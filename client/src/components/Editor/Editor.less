@@ -1,0 +1,293 @@
+@primary: #3370ff;
+@primary-hover: #2860e1;
+@text-primary: #1f2329;
+@text-secondary: #646a73;
+@text-placeholder: #bbbfc4;
+@bg-white: #ffffff;
+@bg-hover: #f0f1f2;
+@border-light: #e8e9eb;
+@border-color: #dee0e3;
+@shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+@radius-sm: 4px;
+@radius-md: 8px;
+@font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
+  "Microsoft YaHei", sans-serif;
+
+.editor-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  font-family: @font;
+
+  // ---- Scroll area ----
+  .editor-scroll {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  // ---- Main doc area ----
+  .editor-container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 48px 0 86px;
+    width: 100%;
+
+    // Title
+    .editor-title-input {
+      width: 100%;
+      font-size: 32px;
+      font-weight: 700;
+      color: @text-primary;
+      border: none;
+      outline: none;
+      padding: 34px 0 14px;
+      background: transparent;
+      line-height: 1.35;
+      font-family: @font;
+
+      &::placeholder { color: @text-placeholder; }
+      &:read-only { cursor: default; }
+    }
+
+    // Meta row
+    .editor-meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 14px;
+
+      .meta-author {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        .meta-avatar {
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          font-size: 11px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .meta-name {
+          font-size: 13px;
+          color: @text-secondary;
+        }
+      }
+
+      .meta-divider {
+        color: @border-color;
+        font-size: 13px;
+      }
+
+      .meta-time {
+        font-size: 13px;
+        color: @text-secondary;
+      }
+    }
+
+    // Content
+    .editor-content-area {
+      position: relative;
+      min-height: 400px;
+      padding-bottom: 120px;
+
+      .tiptap {
+        outline: none;
+        min-height: 300px;
+        padding-top: 2px;
+
+        > * + * { margin-top: 0.5em; }
+
+        > * {
+          position: relative;
+        }
+
+        // Headings
+        h1 { font-size: 26px; font-weight: 700; line-height: 1.4; margin: 1.4em 0 0.4em; }
+        h2 { font-size: 22px; font-weight: 700; line-height: 1.4; margin: 1.2em 0 0.3em; }
+        h3 { font-size: 18px; font-weight: 600; line-height: 1.4; margin: 1em 0 0.3em; }
+        h4 { font-size: 16px; font-weight: 600; line-height: 1.4; margin: 0.8em 0 0.2em; }
+        h5 { font-size: 14px; font-weight: 600; line-height: 1.4; margin: 0.6em 0 0.2em; }
+
+        p { font-size: 15px; line-height: 1.8; color: @text-primary; }
+
+        // Placeholder - first empty p
+        p.is-editor-empty:first-child::before,
+        .is-empty::before {
+          content: attr(data-placeholder);
+          float: left;
+          color: @text-placeholder;
+          pointer-events: none;
+          height: 0;
+          font-size: 15px;
+        }
+
+        &.ProseMirror-focused .is-empty {
+          background-color: #eef2fe; // Light blue highlight like Feishu
+          border-radius: 4px;
+        }
+
+        // Lists
+        ul, ol { padding-left: 24px; }
+        li { line-height: 1.75; }
+        li p { margin: 0; }
+
+        // Task list
+        ul[data-type="taskList"] {
+          list-style: none;
+          padding-left: 0;
+
+          li {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+
+            label {
+              flex-shrink: 0;
+              margin-top: 4px;
+
+              input[type="checkbox"] {
+                width: 15px;
+                height: 15px;
+                accent-color: @primary;
+                cursor: pointer;
+              }
+            }
+
+            &[data-checked="true"] > div > p {
+              text-decoration: line-through;
+              color: @text-secondary;
+            }
+          }
+        }
+
+        // Blockquote
+        blockquote {
+          border-left: 3px solid @primary;
+          padding-left: 16px;
+          margin-left: 0;
+          color: @text-secondary;
+        }
+
+        // Inline code
+        code {
+          background: #f0f1f2;
+          border-radius: 3px;
+          padding: 2px 5px;
+          font-size: 13px;
+          font-family: "SFMono-Regular", Consolas, monospace;
+          color: #d63384;
+        }
+
+        // Code block
+        pre {
+          background: #1e1e1e;
+          border-radius: 8px;
+          padding: 16px 20px;
+          overflow-x: auto;
+          margin: 12px 0;
+
+          code {
+            background: none;
+            color: #d4d4d4;
+            padding: 0;
+            font-size: 13px;
+            line-height: 1.6;
+            color: inherit;
+          }
+        }
+
+        hr {
+          border: none;
+          border-top: 1px solid @border-color;
+          margin: 24px 0;
+        }
+
+        a { color: @primary; text-decoration: underline; cursor: pointer; }
+        mark { border-radius: 2px; padding: 1px 2px; }
+
+        .has-text-align-center { text-align: center; }
+        .has-text-align-right { text-align: right; }
+        .has-text-align-justify { text-align: justify; }
+
+        *::selection { background: rgba(51, 112, 255, 0.15); }
+      }
+    }
+  }
+
+  .block-inline-tools {
+    position: fixed;
+    z-index: 120;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    .block-add-btn {
+      width: 26px;
+      height: 26px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: @text-secondary;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      transform: translateY(-2px); // Align with input line
+
+      &:hover {
+        background: #f7f8fa;
+        color: @primary;
+        border-color: #c9ced6;
+        box-shadow: 0 1px 2px rgba(31, 35, 41, 0.06);
+      }
+    }
+
+    .block-drag-group {
+      height: 26px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: @text-secondary;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 0 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      transform: translateY(-2px);
+
+      &:hover {
+        border-color: #c9ced6;
+        box-shadow: 0 1px 2px rgba(31, 35, 41, 0.06);
+        background: #f7f8fa;
+      }
+
+      .block-type-icon {
+        font-size: 13px;
+        font-family: @font;
+        font-weight: 500;
+        color: @primary;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .block-drag-handle {
+        font-size: 12px;
+        line-height: 1;
+        letter-spacing: -2px;
+        color: @text-placeholder;
+      }
+    }
+  }
+}

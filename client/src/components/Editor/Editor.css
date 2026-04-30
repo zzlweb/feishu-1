@@ -1,0 +1,274 @@
+.editor-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* Title */
+.editor-title {
+  width: 100%;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  border: none;
+  outline: none;
+  padding: 32px 0 12px;
+  background: transparent;
+  line-height: 1.4;
+}
+
+.editor-title::placeholder {
+  color: var(--text-placeholder);
+}
+
+.editor-title:read-only {
+  cursor: default;
+}
+
+/* Meta */
+.editor-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 20px;
+}
+
+.editor-author {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.author-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.author-name {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.editor-divider {
+  color: var(--border-color);
+  font-size: 12px;
+}
+
+.editor-time {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* Editor Content */
+.editor-content {
+  min-height: 500px;
+  padding-bottom: 200px;
+}
+
+.editor-content .tiptap {
+  outline: none;
+  min-height: 400px;
+}
+
+.editor-content .tiptap > * + * {
+  margin-top: 0.5em;
+}
+
+/* Headings */
+.editor-content .tiptap h1 {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  color: var(--text-primary);
+}
+
+.editor-content .tiptap h2 {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin-top: 1.3em;
+  margin-bottom: 0.4em;
+  color: var(--text-primary);
+}
+
+.editor-content .tiptap h3 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 1.2em;
+  margin-bottom: 0.3em;
+  color: var(--text-primary);
+}
+
+.editor-content .tiptap h4 {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 1em;
+  margin-bottom: 0.3em;
+  color: var(--text-primary);
+}
+
+.editor-content .tiptap h5 {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 1em;
+  margin-bottom: 0.2em;
+  color: var(--text-primary);
+}
+
+/* Paragraph */
+.editor-content .tiptap p {
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text-primary);
+}
+
+/* Placeholder */
+.editor-content .tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--text-placeholder);
+  pointer-events: none;
+  height: 0;
+}
+
+.editor-content .tiptap .is-empty::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--text-placeholder);
+  pointer-events: none;
+  height: 0;
+}
+
+/* Lists */
+.editor-content .tiptap ul,
+.editor-content .tiptap ol {
+  padding-left: 24px;
+}
+
+.editor-content .tiptap li {
+  line-height: 1.75;
+}
+
+.editor-content .tiptap li p {
+  margin: 0;
+}
+
+/* Task List */
+.editor-content .tiptap ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.editor-content .tiptap ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.editor-content .tiptap ul[data-type="taskList"] li label {
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.editor-content .tiptap ul[data-type="taskList"] li label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary-color);
+  cursor: pointer;
+}
+
+.editor-content .tiptap ul[data-type="taskList"] li[data-checked="true"] > div > p {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+
+/* Blockquote */
+.editor-content .tiptap blockquote {
+  border-left: 3px solid var(--primary-color);
+  padding-left: 16px;
+  margin-left: 0;
+  color: var(--text-secondary);
+}
+
+/* Code */
+.editor-content .tiptap code {
+  background: #f0f1f2;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 13px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  color: #d63384;
+}
+
+/* Code Block */
+.editor-content .tiptap pre {
+  background: #1e1e1e;
+  border-radius: 8px;
+  padding: 16px 20px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.editor-content .tiptap pre code {
+  background: none;
+  color: #d4d4d4;
+  padding: 0;
+  border-radius: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Horizontal Rule */
+.editor-content .tiptap hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 24px 0;
+}
+
+/* Link */
+.editor-content .tiptap a,
+.editor-content .tiptap .editor-link {
+  color: var(--primary-color);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Highlight */
+.editor-content .tiptap mark {
+  border-radius: 2px;
+  padding: 1px 2px;
+}
+
+/* Text Alignment */
+.editor-content .tiptap .has-text-align-center {
+  text-align: center;
+}
+
+.editor-content .tiptap .has-text-align-right {
+  text-align: right;
+}
+
+.editor-content .tiptap .has-text-align-justify {
+  text-align: justify;
+}
+
+/* Selection styling */
+.editor-content .tiptap .selection,
+.editor-content .tiptap *::selection {
+  background: rgba(51, 112, 255, 0.15);
+}

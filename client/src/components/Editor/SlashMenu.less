@@ -1,0 +1,149 @@
+@primary: #3370ff;
+@text-primary: #1f2329;
+@text-secondary: #646a73;
+@bg-white: #ffffff;
+@bg-hover: #f0f1f2;
+@border-light: #e8e9eb;
+@shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+@radius-md: 8px;
+@font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+
+.slash-menu-feishu {
+  position: fixed;
+  z-index: 9999;
+  width: 220px;
+  max-height: min(520px, 72vh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: @bg-white;
+  border: 1px solid @border-light;
+  border-radius: @radius-md;
+  box-shadow: @shadow-lg;
+  font-family: @font;
+  padding: 6px 0 8px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: @border-light;
+    border-radius: 4px;
+  }
+
+  .slash-section-title {
+    font-size: 11px;
+    color: @text-secondary;
+    font-weight: 500;
+    padding: 8px 14px 6px;
+    letter-spacing: 0.3px;
+  }
+
+  // —— 基础：飞书式图标宫格（仅图标，title 为完整名称）——
+  .slash-section--grid {
+    .slash-basic-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 28px);
+      justify-content: start;
+      gap: 4px;
+      padding: 0 12px 10px;
+    }
+
+    .slash-basic-cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      margin: 0;
+      padding: 0;
+      border: none;
+      border-radius: 6px;
+      background: @bg-white;
+      cursor: pointer;
+      transition: background 0.12s, box-shadow 0.12s;
+      font-family: inherit;
+
+      .slash-basic-cell-icon {
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        border-radius: 6px;
+        background: #f5f6f7;
+        line-height: 1;
+      }
+
+      &:hover,
+      &.active {
+        background: @bg-hover;
+
+        .slash-basic-cell-icon {
+          background: #e8e9eb;
+        }
+      }
+
+      &.active {
+        box-shadow: inset 0 0 0 1px @primary;
+      }
+    }
+  }
+
+  // —— 常用 / 多维表格：列表行 ——
+  .slash-section--list {
+    padding-bottom: 4px;
+    border-bottom: 1px solid @border-light;
+
+    &:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .slash-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 14px;
+      cursor: pointer;
+      transition: background 0.1s;
+      border-radius: 4px;
+      margin: 0 6px;
+
+      .slash-icon {
+        width: 26px;
+        height: 26px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 700;
+        flex-shrink: 0;
+        border-radius: 5px;
+        background: #f5f6f7;
+        line-height: 1;
+      }
+
+      .slash-label {
+        flex: 1;
+        font-size: 13px;
+        color: @text-primary;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .slash-arrow {
+        color: @text-secondary;
+        font-size: 14px;
+      }
+
+      &.active,
+      &:hover {
+        background: @bg-hover;
+      }
+    }
+  }
+}
