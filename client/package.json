@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@icon-park/react": "^1.4.2",
     "@tiptap/extension-code-block-lowlight": "^2.6.0",
     "@tiptap/extension-color": "^2.6.0",
     "@tiptap/extension-highlight": "^2.6.0",

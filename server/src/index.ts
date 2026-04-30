@@ -3,7 +3,7 @@ import cors from 'cors';
 import documentsRouter from './routes/documents';
 
 const app = express();
-const PORT = 3005;
+const PORT = Number(process.env.PORT || 3005);
 
 // Middleware
 app.use(cors());
@@ -18,8 +18,10 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 飞书文档服务器已启动: http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`🚀 飞书文档服务器已启动: http://localhost:${PORT}`);
+  });
+}
 
 export default app;

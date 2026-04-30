@@ -1,10 +1,28 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import {
+  HamburgerButton,
+  Home,
+  Notes,
+  Edit,
+  BellRing,
+  More,
+  Search,
+  Plus,
+  Pushpin,
+  Protect,
+} from '@icon-park/react';
 import { getDocument, updateDocument, deleteDocument, saveAsTemplate, duplicateDocument } from '../../api/documents';
 import type { Document, HeadingItem } from '../../types';
 import Editor from '../Editor/Editor';
 import Sidebar from './Sidebar';
 import './Layout.less';
+
+/** 与编辑器 normalize 逻辑一致：仅当有「真实标题」时才显示大纲侧栏 */
+function titleAllowsOutlineSidebar(displayTitle: string): boolean {
+  const t = displayTitle.trim();
+  return t.length > 0 && t !== '未命名文档';
+}
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
@@ -17,6 +35,31 @@ export default function DocumentPage() {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'idle'>('idle');
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  /** 标题输入快照（来自编辑器回调 + 文档加载同步），用于控制大纲侧栏显隐 */
+  const [titleInputSnapshot, setTitleInputSnapshot] = useState('');
+  const outlineHadTitleRef = useRef(false);
+
+  const showOutlineSidebar = titleAllowsOutlineSidebar(titleInputSnapshot);
+
+  const handleTitleInputChange = useCallback((t: string) => {
+    setTitleInputSnapshot(t);
+  }, []);
+
+  useEffect(() => {
+    if (!doc) return;
+    setTitleInputSnapshot(doc.title === '未命名文档' ? '' : doc.title);
+  }, [doc?.id, doc?.title]);
+
+  useEffect(() => {
+    outlineHadTitleRef.current = false;
+  }, [doc?.id]);
+
+  useEffect(() => {
+    if (showOutlineSidebar && !outlineHadTitleRef.current) {
+      setSidebarCollapsed(false);
+    }
+    outlineHadTitleRef.current = showOutlineSidebar;
+  }, [showOutlineSidebar]);
 
   // close more-menu on outside click
   useEffect(() => {
@@ -101,139 +144,107 @@ export default function DocumentPage() {
     <div className="doc-page">
       {/* Top Header */}
       <header className="doc-page-header">
-        <div className="header-top">
-          {/* Left */}
+        <div className="header-row-primary">
           <div className="header-left">
-            <button className="header-icon-btn" onClick={() => navigate('/')} title="导航">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
+            <button className="header-icon-btn" type="button" onClick={() => navigate('/')} title="导航">
+              <HamburgerButton theme="outline" size={18} strokeWidth={3} fill="#646a73" />
             </button>
-            <button className="header-icon-btn" onClick={() => navigate('/')} title="首页">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M2 8l6-6 6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M4 7v6h3v-3h2v3h3V7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              </svg>
+            <button className="header-icon-btn" type="button" onClick={() => navigate('/')} title="首页">
+              <Home theme="outline" size={18} strokeWidth={3} fill="#646a73" />
             </button>
 
-            {/* Breadcrumb */}
             <nav className="breadcrumb">
-              <button className="bc-item" onClick={() => navigate('/')}>UIH</button>
-              <span className="bc-sep">›</span>
-              <button className="bc-item" onClick={() => navigate('/')}>{doc.author}</button>
-              <span className="bc-sep">›</span>
+              <button type="button" className="bc-item" onClick={() => navigate('/')}>UIH</button>
+              <span className="bc-sep">&gt;</span>
+              <button type="button" className="bc-item" onClick={() => navigate('/')}>{doc.author}</button>
+              <span className="bc-sep">&gt;</span>
               <span className="bc-current">{doc.title || '未命名文档'}</span>
             </nav>
 
-            <button className="header-star-btn" title="收藏">&#9733;</button>
-
-            <button
-              className={`header-icon-btn header-toc-toggle ${sidebarCollapsed ? '' : 'is-open'}`}
-              onClick={() => setSidebarCollapsed(v => !v)}
-              title={sidebarCollapsed ? '展开目录' : '收起目录'}
-            >
-              {sidebarCollapsed ? (
-                <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
-                  <path d="M2.5 3.5h9M2.5 7h6M2.5 10.5h9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
-                  <path d="M8 3L4 7l4 4M11 3L7 7l4 4" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              )}
+            <button type="button" className="header-pin-btn" title="置顶">
+              <Pushpin theme="outline" size={16} strokeWidth={3} fill="#8f959e" />
             </button>
           </div>
 
-          {/* Right */}
           <div className="header-right">
-            {/* save dot */}
-            {saveStatus !== 'idle' && (
-              <span className={`save-dot ${saveStatus}`} title={saveStatus === 'saving' ? '保存中' : '已保存'} />
-            )}
-
-            {/* Share */}
-            <button className="btn-share" onClick={handleShare}>
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <path d="M6.5 1v7M4 4l2.5-3L9 4" stroke="white" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M2 8v3.5h9V8" stroke="white" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              </svg>
+            <button type="button" className="btn-share" onClick={handleShare}>
+              <Notes theme="outline" size={14} strokeWidth={3} fill="#ffffff" />
               分享
             </button>
 
-            {/* Edit/Read mode */}
-            <button className="btn-edit-mode" onClick={() => setReadOnly(!readOnly)}>
-              <svg className="mode-icon" width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <path d="M9 1.5l2.5 2.5L4 11.5H1.5V9L9 1.5z" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+            <button type="button" className="btn-edit-mode" onClick={() => setReadOnly(!readOnly)}>
+              <Edit theme="outline" size={14} strokeWidth={3} fill="#646a73" className="mode-icon-park" />
               {readOnly ? '阅读' : '编辑'}
               <span className="mode-arrow">▾</span>
             </button>
 
-            {/* Bell */}
-            <button className="header-icon-btn" title="通知">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M8 2a4 4 0 00-4 4v3l-1 2h10l-1-2V6a4 4 0 00-4-4zM6.5 12.5a1.5 1.5 0 003 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+            <button type="button" className="header-icon-btn" title="通知">
+              <BellRing theme="outline" size={18} strokeWidth={3} fill="#646a73" />
             </button>
 
-            {/* More ··· */}
             <div className="more-menu-wrapper" ref={moreMenuRef}>
               <button
+                type="button"
                 className="header-icon-btn"
                 onClick={() => setShowMoreMenu(v => !v)}
                 title="更多"
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                  <circle cx="3.5" cy="8" r="1.3"/>
-                  <circle cx="8" cy="8" r="1.3"/>
-                  <circle cx="12.5" cy="8" r="1.3"/>
-                </svg>
+                <More theme="outline" size={18} strokeWidth={3} fill="#646a73" />
               </button>
               {showMoreMenu && (
                 <div className="more-menu">
-                  <button className="more-menu-item" onClick={handleDuplicate}>创建副本</button>
-                  <button className="more-menu-item" onClick={handleSaveAsTemplate}>保存为模板</button>
+                  <button type="button" className="more-menu-item" onClick={handleDuplicate}>创建副本</button>
+                  <button type="button" className="more-menu-item" onClick={handleSaveAsTemplate}>保存为模板</button>
                   <div className="more-menu-divider" />
-                  <button className="more-menu-item danger" onClick={handleDelete}>删除文档</button>
+                  <button type="button" className="more-menu-item danger" onClick={handleDelete}>删除文档</button>
                 </div>
               )}
             </div>
 
-            {/* Search */}
-            <button className="header-icon-btn" title="搜索">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <circle cx="7" cy="7" r="4" stroke="currentColor" strokeWidth="1.3"/>
-                <path d="M11 11l2.5 2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-              </svg>
+            <span className="header-right-divider" aria-hidden />
+
+            <button type="button" className="header-icon-btn" title="搜索">
+              <Search theme="outline" size={18} strokeWidth={3} fill="#646a73" />
             </button>
 
-            {/* New page + */}
-            <button className="header-icon-btn" title="新建页面">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
+            <button type="button" className="header-icon-btn" title="新建页面">
+              <Plus theme="outline" size={18} strokeWidth={3} fill="#646a73" />
             </button>
 
-            {/* Avatar */}
             <div className="user-avatar">{doc.author.charAt(0)}</div>
           </div>
+        </div>
+
+        <div className="header-row-meta">
+          <span className="header-meta-item">
+            <Protect theme="outline" size={14} strokeWidth={3} fill="#8f959e" />
+            内部信息
+          </span>
+          <span className="header-meta-vsep" aria-hidden />
+          <span className="header-meta-item header-meta-cloud">
+            {saveStatus === 'saving' ? '保存中…' : '已经保存到云端'}
+          </span>
         </div>
       </header>
 
       {/* Body */}
       <div className="doc-page-body">
-        <Sidebar
-          headings={headings}
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        {showOutlineSidebar && (
+          <Sidebar
+            headings={headings}
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+          />
+        )}
         <main className="doc-page-main">
           <Editor
             content={doc.content}
             title={doc.title}
             author={doc.author}
+            updatedAt={doc.updated_at}
             onSave={handleSave}
             onHeadingsChange={setHeadings}
+            onTitleInputChange={handleTitleInputChange}
             readOnly={readOnly}
           />
         </main>

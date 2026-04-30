@@ -39,8 +39,8 @@ interface Database {
   templates: TemplateRecord[];
 }
 
-const dataDir = path.join(__dirname, '..', 'data');
-const dbPath = path.join(dataDir, 'db.json');
+const dbPath = process.env.FEISHU_DOC_DB_PATH || path.join(__dirname, '..', 'data', 'db.json');
+const dataDir = path.dirname(dbPath);
 
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });

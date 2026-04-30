@@ -1,5 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ComponentType } from 'react';
 import type { Editor } from '@tiptap/react';
+import {
+  FontSize,
+  H1,
+  H2,
+  H3,
+  ListTwo,
+  OrderedList,
+  CheckCorrect,
+  CodeBrackets,
+  Quote,
+  GridNine,
+  AlignTextBoth,
+  Paint,
+  CuttingOne,
+  Copy,
+  Translate,
+  Delete,
+  ShareThree,
+  NotebookAndPen,
+  Bookmark,
+  CopyLink,
+  AddFour,
+  AlignTextLeft,
+  AlignTextCenter,
+  AlignTextRight,
+  AlignTextBothOne,
+  IndentRight,
+  IndentLeft,
+} from '@icon-park/react';
 import './ContextMenu.less';
 
 interface ContextMenuProps {
@@ -9,29 +39,40 @@ interface ContextMenuProps {
   onClose: () => void;
 }
 
-const HEADING_LEVELS = [
-  { label: 'T 正文', value: 0, icon: 'T' },
-  { label: 'H1', value: 1, icon: 'H1' },
-  { label: 'H2', value: 2, icon: 'H2' },
-  { label: 'H3', value: 3, icon: 'H3' },
-  { label: 'H4', value: 4, icon: 'H4' },
-  { label: 'H5', value: 5, icon: 'H5' },
+const ICON_CFG = { theme: 'outline' as const, strokeWidth: 3 };
+
+type RowKind = 'heading' | 'block' | 'noop';
+
+type DocIcon = ComponentType<any>;
+
+interface GridRowDef {
+  label: string;
+  value: number | string;
+  type: RowKind;
+  Icon: DocIcon;
+}
+
+const ROW_1: GridRowDef[] = [
+  { label: '正文', value: 0, type: 'heading', Icon: FontSize },
+  { label: '一级标题', value: 1, type: 'heading', Icon: H1 },
+  { label: '二级标题', value: 2, type: 'heading', Icon: H2 },
+  { label: '三级标题', value: 3, type: 'heading', Icon: H3 },
+  { label: '无序列表', value: 'bulletList', type: 'block', Icon: ListTwo },
+  { label: '有序列表', value: 'orderedList', type: 'block', Icon: OrderedList },
 ];
 
-const BLOCK_TYPES = [
-  { label: '无序列表', value: 'bulletList', icon: '•' },
-  { label: '有序列表', value: 'orderedList', icon: '1.' },
-  { label: '待办事项', value: 'taskList', icon: '☑' },
-  { label: '代码块', value: 'codeBlock', icon: '{ }' },
-  { label: '引用', value: 'blockquote', icon: '❝' },
-  { label: '分割线', value: 'horizontalRule', icon: '—' },
+const ROW_2: GridRowDef[] = [
+  { label: '待办事项', value: 'taskList', type: 'block', Icon: CheckCorrect },
+  { label: '代码块', value: 'codeBlock', type: 'block', Icon: CodeBrackets },
+  { label: '引用', value: 'blockquote', type: 'block', Icon: Quote },
+  { label: '表格', value: 'noopTable', type: 'noop', Icon: GridNine },
 ];
 
 const ALIGN_OPTIONS = [
-  { label: '左对齐', value: 'left' },
-  { label: '居中对齐', value: 'center' },
-  { label: '右对齐', value: 'right' },
-  { label: '两端对齐', value: 'justify' },
+  { label: '左对齐', value: 'left', Icon: AlignTextLeft },
+  { label: '居中对齐', value: 'center', Icon: AlignTextCenter },
+  { label: '右对齐', value: 'right', Icon: AlignTextRight },
+  { label: '两端对齐', value: 'justify', Icon: AlignTextBothOne },
 ];
 
 const TEXT_COLORS = [
@@ -43,11 +84,18 @@ const TEXT_COLORS = [
   { label: '紫色', value: '#6425d0' },
 ];
 
+function isGridActive(editor: Editor, item: GridRowDef): boolean {
+  if (item.type === 'heading') {
+    if (item.value === 0) return editor.isActive('paragraph');
+    return editor.isActive('heading', { level: item.value as 1 | 2 | 3 });
+  }
+  if (item.type === 'block') return editor.isActive(item.value as string);
+  return false;
+}
+
 export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [subMenu, setSubMenu] = useState<string | null>(null);
-  const [commentText, setCommentText] = useState('');
-  const [showComment, setShowComment] = useState(false);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -66,27 +114,38 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
     };
   }, [onClose]);
 
-  // Adjust position to keep menu within viewport
-  const adjustedX = Math.min(x, window.innerWidth - 240);
-  const adjustedY = Math.min(y, window.innerHeight - 400);
+  const adjustedX = Math.min(x, window.innerWidth - 260);
+  const adjustedY = Math.min(y, window.innerHeight - 420);
 
   const setHeading = (level: number) => {
     if (level === 0) {
       editor.chain().focus().setParagraph().run();
     } else {
-      editor.chain().focus().toggleHeading({ level: level as 1|2|3|4|5 }).run();
+      editor.chain().focus().toggleHeading({ level: level as 1 | 2 | 3 | 4 | 5 }).run();
     }
     onClose();
   };
 
   const toggleBlock = (type: string) => {
     switch (type) {
-      case 'bulletList': editor.chain().focus().toggleBulletList().run(); break;
-      case 'orderedList': editor.chain().focus().toggleOrderedList().run(); break;
-      case 'taskList': editor.chain().focus().toggleTaskList().run(); break;
-      case 'codeBlock': editor.chain().focus().toggleCodeBlock().run(); break;
-      case 'blockquote': editor.chain().focus().toggleBlockquote().run(); break;
-      case 'horizontalRule': editor.chain().focus().setHorizontalRule().run(); break;
+      case 'bulletList':
+        editor.chain().focus().toggleBulletList().run();
+        break;
+      case 'orderedList':
+        editor.chain().focus().toggleOrderedList().run();
+        break;
+      case 'taskList':
+        editor.chain().focus().toggleTaskList().run();
+        break;
+      case 'codeBlock':
+        editor.chain().focus().toggleCodeBlock().run();
+        break;
+      case 'blockquote':
+        editor.chain().focus().toggleBlockquote().run();
+        break;
+      case 'horizontalRule':
+        editor.chain().focus().setHorizontalRule().run();
+        break;
     }
     onClose();
   };
@@ -111,18 +170,7 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
     onClose();
   };
 
-  const handleDuplicate = () => {
-    // Insert the same content below
-    const { from, to } = editor.state.selection;
-    const slice = editor.state.doc.slice(from, to);
-    if (slice.content.size > 0) {
-      editor.chain().focus().insertContentAt(to, slice.content.toJSON()).run();
-    }
-    onClose();
-  };
-
   const handleIndent = () => {
-    // Try to sink list item, or wrap in bullet list
     if (editor.isActive('listItem')) {
       editor.chain().focus().sinkListItem('listItem').run();
     }
@@ -136,74 +184,84 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
     onClose();
   };
 
+  const gridIconFill = (active: boolean) => (active ? '#ffffff' : '#1f2329');
+
+  const handleGridClick = (item: GridRowDef) => {
+    if (item.type === 'heading') setHeading(item.value as number);
+    else if (item.type === 'block') toggleBlock(item.value as string);
+    else onClose();
+  };
+
   return (
-    <div
-      ref={menuRef}
-      className="context-menu"
-      style={{ left: adjustedX, top: adjustedY }}
-    >
-      {/* Block Type Header */}
-      <div className="context-menu-section">
+    <div ref={menuRef} className="context-menu context-menu-feishu" style={{ left: adjustedX, top: adjustedY }}>
+      <div className="context-menu-section context-menu-section--grid">
         <div className="context-block-types">
-          {HEADING_LEVELS.map(h => (
-            <button
-              key={h.value}
-              className={`context-block-btn ${
-                (h.value === 0 && editor.isActive('paragraph')) ||
-                editor.isActive('heading', { level: h.value })
-                  ? 'active' : ''
-              }`}
-              onClick={() => setHeading(h.value)}
-              title={h.label}
-            >
-              {h.icon}
-            </button>
-          ))}
+          {ROW_1.map(item => {
+            const active = isGridActive(editor, item);
+            const Icon = item.Icon;
+            return (
+              <button
+                key={`r1-${item.value}`}
+                type="button"
+                className={`context-block-btn ${active ? 'active' : ''}`}
+                title={item.label}
+                onClick={() => handleGridClick(item)}
+              >
+                <Icon {...ICON_CFG} size={15} fill={gridIconFill(active)} />
+              </button>
+            );
+          })}
         </div>
         <div className="context-block-types">
-          {BLOCK_TYPES.map(b => (
-            <button
-              key={b.value}
-              className={`context-block-btn ${editor.isActive(b.value) ? 'active' : ''}`}
-              onClick={() => toggleBlock(b.value)}
-              title={b.label}
-            >
-              {b.icon}
-            </button>
-          ))}
+          {ROW_2.map(item => {
+            const active = isGridActive(editor, item);
+            const Icon = item.Icon;
+            return (
+              <button
+                key={`r2-${item.value}`}
+                type="button"
+                className={`context-block-btn ${active ? 'active' : ''}`}
+                title={item.label}
+                onClick={() => handleGridClick(item)}
+              >
+                <Icon {...ICON_CFG} size={15} fill={gridIconFill(active)} />
+              </button>
+            );
+          })}
         </div>
       </div>
 
       <div className="context-menu-divider" />
 
-      {/* Indent & Align */}
       <div
         className="context-menu-item has-submenu"
         onMouseEnter={() => setSubMenu('align')}
         onMouseLeave={() => setSubMenu(null)}
       >
-        <span className="context-menu-icon">☰</span>
+        <span className="context-menu-icon">
+          <AlignTextBoth {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
         <span>缩进和对齐</span>
         <span className="context-menu-arrow">›</span>
         {subMenu === 'align' && (
           <div className="context-submenu">
-            <button className="context-menu-item" onClick={handleIndent}>
-              <span className="context-menu-icon">→</span>
+            <button type="button" className="context-menu-item" onClick={handleIndent}>
+              <span className="context-menu-icon">
+                <IndentRight {...ICON_CFG} size={16} fill="#646a73" />
+              </span>
               <span>增加缩进</span>
             </button>
-            <button className="context-menu-item" onClick={handleOutdent}>
-              <span className="context-menu-icon">←</span>
+            <button type="button" className="context-menu-item" onClick={handleOutdent}>
+              <span className="context-menu-icon">
+                <IndentLeft {...ICON_CFG} size={16} fill="#646a73" />
+              </span>
               <span>减少缩进</span>
             </button>
             <div className="context-menu-divider" />
             {ALIGN_OPTIONS.map(a => (
-              <button
-                key={a.value}
-                className="context-menu-item"
-                onClick={() => setAlign(a.value)}
-              >
+              <button key={a.value} type="button" className="context-menu-item" onClick={() => setAlign(a.value)}>
                 <span className="context-menu-icon">
-                  {a.value === 'left' ? '⫷' : a.value === 'center' ? '⫿' : a.value === 'right' ? '⫸' : '⟺'}
+                  <a.Icon {...ICON_CFG} size={16} fill="#646a73" />
                 </span>
                 <span>{a.label}</span>
               </button>
@@ -212,13 +270,14 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
         )}
       </div>
 
-      {/* Color */}
       <div
         className="context-menu-item has-submenu"
         onMouseEnter={() => setSubMenu('color')}
         onMouseLeave={() => setSubMenu(null)}
       >
-        <span className="context-menu-icon">🎨</span>
+        <span className="context-menu-icon">
+          <Paint {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
         <span>颜色</span>
         <span className="context-menu-arrow">›</span>
         {subMenu === 'color' && (
@@ -226,6 +285,7 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
             {TEXT_COLORS.map(c => (
               <button
                 key={c.value || 'default'}
+                type="button"
                 className="context-menu-item"
                 onClick={() => {
                   if (c.value) {
@@ -246,128 +306,85 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
 
       <div className="context-menu-divider" />
 
-      {/* Comment */}
-      <button className="context-menu-item" onClick={() => setShowComment(!showComment)}>
-        <span className="context-menu-icon">💬</span>
-        <span>评论</span>
-      </button>
-      {showComment && (
-        <div className="context-comment-box">
-          <textarea
-            placeholder="添加评论..."
-            value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
-            rows={3}
-          />
-          <button
-            className="context-comment-submit"
-            onClick={() => {
-              // In a real app, this would save to the backend
-              alert(`评论已添加: ${commentText}`);
-              setCommentText('');
-              setShowComment(false);
-              onClose();
-            }}
-          >
-            提交
-          </button>
-        </div>
-      )}
-
-      {/* Clipboard Actions */}
-      <button className="context-menu-item" onClick={handleCut}>
-        <span className="context-menu-icon">✂</span>
-        <span>剪切</span>
+      <button type="button" className="context-menu-item" onClick={handleCut}>
+        <span className="context-menu-icon">
+          <CuttingOne {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
+        <span style={{ flex: 1 }}>剪切</span>
         <span className="context-menu-shortcut">Ctrl+X</span>
       </button>
-      <button className="context-menu-item" onClick={handleCopy}>
-        <span className="context-menu-icon">📋</span>
-        <span>复制</span>
+      <button type="button" className="context-menu-item" onClick={handleCopy}>
+        <span className="context-menu-icon">
+          <Copy {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
+        <span style={{ flex: 1 }}>复制</span>
         <span className="context-menu-shortcut">Ctrl+C</span>
       </button>
-      <button className="context-menu-item" onClick={handleDelete}>
-        <span className="context-menu-icon">🗑</span>
-        <span>删除</span>
-        <span className="context-menu-shortcut">Delete</span>
+      <div className="context-menu-item has-submenu">
+        <span className="context-menu-icon">
+          <Translate {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
+        <span style={{ flex: 1 }}>翻译</span>
+        <span className="context-menu-arrow">›</span>
+      </div>
+      <button type="button" className="context-menu-item" onClick={handleDelete}>
+        <span className="context-menu-icon">
+          <Delete {...ICON_CFG} size={16} fill="#d83931" />
+        </span>
+        <span style={{ flex: 1, color: '#d83931' }}>删除</span>
+        <span className="context-menu-shortcut">Del</span>
       </button>
 
       <div className="context-menu-divider" />
 
-      {/* Share */}
-      <button className="context-menu-item" onClick={() => {
-        navigator.clipboard.writeText(window.location.href);
-        alert('链接已复制到剪贴板');
-        onClose();
-      }}>
-        <span className="context-menu-icon">🔗</span>
-        <span>分享</span>
+      <button type="button" className="context-menu-item" onClick={onClose}>
+        <span className="context-menu-icon">
+          <ShareThree {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
+        <span style={{ flex: 1 }}>分享</span>
       </button>
-
-      {/* Convert to sub-document */}
-      <button className="context-menu-item" onClick={() => {
-        alert('已转换为子文档');
-        onClose();
-      }}>
-        <span className="context-menu-icon">📄</span>
-        <span>转换为子文档</span>
+      <button type="button" className="context-menu-item" onClick={onClose}>
+        <span className="context-menu-icon">
+          <NotebookAndPen {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
+        <span style={{ flex: 1 }}>转换为子文档</span>
       </button>
-
-      {/* Save as template */}
-      <button className="context-menu-item" onClick={() => {
-        alert('已保存为模板');
-        onClose();
-      }}>
-        <span className="context-menu-icon">📑</span>
-        <span>保存为模板</span>
+      <button type="button" className="context-menu-item" onClick={onClose}>
+        <span className="context-menu-icon">
+          <Bookmark {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
+        <span style={{ flex: 1 }}>保存为模板</span>
       </button>
-
-      {/* Copy link */}
-      <button className="context-menu-item" onClick={() => {
-        navigator.clipboard.writeText(window.location.href);
-        alert('链接已复制');
-        onClose();
-      }}>
-        <span className="context-menu-icon">🔗</span>
-        <span>复制链接</span>
+      <button type="button" className="context-menu-item" onClick={onClose}>
+        <span className="context-menu-icon">
+          <CopyLink {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
+        <span style={{ flex: 1 }}>复制链接</span>
       </button>
 
       <div className="context-menu-divider" />
 
-      {/* Add below */}
       <div
         className="context-menu-item has-submenu"
         onMouseEnter={() => setSubMenu('addBelow')}
         onMouseLeave={() => setSubMenu(null)}
       >
-        <span className="context-menu-icon">➕</span>
-        <span>在下方添加</span>
+        <span className="context-menu-icon">
+          <AddFour {...ICON_CFG} size={16} fill="#646a73" />
+        </span>
+        <span style={{ flex: 1 }}>在下方添加</span>
         <span className="context-menu-arrow">›</span>
         {subMenu === 'addBelow' && (
           <div className="context-submenu">
-            <button className="context-menu-item" onClick={() => {
-              editor.chain().focus().insertContentAt(editor.state.selection.to, '<p></p>').run();
-              onClose();
-            }}>
-              <span>段落</span>
-            </button>
-            {HEADING_LEVELS.filter(h => h.value > 0).map(h => (
-              <button key={h.value} className="context-menu-item" onClick={() => {
-                const tag = `h${h.value}`;
-                editor.chain().focus().insertContentAt(
-                  editor.state.selection.to,
-                  `<${tag}></${tag}>`
-                ).run();
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={() => {
+                editor.chain().focus().insertContentAt(editor.state.selection.to, '<p></p>').run();
                 onClose();
-              }}>
-                <span>{h.label}</span>
-              </button>
-            ))}
-            <div className="context-menu-divider" />
-            <button className="context-menu-item" onClick={() => {
-              editor.chain().focus().insertContentAt(editor.state.selection.to, '<hr>').run();
-              onClose();
-            }}>
-              <span>分割线</span>
+              }}
+            >
+              <span>正文</span>
             </button>
           </div>
         )}

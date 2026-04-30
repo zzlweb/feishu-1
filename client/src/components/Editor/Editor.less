@@ -18,6 +18,7 @@
   flex-direction: column;
   min-height: 100%;
   font-family: @font;
+  position: relative;
 
   // ---- Scroll area ----
   .editor-scroll {
@@ -107,6 +108,12 @@
 
         > * {
           position: relative;
+          border-radius: 4px;
+        }
+
+        > *.block-row-plus-highlight {
+          background-color: rgba(240, 244, 255, 0.92);
+          transition: background-color 0.12s ease;
         }
 
         // Headings
@@ -127,11 +134,6 @@
           pointer-events: none;
           height: 0;
           font-size: 15px;
-        }
-
-        &.ProseMirror-focused .is-empty {
-          background-color: #eef2fe; // Light blue highlight like Feishu
-          border-radius: 4px;
         }
 
         // Lists
@@ -230,24 +232,46 @@
     gap: 4px;
 
     .block-add-btn {
-      width: 26px;
-      height: 26px;
-      border: 1px solid transparent;
-      background: transparent;
-      color: @text-secondary;
-      border-radius: 5px;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border: 1px solid #dee0e3;
+      border-radius: 4px;
+      background: #ffffff;
+      color: #646a73;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: all 0.15s ease;
-      transform: translateY(-2px); // Align with input line
+      transition:
+        background 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease,
+        box-shadow 0.15s ease;
+      transform: translateY(-1px);
+
+      .block-add-btn-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 0;
+        pointer-events: none;
+
+        svg {
+          display: block;
+        }
+      }
 
       &:hover {
-        background: #f7f8fa;
+        background: #eef2fe;
         color: @primary;
-        border-color: #c9ced6;
-        box-shadow: 0 1px 2px rgba(31, 35, 41, 0.06);
+        border-color: rgba(51, 112, 255, 0.35);
+        box-shadow: 0 1px 2px rgba(51, 112, 255, 0.08);
+      }
+
+      &:active {
+        background: #e4ebfc;
+        border-color: rgba(51, 112, 255, 0.45);
       }
     }
 
@@ -287,6 +311,36 @@
         line-height: 1;
         letter-spacing: -2px;
         color: @text-placeholder;
+      }
+    }
+  }
+
+  .editor-floating-actions {
+    position: fixed;
+    right: 24px;
+    bottom: 22px;
+    z-index: 110;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    button {
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #eef0f3;
+      border-radius: 50%;
+      color: #646a73;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 8px 24px rgba(31, 35, 41, 0.11);
+      transition: all 0.15s ease;
+
+      &:hover {
+        color: @primary;
+        border-color: #d9e2ff;
+        transform: translateY(-1px);
       }
     }
   }

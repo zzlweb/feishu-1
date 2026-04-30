@@ -1,15 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDocuments, createDocument, deleteDocument } from '../../api/documents';
+import { getDocuments, createDocument, deleteDocument, duplicateDocument } from '../../api/documents';
 import type { Document } from '../../types';
 import './DocumentList.less';
 
 const TABS = ['最近访问', '归我所有', '与我共享', '收藏'];
 
+interface RowMenu {
+  docId: string;
+  x: number;
+  y: number;
+}
+
 export default function DocumentList() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(0);
+  const [rowMenu, setRowMenu] = useState<RowMenu | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const rowMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   const loadDocuments = async () => {
@@ -25,6 +34,25 @@ export default function DocumentList() {
     loadDocuments();
   }, []);
 
+  // Close row menu on outside click / Escape
+  useEffect(() => {
+    if (!rowMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (rowMenuRef.current && !rowMenuRef.current.contains(e.target as Node)) {
+        setRowMenu(null);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRowMenu(null);
+    };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [rowMenu]);
+
   const handleCreate = async () => {
     const res = await createDocument();
     if (res.code === 0 && res.data) {
@@ -32,12 +60,51 @@ export default function DocumentList() {
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const openRowMenu = useCallback((e: React.MouseEvent, docId: string) => {
+    e.preventDefault();
     e.stopPropagation();
-    if (confirm('确定要删除此文档吗？')) {
-      await deleteDocument(id);
+    const x = Math.min(e.clientX, window.innerWidth - 200);
+    const y = Math.min(e.clientY, window.innerHeight - 340);
+    setRowMenu({ docId, x, y });
+  }, []);
+
+  const showDeleteModal = (id: string) => {
+    const doc = documents.find(d => d.id === id);
+    setRowMenu(null);
+    setDeleteTarget({ id, title: doc?.title || '未命名文档' });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    await deleteDocument(deleteTarget.id);
+    setDeleteTarget(null);
+    loadDocuments();
+  };
+
+  const handleRemoveRecord = () => {
+    // In a real app this would remove the visit record only
+    setDeleteTarget(null);
+  };
+
+  const handleDuplicate = async (id: string) => {
+    setRowMenu(null);
+    const res = await duplicateDocument(id);
+    if (res.code === 0 && res.data) {
       loadDocuments();
     }
+  };
+
+  const handleCopyLink = (id: string) => {
+    setRowMenu(null);
+    const url = `${window.location.origin}/doc/${id}`;
+    navigator.clipboard.writeText(url);
+  };
+
+  const handleShare = (id: string) => {
+    setRowMenu(null);
+    const url = `${window.location.origin}/doc/${id}`;
+    navigator.clipboard.writeText(url);
+    alert('分享链接已复制到剪贴板！');
   };
 
   const formatDate = (dateStr: string) => {
@@ -224,7 +291,11 @@ export default function DocumentList() {
             </thead>
             <tbody>
               {visibleDocs.map(doc => (
-                <tr key={doc.id} onClick={() => navigate(`/doc/${doc.id}`)}>
+                <tr
+                  key={doc.id}
+                  onClick={() => navigate(`/doc/${doc.id}`)}
+                  onContextMenu={(e) => openRowMenu(e, doc.id)}
+                >
                   <td className="col-title">
                       <svg className="doc-type-icon" viewBox="0 0 20 20" fill="currentColor">
                         <rect x="3" y="2" width="12" height="16" rx="1.5" fill="currentColor" opacity="0.15"/>
@@ -254,7 +325,7 @@ export default function DocumentList() {
                   <td className="col-actions">
                     <button
                       className="doc-row-more"
-                      onClick={(e) => { e.stopPropagation(); handleDelete(e, doc.id); }}
+                      onClick={(e) => openRowMenu(e, doc.id)}
                       title="更多"
                     >
                       ···
@@ -266,6 +337,68 @@ export default function DocumentList() {
           </table>
         )}
       </div>
+
+      {/* Row context menu */}
+      {rowMenu && (
+        <div
+          ref={rowMenuRef}
+          className="row-context-menu"
+          style={{ left: rowMenu.x, top: rowMenu.y }}
+        >
+          <button className="rcm-item" onClick={() => handleShare(rowMenu.docId)}>
+            <span className="rcm-icon">↗</span>分享
+          </button>
+          <button className="rcm-item" onClick={() => handleCopyLink(rowMenu.docId)}>
+            <span className="rcm-icon">🔗</span>复制链接
+          </button>
+          <button className="rcm-item" onClick={() => handleDuplicate(rowMenu.docId)}>
+            <span className="rcm-icon">📄</span>创建副本
+          </button>
+          <button className="rcm-item" onClick={() => setRowMenu(null)}>
+            <span className="rcm-icon">⊕</span>添加快捷方式到
+          </button>
+          <button className="rcm-item" onClick={() => setRowMenu(null)}>
+            <span className="rcm-icon">📌</span>添加到"置顶"
+          </button>
+          <button className="rcm-item" onClick={() => setRowMenu(null)}>
+            <span className="rcm-icon">⭐</span>收藏
+          </button>
+          <div className="rcm-divider" />
+          <button className="rcm-item" onClick={() => setRowMenu(null)}>
+            <span className="rcm-icon">🔔</span>关注文档更新
+          </button>
+          <button className="rcm-item" onClick={() => setRowMenu(null)}>
+            <span className="rcm-icon">🔒</span>设置密级
+          </button>
+          <div className="rcm-divider" />
+          <button className="rcm-item rcm-danger" onClick={() => showDeleteModal(rowMenu.docId)}>
+            <span className="rcm-icon">🗑</span>删除
+          </button>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
+          <div className="modal-dialog" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">是否删除：{deleteTarget.title}？</span>
+              <button className="modal-close" onClick={() => setDeleteTarget(null)}>×</button>
+            </div>
+            <p className="modal-desc">
+              删除的内容将进入回收站，30 天后自动彻底删除。你也可以保留内容，仅移除访问记录。
+            </p>
+            <div className="modal-actions">
+              <button className="modal-btn modal-btn-outline" onClick={handleRemoveRecord}>
+                仅移除访问记录
+              </button>
+              <button className="modal-btn modal-btn-danger" onClick={handleConfirmDelete}>
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

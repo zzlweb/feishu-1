@@ -15,22 +15,70 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import ContextMenu from './ContextMenu';
 import SlashMenu from './SlashMenu';
 import type { HeadingItem } from '../../types';
+import { Help, Notebook, Plus } from '@icon-park/react';
 import './Editor.less';
 
 const lowlight = createLowlight(common);
 
 const normalizeTitle = (value: string) => value === '未命名文档' ? '' : value;
 
+/** 从当前选区解析光标所在的块级 DOM（仅悬停「+」时用于行背景） */
+function getBlockDomFromEditor(editorInstance: {
+  view: { dom: HTMLElement; domAtPos: (pos: number) => { node: Node; offset: number } };
+  state: { selection: { from: number } };
+}): HTMLElement | null {
+  const root = editorInstance.view.dom as HTMLElement;
+  const from = editorInstance.state.selection.from;
+  const domAt = editorInstance.view.domAtPos(from);
+  let n: Node | null = domAt.node;
+  if (n.nodeType === Node.TEXT_NODE) n = (n as Text).parentElement;
+  let el = n as HTMLElement | null;
+  while (el && el !== root) {
+    const tag = el.tagName?.toLowerCase() ?? '';
+    if (/^(p|h[1-6]|blockquote|pre|hr)$/.test(tag)) return el;
+    if (tag === 'li') return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
 interface EditorProps {
   content: string;
   title: string;
   author: string;
+  /** ISO 时间，用于展示「今天修改」等 */
+  updatedAt?: string;
+  /** 标题输入框当前内容（用于父级控制目录侧栏是否显示） */
+  onTitleInputChange?: (displayTitle: string) => void;
   onSave: (data: { title?: string; content?: string }) => void;
   onHeadingsChange?: (headings: HeadingItem[]) => void;
   readOnly?: boolean;
 }
 
-export default function Editor({ content, title, author, onSave, onHeadingsChange, readOnly = false }: EditorProps) {
+function formatModifiedTime(iso?: string): string {
+  if (!iso) return '今天修改';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '今天修改';
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dayStr = (x: Date) => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
+  if (dayStr(d) === dayStr(now)) return '今天修改';
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (dayStr(d) === dayStr(yesterday)) return '昨天修改';
+  return `${d.getMonth() + 1}月${d.getDate()}日修改`;
+}
+
+export default function Editor({
+  content,
+  title,
+  author,
+  updatedAt,
+  onTitleInputChange,
+  onSave,
+  onHeadingsChange,
+  readOnly = false,
+}: EditorProps) {
   const [docTitle, setDocTitle] = useState(normalizeTitle(title));
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
@@ -39,6 +87,10 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
   const [blockTools, setBlockTools] = useState({ visible: false, top: 0, left: 0, type: 'paragraph', isEmpty: true });
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
+  const menuClosedAtRef = useRef<number>(0);
+  /** 当前块工具对应的块 DOM */
+  const activeBlockElRef = useRef<HTMLElement | null>(null);
+  const [plusHovered, setPlusHovered] = useState(false);
 
   const getElementBlockInfo = useCallback((target: EventTarget | null) => {
     if (!editorAreaRef.current || !(target instanceof Element)) return null;
@@ -74,18 +126,20 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
 
   const updateBlockTools = useCallback((editorInstance: any) => {
     if (readOnly || !editorAreaRef.current || !editorInstance?.view?.hasFocus?.()) {
+      activeBlockElRef.current = null;
       setBlockTools(prev => ({ ...prev, visible: false }));
       return;
     }
 
     const { from, to } = editorInstance.state.selection;
-    const node = editorInstance.state.doc.nodeAt(from);
     const isEmpty = (from === to && editorInstance.state.doc.textBetween(Math.max(0, from - 1), Math.min(editorInstance.state.doc.content.size, from + 1), ' ', '\0').trim() === '') && editorInstance.isActive('paragraph');
 
     const coords = editorInstance.view.coordsAtPos(from);
     const areaRect = editorAreaRef.current.getBoundingClientRect();
     const left = Math.max(areaRect.left - 40, 12);
     const top = Math.max(coords.top - 2, areaRect.top + 8);
+
+    activeBlockElRef.current = getBlockDomFromEditor(editorInstance);
 
     setBlockTools({
       visible: true,
@@ -103,6 +157,7 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
 
     const rect = info.element.getBoundingClientRect();
     const areaRect = editorAreaRef.current.getBoundingClientRect();
+    activeBlockElRef.current = info.element;
     setBlockTools({
       visible: true,
       top: Math.max(rect.top - 1, areaRect.top + 8),
@@ -115,9 +170,20 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
   const handleEditorMouseLeave = useCallback(() => {
     setTimeout(() => {
       if (!document.querySelector('.context-menu') && !document.querySelector('.slash-menu')) {
+        setPlusHovered(false);
         setBlockTools(prev => ({ ...prev, visible: false }));
       }
     }, 100);
+  }, []);
+
+  /** 指针离开整个编辑器外壳（含 Slash、右键菜单、块工具浮层）时收起面板 */
+  const handleEditorWrapMouseLeave = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
+    setSlashMenuVisible(false);
+    setContextMenu(null);
+    setPlusHovered(false);
+    setBlockTools(prev => ({ ...prev, visible: false }));
   }, []);
 
   const editor = useEditor({
@@ -188,6 +254,7 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
     onBlur: () => {
       setTimeout(() => {
         if (!document.querySelector('.context-menu') && !document.querySelector('.slash-menu')) {
+          setPlusHovered(false);
           setBlockTools(prev => ({ ...prev, visible: false }));
         }
       }, 80);
@@ -220,21 +287,48 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
   }, [content, editor, extractHeadings]);
 
   useEffect(() => {
-    setDocTitle(normalizeTitle(title));
-  }, [title]);
+    const n = normalizeTitle(title);
+    setDocTitle(n);
+    onTitleInputChange?.(n);
+  }, [title, onTitleInputChange]);
 
   useEffect(() => {
     if (editor) {
       editor.setEditable(!readOnly);
       if (readOnly) {
+        setPlusHovered(false);
         setBlockTools(prev => ({ ...prev, visible: false }));
       }
     }
   }, [readOnly, editor]);
 
+  /** 浅蓝行背景仅在悬停「+」时出现 */
+  useEffect(() => {
+    const root = editorAreaRef.current?.querySelector('.tiptap');
+    root?.querySelectorAll('.block-row-plus-highlight').forEach(el => {
+      el.classList.remove('block-row-plus-highlight');
+    });
+    const row =
+      plusHovered &&
+      blockTools.visible &&
+      blockTools.isEmpty &&
+      blockTools.type === 'paragraph'
+        ? activeBlockElRef.current
+        : null;
+    if (row?.isConnected) row.classList.add('block-row-plus-highlight');
+  }, [
+    plusHovered,
+    blockTools.visible,
+    blockTools.isEmpty,
+    blockTools.type,
+    blockTools.top,
+    blockTools.left,
+  ]);
+
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTitle = e.target.value;
     setDocTitle(newTitle);
+    onTitleInputChange?.(newTitle);
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       onSave({ title: newTitle });
@@ -254,15 +348,18 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
-  const closeContextMenu = () => setContextMenu(null);
+  const closeContextMenu = () => {
+    setContextMenu(null);
+    menuClosedAtRef.current = Date.now();
+  };
 
   const openBlockConfigMenu = () => {
+    // Prevent re-opening if just closed by a click (300ms cooldown)
+    if (Date.now() - menuClosedAtRef.current < 300) return;
     editor?.commands.focus();
     setSlashMenuVisible(false);
     setContextMenu({ x: blockTools.left, y: blockTools.top + 30 });
   };
-
-  const formatModifiedTime = () => '昨天修改';
 
   const getBlockIcon = (type: string) => {
     switch (type) {
@@ -284,12 +381,13 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
   if (!editor) return null;
 
   return (
-    <div className="editor-wrap">
+    <div className="editor-wrap" onMouseLeave={handleEditorWrapMouseLeave}>
       <div className="editor-scroll">
         <div className="editor-container">
           {/* Title */}
           <input
             className="editor-title-input"
+            aria-label="文档标题"
             placeholder="请输入标题"
             value={docTitle}
             onChange={handleTitleChange}
@@ -304,13 +402,14 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
               <span className="meta-name">{author}</span>
             </div>
             <span className="meta-divider">|</span>
-            <span className="meta-time">{formatModifiedTime()}</span>
+            <span className="meta-time">{formatModifiedTime(updatedAt)}</span>
           </div>
 
           {/* Content */}
           <div
             ref={editorAreaRef}
             className="editor-content-area"
+            aria-label="文档正文编辑区"
             onContextMenu={handleContextMenu}
             onMouseMove={handleEditorMouseMove}
             onMouseLeave={handleEditorMouseLeave}
@@ -319,6 +418,15 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
           </div>
         </div>
 
+      </div>
+
+      <div className="editor-floating-actions" aria-label="快捷帮助">
+        <button type="button" title="文档助手" aria-label="文档助手">
+          <Notebook theme="outline" size={15} strokeWidth={3} fill="#646a73" />
+        </button>
+        <button type="button" title="帮助" aria-label="帮助">
+          <Help theme="outline" size={15} strokeWidth={3} fill="#646a73" />
+        </button>
       </div>
 
       {/* Context Menu */}
@@ -347,10 +455,12 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
               className="block-add-btn"
               onMouseDown={(e) => e.preventDefault()}
               onMouseEnter={() => {
+                setPlusHovered(true);
                 setSlashMenuPos({ top: blockTools.top + 30, left: blockTools.left });
                 setSlashQuery('');
                 setSlashMenuVisible(true);
               }}
+              onMouseLeave={() => setPlusHovered(false)}
               onClick={() => {
                 editor.commands.focus();
                 setSlashMenuPos({ top: blockTools.top + 30, left: blockTools.left });
@@ -358,10 +468,11 @@ export default function Editor({ content, title, author, onSave, onHeadingsChang
                 setSlashMenuVisible(true);
               }}
               title="点击或悬浮添加内容"
+              aria-label="插入内容"
             >
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                <path d="M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/>
-              </svg>
+              <span className="block-add-btn-icon">
+                <Plus theme="outline" size={13} strokeWidth={3} fill="currentColor" />
+              </span>
             </button>
           ) : (
             <div 

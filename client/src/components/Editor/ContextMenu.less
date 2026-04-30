@@ -1,65 +1,81 @@
-.context-menu {
+.context-menu-feishu.context-menu {
   position: fixed;
+  --border-color: #e8e9eb;
+  --border-light: #eef0f3;
+  --text-primary: #1f2329;
+  --text-secondary: #646a73;
+  --text-placeholder: #8f959e;
+  --bg-white: #ffffff;
+  --bg-hover: #f0f1f2;
+  --shadow-lg: 0 12px 32px rgba(31, 35, 41, 0.1), 0 2px 8px rgba(31, 35, 41, 0.06);
+  --radius-md: 8px;
+  --radius-sm: 6px;
+  --primary-color: #3370ff;
+
   background: var(--bg-white);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  padding: 4px;
-  min-width: 220px;
-  z-index: 1000;
-  max-height: 80vh;
+  padding: 8px 0;
+  min-width: 204px;
+  z-index: 10050;
+  max-height: 78vh;
   overflow-y: auto;
 }
 
-.context-menu-section {
-  padding: 6px 8px;
+.context-menu-section--grid {
+  padding: 8px 12px 6px;
 }
 
-.context-block-types {
+.context-menu-feishu .context-block-types {
   display: flex;
-  gap: 2px;
-  margin-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
-.context-block-types:last-child {
+.context-menu-feishu .context-block-types:last-child {
   margin-bottom: 0;
 }
 
-.context-block-btn {
-  width: 32px;
+.context-menu-feishu .context-block-btn {
+  width: 28px;
   height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
+  border-radius: 6px;
   cursor: pointer;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  transition: background 0.12s ease;
 }
 
-.context-block-btn:hover {
+.context-menu-feishu .context-block-btn:hover {
   background: var(--bg-hover);
 }
 
-.context-block-btn.active {
-  background: rgba(51, 112, 255, 0.12);
-  color: var(--primary-color);
+.context-menu-feishu .context-block-btn.active {
+  background: var(--primary-color);
 }
 
-.context-menu-divider {
+.context-menu-feishu .context-block-btn svg {
+  flex-shrink: 0;
+}
+
+.context-menu-feishu .context-menu-divider {
   height: 1px;
   background: var(--border-light);
-  margin: 4px 8px;
+  margin: 6px 10px;
 }
 
-.context-menu-item {
+.context-menu-feishu .context-menu-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  border-radius: 6px;
   font-size: 13px;
   color: var(--text-primary);
   cursor: pointer;
@@ -67,87 +83,65 @@
   text-align: left;
   background: none;
   border: none;
+  margin: 0 6px;
+  width: calc(100% - 12px);
 }
 
-.context-menu-item:hover {
+.context-menu-feishu .context-menu-item:hover {
   background: var(--bg-hover);
 }
 
-.context-menu-icon {
-  width: 18px;
-  text-align: center;
-  font-size: 14px;
+.context-menu-feishu .context-menu-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
-.context-menu-arrow {
-  margin-left: auto;
-  color: var(--text-secondary);
-  font-size: 16px;
+.context-menu-feishu .context-menu-icon svg {
+  display: block;
 }
 
-.context-menu-shortcut {
+.context-menu-feishu .context-menu-arrow {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+
+.context-menu-feishu .context-menu-shortcut {
   margin-left: auto;
   color: var(--text-placeholder);
   font-size: 12px;
 }
 
-.context-color-dot {
+.context-menu-feishu .context-color-dot {
   width: 14px;
   height: 14px;
   border-radius: 50%;
   flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
-/* Submenu */
-.has-submenu {
+.context-menu-feishu .has-submenu {
   position: relative;
 }
 
-.context-submenu {
+.context-menu-feishu .context-submenu {
   position: absolute;
   left: 100%;
   top: -4px;
   background: var(--bg-white);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
-  padding: 4px;
-  min-width: 160px;
-  z-index: 1001;
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  min-width: 168px;
+  z-index: 10051;
 }
 
-/* Comment Box */
-.context-comment-box {
-  padding: 8px 12px;
-}
-
-.context-comment-box textarea {
+.context-menu-feishu .context-submenu .context-menu-item {
+  margin: 0;
   width: 100%;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 8px;
-  font-size: 13px;
-  resize: none;
-  font-family: var(--font-family);
-  outline: none;
-}
-
-.context-comment-box textarea:focus {
-  border-color: var(--primary-color);
-}
-
-.context-comment-submit {
-  margin-top: 6px;
-  padding: 4px 12px;
-  background: var(--primary-color);
-  color: white;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  cursor: pointer;
-  border: none;
-}
-
-.context-comment-submit:hover {
-  background: var(--primary-hover);
 }

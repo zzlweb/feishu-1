@@ -24,6 +24,16 @@ router.get('/', (_req: Request, res: Response) => {
   }
 });
 
+// GET /api/documents/templates/list - 获取模板列表
+router.get('/templates/list', (_req: Request, res: Response) => {
+  try {
+    const templates = getAllTemplates();
+    res.json({ code: 0, data: templates });
+  } catch (err: any) {
+    res.status(500).json({ code: -1, message: err.message });
+  }
+});
+
 // GET /api/documents/:id - 获取单个文档
 router.get('/:id', (req: Request, res: Response) => {
   try {
@@ -145,16 +155,6 @@ router.post('/:id/comments', (req: Request, res: Response) => {
 });
 
 // ---- Templates ----
-
-// GET /api/templates
-router.get('/templates/list', (_req: Request, res: Response) => {
-  try {
-    const templates = getAllTemplates();
-    res.json({ code: 0, data: templates });
-  } catch (err: any) {
-    res.status(500).json({ code: -1, message: err.message });
-  }
-});
 
 // POST /api/documents/:id/save-as-template
 router.post('/:id/save-as-template', (req: Request, res: Response) => {

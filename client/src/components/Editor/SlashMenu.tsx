@@ -1,12 +1,41 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ComponentType } from 'react';
 import type { Editor } from '@tiptap/react';
+import {
+  H1,
+  H2,
+  H3,
+  ListTwo,
+  OrderedList,
+  ListCheckbox,
+  CodeBrackets,
+  Quote,
+  Picture,
+  HighLight,
+  DividingLine,
+  LinkOne,
+  CheckCorrect,
+  PictureOne,
+  FolderOpen,
+  GridNine,
+  SplitCells,
+  Connection,
+  Rectangle,
+  Formula,
+  Bookmark,
+  NotebookOne,
+  Dashboard,
+  Timeline,
+  PictureAlbum,
+} from '@icon-park/react';
 import './SlashMenu.less';
 
+type DocIcon = ComponentType<any>;
+
 interface SlashMenuItem {
-  icon: string;
-  iconColor: string;
+  Icon: DocIcon;
+  iconColor?: string;
   label: string;
-  /** 输入 / 时的额外匹配词（如拼音、简称） */
   matchText?: string;
   desc?: string;
   hasArrow?: boolean;
@@ -37,8 +66,8 @@ function deleteSlashIfAny(editor: Editor) {
   }
 }
 
-const noop = (editor: Editor) => {
-  deleteSlashIfAny(editor);
+const noop = (_editor: Editor) => {
+  deleteSlashIfAny(_editor);
 };
 
 const SECTIONS: SlashMenuSection[] = [
@@ -47,16 +76,7 @@ const SECTIONS: SlashMenuSection[] = [
     layout: 'grid',
     items: [
       {
-        icon: 'T',
-        iconColor: '#1f2329',
-        label: '正文',
-        matchText: '正文 zhengwen zw paragraph',
-        action: e => {
-          e.chain().focus().deleteRange(getSlashRange(e)).setParagraph().run();
-        },
-      },
-      {
-        icon: 'H1',
+        Icon: H1,
         iconColor: '#1f2329',
         label: '一级标题',
         matchText: 'H1 标题一',
@@ -65,7 +85,7 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: 'H2',
+        Icon: H2,
         iconColor: '#1f2329',
         label: '二级标题',
         matchText: 'H2 标题二',
@@ -74,7 +94,7 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: 'H3',
+        Icon: H3,
         iconColor: '#1f2329',
         label: '三级标题',
         matchText: 'H3 标题三',
@@ -83,7 +103,7 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: '•',
+        Icon: ListTwo,
         iconColor: '#3370ff',
         label: '无序列表',
         matchText: 'bullet 项目符号',
@@ -92,7 +112,7 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: '1.',
+        Icon: OrderedList,
         iconColor: '#3370ff',
         label: '有序列表',
         matchText: '编号 数字',
@@ -101,7 +121,7 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: '☑',
+        Icon: ListCheckbox,
         iconColor: '#00b42a',
         label: '任务列表',
         matchText: '任务 待办 勾选',
@@ -110,7 +130,7 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: '{}',
+        Icon: CodeBrackets,
         iconColor: '#ff7d00',
         label: '代码块',
         matchText: 'code',
@@ -119,7 +139,7 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: '❝',
+        Icon: Quote,
         iconColor: '#722ed1',
         label: '引用',
         matchText: 'blockquote',
@@ -128,7 +148,23 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: '—',
+        Icon: Picture,
+        iconColor: '#52c41a',
+        label: '图片',
+        matchText: '图片 图像 image',
+        action: noop,
+      },
+      {
+        Icon: HighLight,
+        iconColor: '#f5a623',
+        label: '高亮块',
+        matchText: '高亮 callout',
+        action: e => {
+          e.chain().focus().deleteRange(getSlashRange(e)).toggleHighlight({ color: '#fff7e6' }).run();
+        },
+      },
+      {
+        Icon: DividingLine,
         iconColor: '#646a73',
         label: '分割线',
         matchText: '分隔 横线',
@@ -137,17 +173,10 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: '⎘',
+        Icon: LinkOne,
         iconColor: '#3370ff',
         label: '页面链接',
-        matchText: '链接 页面',
-        action: noop,
-      },
-      {
-        icon: '🔗',
-        iconColor: '#3370ff',
-        label: '超链接',
-        matchText: 'url link',
+        matchText: '链接 link url',
         action: noop,
       },
     ],
@@ -157,41 +186,42 @@ const SECTIONS: SlashMenuSection[] = [
     layout: 'list',
     items: [
       {
-        icon: '☑',
+        Icon: CheckCorrect,
         iconColor: '#1753eb',
         label: '任务',
+        matchText: '任务列表',
         action: e => {
           e.chain().focus().deleteRange(getSlashRange(e)).toggleTaskList().run();
         },
       },
       {
-        icon: '🖼',
+        Icon: PictureOne,
         iconColor: '#52c41a',
         label: '图片',
         action: noop,
       },
       {
-        icon: '📎',
-        iconColor: '#fa8c16',
+        Icon: FolderOpen,
+        iconColor: '#13c2c2',
         label: '视频或文件',
         action: noop,
       },
       {
-        icon: '⊞',
+        Icon: GridNine,
         iconColor: '#1753eb',
         label: '表格',
         hasArrow: true,
         action: noop,
       },
       {
-        icon: '⫾',
-        iconColor: '#8c8c8c',
+        Icon: SplitCells,
+        iconColor: '#9254de',
         label: '分栏',
         hasArrow: true,
         action: noop,
       },
       {
-        icon: '▰',
+        Icon: HighLight,
         iconColor: '#f5a623',
         label: '高亮块',
         action: e => {
@@ -199,34 +229,34 @@ const SECTIONS: SlashMenuSection[] = [
         },
       },
       {
-        icon: '⧄',
-        iconColor: '#13c2c2',
+        Icon: Connection,
+        iconColor: '#eb2f96',
         label: '同步块',
         action: noop,
       },
       {
-        icon: '⬜',
+        Icon: Rectangle,
         iconColor: '#597ef7',
         label: '按钮',
         hasArrow: true,
         action: noop,
       },
       {
-        icon: 'TeX',
+        Icon: Formula,
         iconColor: '#722ed1',
         label: '公式',
         action: noop,
       },
       {
-        icon: '⊙',
+        Icon: Bookmark,
         iconColor: '#f5222d',
         label: '模板',
         hasArrow: true,
         action: noop,
       },
       {
-        icon: '▤',
-        iconColor: '#4b4f58',
+        Icon: NotebookOne,
+        iconColor: '#3370ff',
         label: '子文档',
         action: noop,
       },
@@ -237,26 +267,26 @@ const SECTIONS: SlashMenuSection[] = [
     layout: 'list',
     items: [
       {
-        icon: '⊞',
+        Icon: GridNine,
         iconColor: '#1753eb',
         label: '表格',
         action: noop,
       },
       {
-        icon: '▤',
-        iconColor: '#13c2c2',
+        Icon: Dashboard,
+        iconColor: '#52c41a',
         label: '看板',
         action: noop,
       },
       {
-        icon: '▬',
+        Icon: Timeline,
         iconColor: '#f5a623',
         label: '甘特图',
         action: noop,
       },
       {
-        icon: '▦',
-        iconColor: '#52c41a',
+        Icon: PictureAlbum,
+        iconColor: '#9254de',
         label: '画册',
         action: noop,
       },
@@ -292,6 +322,12 @@ export default function SlashMenu({ editor, position, query, onClose }: Props) {
   const allItems = filteredSections.flatMap(s => s.items);
 
   useEffect(() => {
+    if (allItems.length === 0) {
+      onClose();
+    }
+  }, [allItems.length, onClose]);
+
+  useEffect(() => {
     setActiveIdx(0);
   }, [query]);
 
@@ -323,11 +359,12 @@ export default function SlashMenu({ editor, position, query, onClose }: Props) {
   }, [allItems, activeIdx, editor, onClose]);
 
   if (allItems.length === 0) {
-    onClose();
     return null;
   }
 
   let globalIdx = 0;
+
+  const gridStroke = 3;
 
   return (
     <div
@@ -342,6 +379,7 @@ export default function SlashMenu({ editor, position, query, onClose }: Props) {
             <div className="slash-basic-grid">
               {section.items.map(item => {
                 const idx = globalIdx++;
+                const Icon = item.Icon;
                 return (
                   <button
                     key={`${section.title}-${item.label}`}
@@ -355,8 +393,8 @@ export default function SlashMenu({ editor, position, query, onClose }: Props) {
                       onClose();
                     }}
                   >
-                    <span className="slash-basic-cell-icon" style={{ color: item.iconColor }}>
-                      {item.icon}
+                    <span className="slash-basic-cell-icon">
+                      <Icon theme="outline" size={18} strokeWidth={gridStroke} fill={item.iconColor ?? '#1f2329'} />
                     </span>
                   </button>
                 );
@@ -365,6 +403,7 @@ export default function SlashMenu({ editor, position, query, onClose }: Props) {
           ) : (
             section.items.map(item => {
               const idx = globalIdx++;
+              const Icon = item.Icon;
               return (
                 <div
                   key={`${section.title}-${item.label}`}
@@ -379,8 +418,8 @@ export default function SlashMenu({ editor, position, query, onClose }: Props) {
                     onClose();
                   }}
                 >
-                  <span className="slash-icon" style={{ color: item.iconColor }}>
-                    {item.icon}
+                  <span className="slash-icon-wrap">
+                    <Icon theme="outline" size={18} strokeWidth={gridStroke} fill={item.iconColor ?? '#1f2329'} />
                   </span>
                   <span className="slash-label">{item.label}</span>
                   {item.hasArrow && <span className="slash-arrow">›</span>}
