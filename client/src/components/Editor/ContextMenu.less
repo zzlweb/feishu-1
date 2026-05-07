@@ -17,20 +17,24 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   padding: 8px 0;
-  min-width: 204px;
+  min-width: 268px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
   z-index: 10050;
   max-height: 78vh;
   overflow-y: auto;
 }
 
 .context-menu-section--grid {
-  padding: 8px 12px 6px;
+  padding: 10px 14px 8px;
 }
 
 .context-menu-feishu .context-block-types {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   margin-bottom: 6px;
+  justify-content: flex-start;
 }
 
 .context-menu-feishu .context-block-types:last-child {
@@ -38,8 +42,8 @@
 }
 
 .context-menu-feishu .context-block-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -67,16 +71,21 @@
 .context-menu-feishu .context-menu-divider {
   height: 1px;
   background: var(--border-light);
-  margin: 6px 10px;
+  margin: 6px 12px;
+}
+
+.context-menu-feishu .context-menu-divider--inset {
+  margin: 6px 0;
 }
 
 .context-menu-feishu .context-menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   padding: 8px 14px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.45;
   color: var(--text-primary);
   cursor: pointer;
   position: relative;
@@ -87,13 +96,19 @@
   width: calc(100% - 12px);
 }
 
-.context-menu-feishu .context-menu-item:hover {
+.context-menu-feishu .context-menu-item--disabled {
+  opacity: 0.55;
+  cursor: default;
+  pointer-events: none;
+}
+
+.context-menu-feishu .context-menu-item:hover:not(.context-menu-item--disabled) {
   background: var(--bg-hover);
 }
 
 .context-menu-feishu .context-menu-icon {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -108,6 +123,13 @@
   margin-left: auto;
   color: var(--text-secondary);
   font-size: 15px;
+}
+
+.context-menu-feishu .context-menu-arrow-feishu {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .context-menu-feishu .context-menu-shortcut {
@@ -144,4 +166,93 @@
 .context-menu-feishu .context-submenu .context-menu-item {
   margin: 0;
   width: 100%;
+}
+
+/* Portal 浮层：不被主菜单 overflow 裁剪 */
+.context-menu-feishu.context-submenu-flyout,
+.context-submenu-flyout {
+  --border-color: #e8e9eb;
+  --border-light: #eef0f3;
+  --text-primary: #1f2329;
+  --text-secondary: #646a73;
+  --bg-white: #ffffff;
+  --bg-hover: #f0f1f2;
+  --shadow-lg: 0 12px 32px rgba(31, 35, 41, 0.1), 0 2px 8px rgba(31, 35, 41, 0.06);
+  --radius-md: 8px;
+  --primary-color: #3370ff;
+
+  background: var(--bg-white);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.context-align-flyout {
+  padding: 6px;
+  min-width: 200px;
+}
+
+.context-align-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  text-align: left;
+  color: var(--text-primary);
+}
+
+.context-align-row:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.context-align-row--active {
+  color: var(--primary-color);
+}
+
+.context-align-row--active .context-align-label {
+  color: var(--primary-color);
+}
+
+.context-align-row--disabled,
+.context-align-row:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.context-align-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.context-align-check {
+  color: var(--primary-color);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.context-align-help {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.context-menu-feishu .context-menu-divider--flyout {
+  margin: 6px 0;
+}
+
+.context-color-flyout {
+  min-width: 252px;
+  padding: 12px;
+  max-height: min(420px, 78vh);
+  overflow-y: auto;
 }

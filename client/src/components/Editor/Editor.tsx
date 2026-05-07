@@ -14,9 +14,16 @@ import { common, createLowlight } from 'lowlight';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ContextMenu from './ContextMenu';
 import SlashMenu from './SlashMenu';
+import SelectionBubble from './SelectionBubble';
 import type { HeadingItem } from '../../types';
-import { Help, Notebook, Plus } from '@icon-park/react';
+import { HelpCircleIcon, BookOpenIcon } from 'tdesign-icons-react';
+import { wrapIcon } from '../../icons/wrap';
+import { IconAddOutlined, IconDragOutlined } from '../../icons/feishuDoc';
+import BlockGutterGlyph from './BlockGutterGlyph';
 import './Editor.less';
+
+const Notebook = wrapIcon(BookOpenIcon);
+const Help = wrapIcon(HelpCircleIcon);
 
 const lowlight = createLowlight(common);
 
@@ -40,6 +47,49 @@ function getBlockDomFromEditor(editorInstance: {
     el = el.parentElement;
   }
   return null;
+}
+
+/**
+ * ProseMirror `view.hasFocus()` 仅当 document.activeElement === 编辑器根节点时为 true。
+ * 个别浏览器/场景下焦点落在 contenteditable 内部节点，导致块柄被误判隐藏。
+ * TipTap 的 isFocused 及对 activeElement 的 contains 检测作为补充。
+ */
+function isEditorTypingFocused(editorInstance: {
+  isFocused?: boolean;
+  view?: { dom: HTMLElement; hasFocus: () => boolean };
+}): boolean {
+  if (editorInstance.isFocused) return true;
+  const view = editorInstance.view;
+  if (!view) return false;
+  if (view.hasFocus()) return true;
+  if (typeof document === 'undefined') return false;
+  const ae = document.activeElement;
+  return Boolean(ae && view.dom.contains(ae));
+}
+
+/** 侧栏块柄纵轴：标题与首行文字中线对齐，其它块用块级盒子垂直中心 */
+function getBlockToolsAnchorTop(
+  editorInstance: {
+    view: {
+      posAtDOM: (node: Node, offset: number) => number;
+      coordsAtPos: (pos: number) => { top: number; bottom: number };
+    };
+  },
+  blockEl: HTMLElement,
+  areaRectTop: number,
+): number {
+  const tag = blockEl.tagName.toLowerCase();
+  if (/^h[1-6]$/.test(tag)) {
+    try {
+      const pos = editorInstance.view.posAtDOM(blockEl, 0);
+      const c = editorInstance.view.coordsAtPos(pos);
+      return (c.top + c.bottom) / 2 - areaRectTop;
+    } catch {
+      /* 降级为块中心 */
+    }
+  }
+  const rr = blockEl.getBoundingClientRect();
+  return rr.top + rr.height / 2 - areaRectTop;
 }
 
 interface EditorProps {
@@ -84,13 +134,20 @@ export default function Editor({
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
   const [slashMenuPos, setSlashMenuPos] = useState({ top: 0, left: 0 });
   const [slashQuery, setSlashQuery] = useState('');
-  const [blockTools, setBlockTools] = useState({ visible: false, top: 0, left: 0, type: 'paragraph', isEmpty: true });
+  /** 面板是否由段落旁「+」悬停/点击打开（与输入 `/` 打开的菜单分流，便于嵌套在同一 hover 容器内） */
+  const [slashMenuFromPlus, setSlashMenuFromPlus] = useState(false);
+  const [blockTools, setBlockTools] = useState({ visible: false, top: 0, type: 'paragraph', isEmpty: true });
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const menuClosedAtRef = useRef<number>(0);
   /** 当前块工具对应的块 DOM */
   const activeBlockElRef = useRef<HTMLElement | null>(null);
   const [plusHovered, setPlusHovered] = useState(false);
+
+  const closeSlashMenu = useCallback(() => {
+    setSlashMenuVisible(false);
+    setSlashMenuFromPlus(false);
+  }, []);
 
   const getElementBlockInfo = useCallback((target: EventTarget | null) => {
     if (!editorAreaRef.current || !(target instanceof Element)) return null;
@@ -125,7 +182,7 @@ export default function Editor({
   }, []);
 
   const updateBlockTools = useCallback((editorInstance: any) => {
-    if (readOnly || !editorAreaRef.current || !editorInstance?.view?.hasFocus?.()) {
+    if (readOnly || !editorAreaRef.current || !isEditorTypingFocused(editorInstance)) {
       activeBlockElRef.current = null;
       setBlockTools(prev => ({ ...prev, visible: false }));
       return;
@@ -134,41 +191,33 @@ export default function Editor({
     const { from, to } = editorInstance.state.selection;
     const isEmpty = (from === to && editorInstance.state.doc.textBetween(Math.max(0, from - 1), Math.min(editorInstance.state.doc.content.size, from + 1), ' ', '\0').trim() === '') && editorInstance.isActive('paragraph');
 
-    const coords = editorInstance.view.coordsAtPos(from);
     const areaRect = editorAreaRef.current.getBoundingClientRect();
-    const left = Math.max(areaRect.left - 40, 12);
-    const top = Math.max(coords.top - 2, areaRect.top + 8);
 
     activeBlockElRef.current = getBlockDomFromEditor(editorInstance);
+    const row = activeBlockElRef.current;
+    let top: number;
+    if (row) {
+      top = getBlockToolsAnchorTop(editorInstance, row, areaRect.top);
+    } else {
+      const c = editorInstance.view.coordsAtPos(from);
+      top = (c.top + c.bottom) / 2 - areaRect.top;
+    }
 
     setBlockTools({
       visible: true,
       top,
-      left,
       type: getCurrentBlockType(editorInstance),
       isEmpty,
     });
   }, [getCurrentBlockType, readOnly]);
 
-  const handleEditorMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (readOnly || !editorAreaRef.current) return;
-    const info = getElementBlockInfo(e.target);
-    if (!info) return;
+  const handleEditorMouseLeave = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
+    if (next instanceof Element && next.closest('.block-inline-tools')) return;
+    if (next instanceof Element && next.closest('.selection-bubble')) return;
 
-    const rect = info.element.getBoundingClientRect();
-    const areaRect = editorAreaRef.current.getBoundingClientRect();
-    activeBlockElRef.current = info.element;
-    setBlockTools({
-      visible: true,
-      top: Math.max(rect.top - 1, areaRect.top + 8),
-      left: Math.max(areaRect.left - 40, 12),
-      type: info.type,
-      isEmpty: info.isEmpty,
-    });
-  }, [getElementBlockInfo, readOnly]);
-
-  const handleEditorMouseLeave = useCallback(() => {
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (!document.querySelector('.context-menu') && !document.querySelector('.slash-menu')) {
         setPlusHovered(false);
         setBlockTools(prev => ({ ...prev, visible: false }));
@@ -180,16 +229,17 @@ export default function Editor({
   const handleEditorWrapMouseLeave = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const next = e.relatedTarget as Node | null;
     if (next && e.currentTarget.contains(next)) return;
-    setSlashMenuVisible(false);
+    if (next instanceof Element && next.closest('.selection-bubble')) return;
+    closeSlashMenu();
     setContextMenu(null);
     setPlusHovered(false);
     setBlockTools(prev => ({ ...prev, visible: false }));
-  }, []);
+  }, [closeSlashMenu]);
 
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        heading: { levels: [1, 2, 3, 4, 5] },
+        heading: { levels: [1, 2, 3, 4, 5, 6] },
         codeBlock: false,
       }),
       CodeBlockLowlight.configure({ lowlight }),
@@ -202,7 +252,10 @@ export default function Editor({
       TaskItem.configure({ nested: true }),
       Placeholder.configure({
         placeholder: ({ node }) => {
-          if (node.type.name === 'heading') return '标题';
+          if (node.type.name === 'heading') {
+            const level = typeof node.attrs.level === 'number' ? node.attrs.level : 2;
+            return `H${level}`;
+          }
           return '输入“/”快速插入内容';
         },
       }),
@@ -235,12 +288,13 @@ export default function Editor({
           const coords = editor.view.coordsAtPos(from);
           setSlashMenuPos({ top: coords.bottom + 4, left: coords.left });
           setSlashQuery(query);
+          setSlashMenuFromPlus(false);
           setSlashMenuVisible(true);
         } else {
-          setSlashMenuVisible(false);
+          closeSlashMenu();
         }
       } else {
-        setSlashMenuVisible(false);
+        closeSlashMenu();
       }
 
       updateBlockTools(editor);
@@ -253,6 +307,8 @@ export default function Editor({
     },
     onBlur: () => {
       setTimeout(() => {
+        const ae = document.activeElement;
+        if (ae instanceof Element && ae.closest('.selection-bubble')) return;
         if (!document.querySelector('.context-menu') && !document.querySelector('.slash-menu')) {
           setPlusHovered(false);
           setBlockTools(prev => ({ ...prev, visible: false }));
@@ -260,6 +316,38 @@ export default function Editor({
       }, 80);
     },
   });
+
+  /** 可编辑时屏蔽正文区右键菜单（含系统菜单）；只读时保留系统菜单便于复制等 */
+  useEffect(() => {
+    if (!editor) return;
+    const area = editorAreaRef.current;
+    if (!area) return;
+    const onContextMenu = (e: MouseEvent) => {
+      if (readOnly) return;
+      e.preventDefault();
+    };
+    area.addEventListener('contextmenu', onContextMenu, true);
+    return () => area.removeEventListener('contextmenu', onContextMenu, true);
+  }, [editor, readOnly]);
+
+  const handleEditorMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (readOnly || !editorAreaRef.current || !editor) return;
+      const info = getElementBlockInfo(e.target);
+      if (!info) return;
+
+      const areaRect = editorAreaRef.current.getBoundingClientRect();
+      activeBlockElRef.current = info.element;
+      const centerY = getBlockToolsAnchorTop(editor, info.element, areaRect.top);
+      setBlockTools({
+        visible: true,
+        top: centerY,
+        type: info.type,
+        isEmpty: info.isEmpty,
+      });
+    },
+    [getElementBlockInfo, readOnly, editor],
+  );
 
   const extractHeadings = useCallback((editorInstance: any) => {
     if (!onHeadingsChange || !editorInstance) return;
@@ -298,31 +386,40 @@ export default function Editor({
       if (readOnly) {
         setPlusHovered(false);
         setBlockTools(prev => ({ ...prev, visible: false }));
+        closeSlashMenu();
       }
     }
-  }, [readOnly, editor]);
+  }, [readOnly, editor, closeSlashMenu]);
 
-  /** 浅蓝行背景仅在悬停「+」时出现 */
+  /** 浅蓝行背景：空段落悬停「+」；或非空 / 非段落时显示块柄与正文行对齐 */
   useEffect(() => {
     const root = editorAreaRef.current?.querySelector('.tiptap');
-    root?.querySelectorAll('.block-row-plus-highlight').forEach(el => {
-      el.classList.remove('block-row-plus-highlight');
+    root?.querySelectorAll('.block-row-gutter-highlight').forEach(el => {
+      el.classList.remove('block-row-gutter-highlight');
     });
-    const row =
+    let row: HTMLElement | null = null;
+    if (
       plusHovered &&
       blockTools.visible &&
       blockTools.isEmpty &&
       blockTools.type === 'paragraph'
-        ? activeBlockElRef.current
-        : null;
-    if (row?.isConnected) row.classList.add('block-row-plus-highlight');
+    ) {
+      row = activeBlockElRef.current;
+    } else if (
+      blockTools.visible &&
+      !readOnly &&
+      !(blockTools.isEmpty && blockTools.type === 'paragraph')
+    ) {
+      row = activeBlockElRef.current;
+    }
+    if (row?.isConnected) row.classList.add('block-row-gutter-highlight');
   }, [
     plusHovered,
     blockTools.visible,
     blockTools.isEmpty,
     blockTools.type,
     blockTools.top,
-    blockTools.left,
+    readOnly,
   ]);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -342,12 +439,6 @@ export default function Editor({
     }
   };
 
-  const handleContextMenu = (e: React.MouseEvent) => {
-    if (readOnly) return;
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY });
-  };
-
   const closeContextMenu = () => {
     setContextMenu(null);
     menuClosedAtRef.current = Date.now();
@@ -357,24 +448,13 @@ export default function Editor({
     // Prevent re-opening if just closed by a click (300ms cooldown)
     if (Date.now() - menuClosedAtRef.current < 300) return;
     editor?.commands.focus();
-    setSlashMenuVisible(false);
-    setContextMenu({ x: blockTools.left, y: blockTools.top + 30 });
-  };
-
-  const getBlockIcon = (type: string) => {
-    switch (type) {
-      case 'task': return '☑';
-      case 'bulletList': return '•';
-      case 'orderedList': return '1.';
-      case 'blockquote': return '❝';
-      case 'codeBlock': return '{}';
-      case 'h1': return 'H1';
-      case 'h2': return 'H2';
-      case 'h3': return 'H3';
-      case 'h4': return 'H4';
-      case 'h5': return 'H5';
-      case 'hr': return '—';
-      default: return '⋮⋮';
+    closeSlashMenu();
+    const area = editorAreaRef.current;
+    if (area) {
+      const ar = area.getBoundingClientRect();
+      setContextMenu({ x: ar.left - 8, y: ar.top + blockTools.top + 30 });
+    } else {
+      setContextMenu({ x: 24, y: blockTools.top + 30 });
     }
   };
 
@@ -410,11 +490,85 @@ export default function Editor({
             ref={editorAreaRef}
             className="editor-content-area"
             aria-label="文档正文编辑区"
-            onContextMenu={handleContextMenu}
             onMouseMove={handleEditorMouseMove}
             onMouseLeave={handleEditorMouseLeave}
           >
+            {blockTools.visible && !readOnly && (
+              <div className="block-inline-tools" style={{ top: blockTools.top }}>
+                {blockTools.isEmpty && blockTools.type === 'paragraph' ? (
+                  <div
+                    className="block-add-hover-wrap"
+                    onMouseEnter={() => {
+                      setPlusHovered(true);
+                      setSlashMenuFromPlus(true);
+                      setSlashQuery('');
+                      setSlashMenuVisible(true);
+                    }}
+                    onMouseLeave={(e) => {
+                      const next = e.relatedTarget as Node | null;
+                      if (next && e.currentTarget.contains(next)) return;
+                      setPlusHovered(false);
+                      closeSlashMenu();
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="block-add-btn"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => {
+                        editor.commands.focus();
+                        setSlashMenuFromPlus(true);
+                        setSlashQuery('');
+                        setSlashMenuVisible(true);
+                      }}
+                      title="点击或悬浮添加内容"
+                      aria-label="插入内容"
+                    >
+                      <span className="block-add-btn-box">
+                        <IconAddOutlined size={14} color="currentColor" />
+                      </span>
+                    </button>
+                    {slashMenuVisible && slashMenuFromPlus && (
+                      <SlashMenu
+                        editor={editor}
+                        position={slashMenuPos}
+                        query={slashQuery}
+                        variant="anchored"
+                        onClose={closeSlashMenu}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="block-drag-row"
+                    onMouseDown={e => e.preventDefault()}
+                    onMouseEnter={openBlockConfigMenu}
+                    onClick={openBlockConfigMenu}
+                    title="块配置"
+                    aria-label="块配置"
+                  >
+                    <div className="hover-drag-icon-wrapper">
+                      <div className="hover-block-type-icon-container">
+                        <span className="menu_ud_icon color-b-500">
+                          <BlockGutterGlyph type={blockTools.type} />
+                        </span>
+                      </div>
+                      <span className="drag-handle" aria-hidden>
+                        <IconDragOutlined size={16} color="#8f959e" />
+                      </span>
+                    </div>
+                    <span className="block-drag-caret" aria-hidden>
+                      <svg width="8" height="5" viewBox="0 0 8 5" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 5 0 0h8L4 5Z" fill="#1f2329" />
+                      </svg>
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
             <EditorContent editor={editor} />
+            {!readOnly && <SelectionBubble editor={editor} />}
           </div>
         </div>
 
@@ -439,56 +593,13 @@ export default function Editor({
         />
       )}
 
-      {slashMenuVisible && (
+      {slashMenuVisible && !slashMenuFromPlus && (
         <SlashMenu
           editor={editor}
           position={slashMenuPos}
           query={slashQuery}
-          onClose={() => setSlashMenuVisible(false)}
+          onClose={closeSlashMenu}
         />
-      )}
-
-      {blockTools.visible && !readOnly && (
-        <div className="block-inline-tools" style={{ top: blockTools.top, left: blockTools.left }}>
-          {blockTools.isEmpty && blockTools.type === 'paragraph' ? (
-            <button
-              className="block-add-btn"
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => {
-                setPlusHovered(true);
-                setSlashMenuPos({ top: blockTools.top + 30, left: blockTools.left });
-                setSlashQuery('');
-                setSlashMenuVisible(true);
-              }}
-              onMouseLeave={() => setPlusHovered(false)}
-              onClick={() => {
-                editor.commands.focus();
-                setSlashMenuPos({ top: blockTools.top + 30, left: blockTools.left });
-                setSlashQuery('');
-                setSlashMenuVisible(true);
-              }}
-              title="点击或悬浮添加内容"
-              aria-label="插入内容"
-            >
-              <span className="block-add-btn-icon">
-                <Plus theme="outline" size={13} strokeWidth={3} fill="currentColor" />
-              </span>
-            </button>
-          ) : (
-            <div 
-              className="block-drag-group"
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={openBlockConfigMenu}
-              onClick={openBlockConfigMenu}
-              title="块配置"
-            >
-              {blockTools.type !== 'paragraph' && (
-                <span className="block-type-icon">{getBlockIcon(blockTools.type)}</span>
-              )}
-              <span className="block-drag-handle">⋮⋮</span>
-            </div>
-          )}
-        </div>
       )}
     </div>
   );

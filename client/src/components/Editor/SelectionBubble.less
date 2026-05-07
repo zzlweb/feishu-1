@@ -1,0 +1,432 @@
+.selection-bubble {
+  visibility: hidden;
+  overflow: visible;
+
+  .selection-bubble-inner {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    box-sizing: border-box;
+    min-height: 44px;
+    padding: 8px 10px;
+    overflow: visible;
+    background: #fff;
+    border: 1px solid rgba(222, 224, 227, 0.95);
+    border-radius: 10px;
+    box-shadow: 0 0 1px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.12);
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC',
+      'Microsoft YaHei', sans-serif;
+  }
+
+  /* 避免 flex 挤压导致 SVG 被裁切 */
+  .selection-bubble-btn svg,
+  .selection-bubble-submenu svg {
+    flex-shrink: 0;
+    vertical-align: middle;
+  }
+
+  .selection-bubble-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-height: 30px;
+
+    &--extra {
+      padding-left: 2px;
+    }
+  }
+
+  .selection-bubble-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #1c1f23;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &:hover:not(:disabled) {
+      background: rgba(31, 35, 41, 0.08);
+    }
+
+    &:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    &.active {
+      background: rgba(0, 87, 255, 0.08);
+      color: #3370ff;
+    }
+  }
+
+  .selection-bubble-btn--brand {
+    color: #3370ff;
+  }
+
+  .selection-bubble-btn--brand.active {
+    background: rgba(51, 112, 255, 0.1);
+    color: #3370ff;
+  }
+
+  .selection-bubble-link-glyph {
+    color: #3370ff;
+  }
+
+  .selection-bubble-btn--brand-outline:not(:disabled):hover {
+    background: rgba(51, 112, 255, 0.08);
+    color: #3370ff;
+  }
+
+  .selection-bubble-btn--icon-quiet {
+    color: #1c1f23;
+  }
+
+  .selection-bubble-submenu {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 30px;
+    height: 30px;
+    padding: 0 6px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #1c1f23;
+    cursor: pointer;
+    font: inherit;
+
+    &:hover {
+      background: rgba(31, 35, 41, 0.08);
+    }
+  }
+
+  .selection-bubble-submenu-label {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.25;
+    max-width: 36px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .selection-bubble-chevron {
+    flex-shrink: 0;
+    color: rgba(28, 31, 35, 0.55);
+  }
+
+  .selection-bubble-heading-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .selection-bubble-color-b500 {
+    color: #3370ff;
+  }
+
+  .selection-bubble-heading-trigger {
+    min-width: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .selection-bubble-align-trigger {
+    padding: 0 4px;
+  }
+
+  .selection-bubble-fontcolor-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px;
+    border-radius: 4px;
+    background-color: rgba(255, 246, 122, 0.8);
+    color: #1c1f23;
+  }
+
+  .selection-bubble-divider {
+    flex-shrink: 0;
+    background: rgba(31, 35, 41, 0.12);
+
+    &--thin {
+      width: 1px;
+      align-self: center;
+      height: 18px;
+      margin: 0 4px;
+    }
+
+    &--section {
+      width: 1px;
+      align-self: stretch;
+      flex-shrink: 0;
+      /* 上下留白，避免竖线顶到圆角内侧显得被裁切 */
+      margin: 6px 6px;
+    }
+  }
+
+  .selection-bubble-dropdown {
+    position: relative;
+    display: flex;
+    align-items: center;
+
+    &--link {
+      align-items: center;
+    }
+  }
+
+  .selection-bubble-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    margin-top: 0;
+    min-width: 120px;
+    padding: 4px 0;
+    background: #fff;
+    border: 1px solid rgba(222, 224, 227, 0.98);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 0 1px rgba(0, 0, 0, 0.06);
+    z-index: 10;
+
+    &--block-style {
+      min-width: 248px;
+      max-width: min(92vw, 300px);
+      padding: 6px;
+      overflow: visible;
+    }
+
+    &--align {
+      min-width: 132px;
+    }
+
+    &--more {
+      left: auto;
+      right: 0;
+      min-width: 140px;
+    }
+
+    &--color {
+      left: auto;
+      right: 0;
+      min-width: 252px;
+      padding: 12px;
+      max-height: min(380px, 72vh);
+      overflow-y: auto;
+    }
+  }
+
+  .selection-bubble-menu-divider {
+    height: 1px;
+    margin: 4px 8px;
+    background: rgba(31, 35, 41, 0.1);
+    flex-shrink: 0;
+  }
+
+  .selection-bubble-style-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    font: inherit;
+    font-size: 13px;
+    color: #1c1f23;
+    cursor: pointer;
+    box-sizing: border-box;
+
+    &:hover:not(:disabled) {
+      background: rgba(31, 35, 41, 0.06);
+    }
+
+    &--active {
+      color: #3370ff;
+
+      .selection-bubble-style-label {
+        color: #3370ff;
+        font-weight: 500;
+      }
+    }
+
+    &--trigger {
+      cursor: default;
+      position: relative;
+    }
+
+    &--trigger:hover {
+      background: rgba(31, 35, 41, 0.06);
+    }
+
+    &--sub-active:not(:hover) {
+      background: rgba(0, 87, 255, 0.04);
+    }
+  }
+
+  .selection-bubble-style-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+
+    svg {
+      display: block;
+    }
+  }
+
+  .selection-bubble-style-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .selection-bubble-style-tag {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(28, 31, 35, 0.88);
+
+    &--muted {
+      color: rgba(28, 31, 35, 0.45);
+    }
+  }
+
+  .selection-bubble-style-row--active .selection-bubble-style-tag {
+    color: #3370ff;
+  }
+
+  .selection-bubble-style-label {
+    font-size: 13px;
+    color: inherit;
+    line-height: 1.35;
+  }
+
+  .selection-bubble-style-check {
+    flex-shrink: 0;
+    margin-left: auto;
+    color: #3370ff;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .selection-bubble-style-more-wrap {
+    position: relative;
+  }
+
+  .selection-bubble-style-more-flyout {
+    position: absolute;
+    left: calc(100% + 6px);
+    top: -4px;
+    min-width: 196px;
+    padding: 6px;
+    background: #fff;
+    border: 1px solid rgba(222, 224, 227, 0.98);
+    border-radius: 8px;
+    box-shadow:
+      0 4px 16px rgba(0, 0, 0, 0.1),
+      0 0 1px rgba(0, 0, 0, 0.06);
+    z-index: 24;
+  }
+
+  .selection-bubble-chevron-right {
+    flex-shrink: 0;
+    margin-left: auto;
+    transform: rotate(-90deg);
+    color: rgba(28, 31, 35, 0.45);
+  }
+
+  .selection-bubble-menu-item {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    text-align: left;
+    font-size: 13px;
+    color: #1c1f23;
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(31, 35, 41, 0.06);
+    }
+
+    &.active {
+      color: #3370ff;
+      font-weight: 500;
+    }
+  }
+
+  .selection-bubble-link-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid #e8e9eb;
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+    z-index: 12;
+    white-space: nowrap;
+
+    input {
+      width: 180px;
+      padding: 4px 8px;
+      border: 1px solid #dee0e3;
+      border-radius: 4px;
+      font-size: 12px;
+      outline: none;
+
+      &:focus {
+        border-color: #3370ff;
+      }
+    }
+  }
+
+  .selection-bubble-link-ok {
+    padding: 4px 10px;
+    border: none;
+    border-radius: 4px;
+    background: #3370ff;
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+      background: #2860e1;
+    }
+  }
+
+  .selection-bubble-color-trigger {
+    gap: 2px;
+    padding-right: 2px;
+  }
+}
+
+/* BubbleMenu：选区在 .tippy-content 内，避免 tippy 默认样式裁切图标 */
+.tippy-box:has(.selection-bubble),
+.tippy-box:has(.selection-bubble) .tippy-content {
+  overflow: visible;
+}
+
+.tippy-box:has(.selection-bubble) .tippy-content {
+  padding: 0;
+}

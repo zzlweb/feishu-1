@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@icon-park/react": "^1.4.2",
     "@tiptap/extension-code-block-lowlight": "^2.6.0",
     "@tiptap/extension-color": "^2.6.0",
     "@tiptap/extension-highlight": "^2.6.0",
@@ -26,7 +25,9 @@
     "lowlight": "^3.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.0"
+    "react-router-dom": "^6.26.0",
+    "tdesign-icons-react": "^0.6.4",
+    "tdesign-react": "^1.16.9"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",

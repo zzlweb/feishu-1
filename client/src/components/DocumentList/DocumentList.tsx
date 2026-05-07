@@ -1,5 +1,18 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Dialog, Loading, Button, MessagePlugin } from 'tdesign-react';
+import {
+  SearchIcon,
+  UserIcon,
+  NotificationIcon,
+  AppIcon,
+  FileAddIcon,
+  UploadIcon,
+  TemplateIcon,
+  FilterIcon,
+  ViewListIcon,
+  ComponentGridIcon,
+} from 'tdesign-icons-react';
 import { getDocuments, createDocument, deleteDocument, duplicateDocument } from '../../api/documents';
 import type { Document } from '../../types';
 import './DocumentList.less';
@@ -104,7 +117,7 @@ export default function DocumentList() {
     setRowMenu(null);
     const url = `${window.location.origin}/doc/${id}`;
     navigator.clipboard.writeText(url);
-    alert('分享链接已复制到剪贴板！');
+    void MessagePlugin.success('分享链接已复制到剪贴板！');
   };
 
   const formatDate = (dateStr: string) => {
@@ -132,30 +145,17 @@ export default function DocumentList() {
       <header className="home-header">
         <span className="home-header-title">主页</span>
         <div className="home-header-actions">
-          <button className="header-icon-btn" title="搜索">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="6.5" cy="6.5" r="4" stroke="currentColor" strokeWidth="1.4"/>
-              <path d="M11 11l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-            </svg>
+          <button type="button" className="header-icon-btn" title="搜索">
+            <SearchIcon size="16px" strokeColor="currentColor" strokeWidth={2} />
           </button>
-          <button className="header-icon-btn" title="联系人">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
-              <path d="M3 13c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-            </svg>
+          <button type="button" className="header-icon-btn" title="联系人">
+            <UserIcon size="16px" strokeColor="currentColor" strokeWidth={2} />
           </button>
-          <button className="header-icon-btn" title="通知">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 2a4 4 0 00-4 4v3l-1 2h10l-1-2V6a4 4 0 00-4-4zM6.5 12a1.5 1.5 0 003 0" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+          <button type="button" className="header-icon-btn" title="通知">
+            <NotificationIcon size="16px" strokeColor="currentColor" strokeWidth={2} />
           </button>
-          <button className="header-icon-btn" title="应用">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <rect x="2" y="2" width="5" height="5" rx="1"/>
-              <rect x="9" y="2" width="5" height="5" rx="1"/>
-              <rect x="2" y="9" width="5" height="5" rx="1"/>
-              <rect x="9" y="9" width="5" height="5" rx="1"/>
-            </svg>
+          <button type="button" className="header-icon-btn" title="应用">
+            <AppIcon size="16px" strokeColor="currentColor" strokeWidth={2} />
           </button>
           <div className="user-avatar">张</div>
         </div>
@@ -166,10 +166,7 @@ export default function DocumentList() {
         <div className="action-bar">
           <div className="action-card" onClick={handleCreate}>
             <div className="action-card-icon icon-create">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <rect x="2" y="2" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-                <path d="M9 6v6M6 9h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
+              <FileAddIcon size="18px" strokeColor="currentColor" strokeWidth={2} />
             </div>
             <div className="action-card-text">
               <span className="action-card-name">新建</span>
@@ -180,10 +177,7 @@ export default function DocumentList() {
 
           <div className="action-card">
             <div className="action-card-icon icon-upload">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M9 12V5M6 8l3-3 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M4 13h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
+              <UploadIcon size="18px" strokeColor="currentColor" strokeWidth={2} />
             </div>
             <div className="action-card-text">
               <span className="action-card-name">上传</span>
@@ -194,10 +188,7 @@ export default function DocumentList() {
 
           <div className="action-card">
             <div className="action-card-icon icon-template">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <rect x="2" y="2" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-                <path d="M5 6h8M5 9h5M5 12h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
+              <TemplateIcon size="18px" strokeColor="currentColor" strokeWidth={2} />
             </div>
             <div className="action-card-text">
               <span className="action-card-name">模板库</span>
@@ -222,34 +213,20 @@ export default function DocumentList() {
             <button className="tab-add" title="添加标签">+</button>
           </div>
           <div className="tabs-right">
-            <button className="tab-action-btn">
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <path d="M2 4h9M3.5 7h6M5 10h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-              </svg>
+            <button type="button" className="tab-action-btn">
+              <FilterIcon size="13px" strokeColor="currentColor" strokeWidth={2} />
               筛选
             </button>
-            <button className="tab-action-btn">
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <rect x="1" y="1" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/>
-                <rect x="8" y="1" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/>
-                <rect x="1" y="8" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/>
-                <rect x="8" y="8" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/>
-              </svg>
+            <button type="button" className="tab-action-btn">
+              <ComponentGridIcon size="13px" strokeColor="currentColor" strokeWidth={2} />
               显示设置
             </button>
             <div className="view-toggle">
-              <button className="active" title="列表">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M2 4h10M2 7h10M2 10h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                </svg>
+              <button type="button" className="active" title="列表">
+                <ViewListIcon size="14px" strokeColor="currentColor" strokeWidth={2} />
               </button>
-              <button title="宫格">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <rect x="1" y="1" width="5" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.2"/>
-                  <rect x="8" y="1" width="5" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.2"/>
-                  <rect x="1" y="8" width="5" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.2"/>
-                  <rect x="8" y="8" width="5" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.2"/>
-                </svg>
+              <button type="button" title="宫格">
+                <ComponentGridIcon size="14px" strokeColor="currentColor" strokeWidth={2} />
               </button>
             </div>
           </div>
@@ -258,8 +235,7 @@ export default function DocumentList() {
         {/* Table */}
         {loading ? (
           <div className="doc-loading">
-            <div className="spinner" />
-            <span>加载中...</span>
+            <Loading loading size="medium" text="加载中..." />
           </div>
         ) : visibleDocs.length === 0 ? (
           <div className="doc-empty">
@@ -275,7 +251,9 @@ export default function DocumentList() {
               </svg>
             </div>
             <p>暂无文档</p>
-            <button className="btn-create-empty" onClick={handleCreate}>创建第一个文档</button>
+            <Button theme="primary" onClick={handleCreate}>
+              创建第一个文档
+            </Button>
           </div>
         ) : (
           <table className="doc-table">
@@ -377,28 +355,20 @@ export default function DocumentList() {
         </div>
       )}
 
-      {/* Delete confirmation modal */}
-      {deleteTarget && (
-        <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
-          <div className="modal-dialog" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">是否删除：{deleteTarget.title}？</span>
-              <button className="modal-close" onClick={() => setDeleteTarget(null)}>×</button>
-            </div>
-            <p className="modal-desc">
-              删除的内容将进入回收站，30 天后自动彻底删除。你也可以保留内容，仅移除访问记录。
-            </p>
-            <div className="modal-actions">
-              <button className="modal-btn modal-btn-outline" onClick={handleRemoveRecord}>
-                仅移除访问记录
-              </button>
-              <button className="modal-btn modal-btn-danger" onClick={handleConfirmDelete}>
-                删除
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog
+        visible={!!deleteTarget}
+        destroyOnClose
+        header={deleteTarget ? `是否删除：${deleteTarget.title}？` : ''}
+        cancelBtn="仅移除访问记录"
+        confirmBtn={{ content: '删除', theme: 'danger' }}
+        onClose={() => setDeleteTarget(null)}
+        onCancel={() => handleRemoveRecord()}
+        onConfirm={() => void handleConfirmDelete()}
+      >
+        <p className="modal-desc" style={{ margin: 0 }}>
+          删除的内容将进入回收站，30 天后自动彻底删除。你也可以保留内容，仅移除访问记录。
+        </p>
+      </Dialog>
     </div>
   );
 }

@@ -46,7 +46,6 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 0 14px 6px 46px;
       font-size: 12px;
       color: #8f959e;
       line-height: 1.4;
@@ -98,6 +97,14 @@
       flex-shrink: 0;
     }
 
+    .header-left-divider {
+      width: 1px;
+      height: 18px;
+      background: @border-color;
+      margin: 0 4px 0 2px;
+      flex-shrink: 0;
+    }
+
     .header-right-divider {
       width: 1px;
       height: 18px;
@@ -123,6 +130,21 @@
       &:hover {
         background: @bg-hover;
         color: @text-primary;
+      }
+    }
+
+    /** 顶栏「新建」：圆形线框 + 号，贴近飞书 */
+    .header-icon-btn.header-add-circle-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid @border-color;
+      background: @bg-white;
+
+      &:hover {
+        background: @bg-hover;
+        border-color: #c9ced6;
+        color: @text-secondary;
       }
     }
 
@@ -165,6 +187,9 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
       }
     }
 
@@ -202,7 +227,7 @@
 
       &:hover { border-color: @primary; color: @primary; }
 
-      .mode-icon-park {
+      .mode-icon {
         display: flex;
         flex-shrink: 0;
       }

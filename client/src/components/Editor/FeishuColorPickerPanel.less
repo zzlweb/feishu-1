@@ -1,0 +1,120 @@
+@fcp-primary: var(--primary-color, #3370ff);
+
+.feishu-color-panel {
+  min-width: 228px;
+
+  &__section {
+    margin-bottom: 12px;
+
+    &:last-of-type {
+      margin-bottom: 10px;
+    }
+  }
+
+  &__title {
+    font-size: 12px;
+    color: var(--text-secondary, #646a73);
+    margin-bottom: 8px;
+    line-height: 1.35;
+  }
+
+  &__font-row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    justify-content: space-between;
+  }
+
+  &__font-btn {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    max-width: 30px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      border-color 0.12s ease,
+      background 0.12s ease;
+
+    &:hover {
+      background: var(--bg-hover, #f0f1f2);
+    }
+
+    &--selected {
+      border-color: @fcp-primary;
+      background: transparent;
+    }
+  }
+
+  &__font-a {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1;
+    user-select: none;
+  }
+
+  &__bg-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 6px;
+  }
+
+  &__bg-btn {
+    width: 100%;
+    aspect-ratio: 1;
+    max-width: 28px;
+    justify-self: center;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 6px;
+    padding: 0;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: box-shadow 0.12s ease, border-color 0.12s ease;
+
+    &:hover:not(:disabled) {
+      filter: brightness(0.96);
+    }
+
+    &--clear {
+      background: #fff;
+      background-image: linear-gradient(
+        to top right,
+        #fff 47%,
+        @fcp-primary 47%,
+        @fcp-primary 53%,
+        #fff 53%
+      );
+    }
+
+    &--selected {
+      box-shadow: 0 0 0 2px @fcp-primary;
+      border-color: rgba(51, 112, 255, 0.35);
+    }
+  }
+
+  &__restore {
+    width: 100%;
+    padding: 8px 12px;
+    margin-top: 2px;
+    border: 1px solid var(--border-color, #dee0e3);
+    border-radius: 6px;
+    background: var(--bg-white, #fff);
+    font-size: 13px;
+    color: var(--text-secondary, #646a73);
+    cursor: pointer;
+    transition:
+      background 0.12s ease,
+      color 0.12s ease;
+
+    &:hover {
+      background: var(--bg-hover, #f0f1f2);
+      color: var(--text-primary, #1f2329);
+    }
+  }
+}
