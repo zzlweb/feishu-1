@@ -13,26 +13,126 @@
 @font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
   "Microsoft YaHei", sans-serif;
 
+/** 版心宽度：视口变窄时不缩小该宽度，超出部分由外层横向裁切，正文不因容器变窄而重排换行 */
+@editor-page-width: 860px;
+
 .editor-wrap {
   display: flex;
   flex-direction: column;
   min-height: 100%;
   font-family: @font;
   position: relative;
+  overflow-x: hidden;
 
   // ---- Scroll area ----
   .editor-scroll {
     flex: 1;
     display: flex;
     flex-direction: column;
+    align-items: stretch;
+    overflow-x: hidden;
+    min-width: 0;
   }
 
   // ---- Main doc area ----
   .editor-container {
-    max-width: 860px;
-    margin: 0 auto;
+    box-sizing: border-box;
+    width: @editor-page-width;
+    min-width: @editor-page-width;
+    max-width: @editor-page-width;
+    flex-shrink: 0;
+    margin-left: max(calc((100% - @editor-page-width) / 2), calc(var(--catalogue-rail-width, 0px) + 24px));
+    margin-right: auto;
     padding: 0 48px 0 86px;
-    width: 100%;
+
+    // Title area wrapper (hover detection zone)
+    .editor-title-area {
+      position: relative;
+      padding-top: 34px;
+
+      // Hover meta bar — absolutely positioned in the top padding, no layout push
+      .page-block-header-top {
+        position: absolute;
+        top: 6px;
+        left: 0;
+        display: flex;
+        align-items: center;
+        height: 28px;
+        gap: 4px;
+        z-index: 10;
+
+        .doc-meta-entry-container {
+          .doc-meta-entry {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            font-size: 13px;
+            color: @text-secondary;
+            background: none;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            white-space: nowrap;
+
+            .universe-icon {
+              display: flex;
+              align-items: center;
+              font-size: 16px;
+            }
+
+            .doc-meta-entry-text {
+              font-size: 13px;
+            }
+
+            &:hover {
+              background: @bg-hover;
+              color: @text-primary;
+            }
+          }
+        }
+      }
+
+      // Emoji picker floats below the meta bar
+      .emoji-picker {
+        position: absolute;
+        top: 34px;
+        left: 0;
+        z-index: 1000;
+      }
+
+      // Icon display
+      .editor-doc-icon {
+        box-sizing: border-box;
+        width: 54px;
+        height: 54px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 42px;
+        font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+        line-height: 54px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0;
+        border-radius: 6px;
+        flex-shrink: 0;
+        text-align: center;
+        transition: background 0.15s;
+
+        &:hover {
+          background: @bg-hover;
+        }
+      }
+
+      // Title row with icon inline
+      .editor-title-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+    }
 
     // Title
     .editor-title-input {
@@ -42,9 +142,9 @@
       color: @text-primary;
       border: none;
       outline: none;
-      padding: 34px 0 14px;
+      padding: 5px 0 14px;
       background: transparent;
-      line-height: 1.35;
+      line-height: 44px;
       font-family: @font;
 
       &::placeholder { color: @text-placeholder; }
@@ -112,23 +212,27 @@
         }
 
         > *.block-row-gutter-highlight {
-          background-color: rgba(240, 244, 255, 0.92);
+          background-color: rgba(46, 137, 255, 0.08);
           transition: background-color 0.12s ease;
         }
 
         // Headings
-        h1 { font-size: 26px; font-weight: 700; line-height: 1.4; margin: 1.4em 0 0.4em; }
-        h2 { font-size: 22px; font-weight: 700; line-height: 1.4; margin: 1.2em 0 0.3em; }
-        h3 { font-size: 18px; font-weight: 600; line-height: 1.4; margin: 1em 0 0.3em; }
-        h4 { font-size: 16px; font-weight: 600; line-height: 1.4; margin: 0.8em 0 0.2em; }
-        h5 { font-size: 14px; font-weight: 600; line-height: 1.4; margin: 0.6em 0 0.2em; }
-        h6 { font-size: 13px; font-weight: 600; line-height: 1.4; margin: 0.55em 0 0.2em; color: @text-secondary; }
+        h1 { font-size: 26px; font-weight: 700; line-height: 1.4;  }
+        h2 { font-size: 22px; font-weight: 700; line-height: 1.4; }
+        h3 { font-size: 18px; font-weight: 600; line-height: 1.4;}
+        h4 { font-size: 16px; font-weight: 600; line-height: 1.4; }
+        h5 { font-size: 14px; font-weight: 600; line-height: 1.4;  }
+        h6 { font-size: 13px; font-weight: 600; line-height: 1.4;  color: @text-secondary; }
 
         p { font-size: 15px; line-height: 1.8; color: @text-primary; }
 
-        // Placeholder - first empty p
-        p.is-editor-empty:first-child::before,
-        .is-empty::before {
+        // Placeholder
+        h1.is-empty::before,
+        h2.is-empty::before,
+        h3.is-empty::before,
+        h4.is-empty::before,
+        h5.is-empty::before,
+        h6.is-empty::before {
           content: attr(data-placeholder);
           float: left;
           color: @text-placeholder;
@@ -198,19 +302,163 @@
 
         // Code block
         pre {
-          background: #1e1e1e;
-          border-radius: 8px;
-          padding: 16px 20px;
-          overflow-x: auto;
-          margin: 12px 0;
+          margin: 0;
 
           code {
             background: none;
-            color: #d4d4d4;
             padding: 0;
             font-size: 13px;
             line-height: 1.6;
             color: inherit;
+          }
+        }
+
+        .feishu-code-block {
+          box-sizing: border-box;
+          margin: 12px 0;
+          border: 1px solid #dfe3e8;
+          border-radius: 6px;
+          background: #f7f8fa;
+          overflow: hidden;
+          color: #1f2329;
+
+          .feishu-code-block__toolbar {
+            box-sizing: border-box;
+            min-height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 6px 10px 4px 14px;
+            color: #646a73;
+            font-size: 13px;
+            line-height: 20px;
+          }
+
+          .feishu-code-block__title {
+            flex-shrink: 0;
+            font-weight: 500;
+          }
+
+          .feishu-code-block__actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+          }
+
+          .feishu-code-block__language {
+            max-width: 140px;
+            height: 24px;
+            padding: 0 20px 0 6px;
+            border: none;
+            border-radius: 4px;
+            outline: none;
+            background: transparent;
+            color: #646a73;
+            font-size: 12px;
+            cursor: pointer;
+
+            &:hover,
+            &:focus {
+              background: #edf0f3;
+              color: #1f2329;
+            }
+          }
+
+          .feishu-code-block__action {
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 0 6px;
+            border: none;
+            border-radius: 4px;
+            background: transparent;
+            color: #646a73;
+            font-size: 12px;
+            line-height: 24px;
+            cursor: pointer;
+            white-space: nowrap;
+
+            &:hover {
+              background: #edf0f3;
+              color: #1f2329;
+            }
+          }
+
+          .feishu-code-block__pre {
+            box-sizing: border-box;
+            min-height: 44px;
+            padding: 2px 16px 16px 16px;
+            overflow-x: auto;
+            background: transparent;
+          }
+
+          .feishu-code-block__content {
+            display: block;
+            min-height: 22px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 13px;
+            line-height: 22px;
+            color: #1f2329;
+            white-space: pre;
+            tab-size: 2;
+            outline: none;
+          }
+
+          .hljs-keyword,
+          .hljs-selector-tag,
+          .hljs-built_in,
+          .hljs-name,
+          .hljs-tag {
+            color: #245bdb;
+          }
+
+          .hljs-string,
+          .hljs-title,
+          .hljs-section,
+          .hljs-attribute,
+          .hljs-literal,
+          .hljs-template-tag,
+          .hljs-template-variable,
+          .hljs-type,
+          .hljs-addition {
+            color: #2b7a0b;
+          }
+
+          .hljs-comment,
+          .hljs-quote,
+          .hljs-deletion,
+          .hljs-meta {
+            color: #8f959e;
+            font-style: italic;
+          }
+
+          .hljs-number,
+          .hljs-regexp,
+          .hljs-symbol,
+          .hljs-bullet,
+          .hljs-link {
+            color: #b75c00;
+          }
+
+          .hljs-variable,
+          .hljs-params,
+          .hljs-class .hljs-title,
+          .hljs-function .hljs-title {
+            color: #7a3e9d;
+          }
+
+          &.feishu-code-block--wrap {
+            .feishu-code-block__pre {
+              overflow-x: hidden;
+            }
+
+            .feishu-code-block__content {
+              white-space: pre-wrap;
+              word-break: break-word;
+            }
           }
         }
 
@@ -235,7 +483,7 @@
   .block-inline-tools {
     position: absolute;
     left: 0;
-    z-index: 120;
+    z-index: 200;
     display: flex;
     align-items: center;
     gap: 0;

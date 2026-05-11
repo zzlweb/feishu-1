@@ -263,15 +263,74 @@
 
   }
 
+  // ---- Cover image (inside scroll area) ----
+  .doc-cover-wrapper {
+    width: 100%;
+    position: relative;
+    height: 330px;
+    overflow: hidden;
+
+    .doc-cover-img {
+      width: 100%;
+      height: 330px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .doc-cover-actions {
+      position: absolute;
+      bottom: 12px;
+      right: 24px;
+      display: flex;
+      gap: 8px;
+      opacity: 0;
+      transition: opacity 0.2s;
+
+      .cover-action-btn {
+        padding: 6px 14px;
+        font-size: 13px;
+        color: #1f2329;
+        background: rgba(255, 255, 255, 0.88);
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+
+        &:hover {
+          background: rgba(255, 255, 255, 1);
+        }
+      }
+    }
+
+    &:hover .doc-cover-actions {
+      opacity: 1;
+    }
+  }
+
   // ---- Body ----
   .doc-page-body {
     display: flex;
     flex: 1;
     overflow: hidden;
+    min-height: 0;
+    position: relative;
+    /** 目录展开 / 收起轨宽（无目录时为 0），正文可用 calc(env(...) var(...)) 避让 */
+    --catalogue-rail-width: 0px;
+
+    &:has(.catalogue-aside:not(.catalogue-aside--collapsed)) {
+      --catalogue-rail-width: 200px;
+    }
+
+    &:has(.catalogue-aside.catalogue-aside--collapsed) {
+      --catalogue-rail-width: 40px;
+    }
   }
 
   .doc-page-main {
     flex: 1;
+    min-width: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     background: @bg-white;
     position: relative;
@@ -346,111 +405,189 @@
 }
 
 // ========================
-// Sidebar
+// 左侧目录（有正文标题才显示；无分割栏；顶 « + 蓝色条目）
 // ========================
 
-.sidebar {
+.catalogue-aside {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
   width: 200px;
-  border-right: 1px solid @border-light;
-  background: @bg-white;
-  display: flex;
-  flex-direction: row;
-  flex-shrink: 0;
-  overflow: hidden;
+  max-width: 200px;
+  box-sizing: border-box;
   min-height: 0;
-  align-self: stretch;
+  z-index: 1;
+  background-color: initial;
+  transition: flex-basis 0.18s ease, width 0.18s ease, max-width 0.18s ease;
 
-  &.sidebar-collapsed {
-    width: 28px;
-  }
-
-  .sidebar-main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .sidebar-rail {
-    width: 28px;
-    flex-shrink: 0;
+  .catalogue-inner {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    justify-content: center;
-    border-left: 1px solid @border-light;
-    background: @bg-white;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    min-height: 0;
+    flex: 1;
+    padding: 12px 10px 16px 16px;
+    transition: width 0.18s ease, padding 0.18s ease;
+    position: absolute;
+    inset: 0;
+    padding-top: 54px;
+    z-index: 1;
+    overflow: hidden;
   }
 
-  &.sidebar-collapsed .sidebar-rail {
-    border-left: none;
+  &.catalogue-aside--collapsed {
+    width: 40px;
+    max-width: 40px;
+
+    .catalogue-inner {
+      width: 100%;
+      padding: 12px 6px 16px 10px;
+      align-items: center;
+      padding-top: 54px;
+    }
   }
 
-  .sidebar-toggle {
+  .catalogue-collapse-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    flex: 1;
-    min-height: 72px;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin-bottom: 8px;
     padding: 0;
-    border-radius: 0;
-    color: @text-secondary;
-    background: none;
     border: none;
+    border-radius: @radius-sm;
+    background: transparent;
+    color: #c7ccd2;
     cursor: pointer;
-    font-size: 13px;
+    transition: background 0.15s, color 0.15s;
 
-    &:hover { background: @bg-hover; color: @text-primary; }
+    &:hover {
+      background: @bg-hover;
+      color: #8f959e;
+    }
+
+    &__icon {
+      flex-shrink: 0;
+      display: block;
+      pointer-events: none;
+      user-select: none;
+
+      &--mirrored {
+        transform: scaleX(-1);
+      }
+    }
   }
 
-  .sidebar-content {
-    padding: 12px 12px 12px;
-    overflow-y: auto;
+  &.catalogue-aside--collapsed .catalogue-collapse-btn {
+    margin-bottom: 0;
+  }
+
+  .catalogue__scroller {
     flex: 1;
     min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    outline: none;
+
+    &::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: rgba(31, 35, 41, 0.12);
+      border-radius: 3px;
+    }
   }
 
-  .sidebar-title {
-    display: none;
+  .catalogue__list {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 40px;
+    cursor: default;
   }
 
-  .sidebar-empty {
-    font-size: 13px;
-    color: @text-placeholder;
-    padding: 12px 0;
+  .catalogue__list-item {
+    margin: 0;
+    padding: 0 0 10px;
   }
 
-  .sidebar-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
+  /** 文档标题（目录首行，与正文 H1 同级视觉权重） */
+  .catalogue__list-item--doc-title .catalogue__item-title {
+    font-size: 14px;
+    font-weight: 600;
   }
 
-  .sidebar-item {
+  .catalogue__item-title {
     display: block;
     width: 100%;
-    padding: 5px 8px;
+    padding: 3px 6px;
+    margin: 0;
+    box-sizing: border-box;
+    border: none;
+    border-radius: 4px;
+    background: none;
     text-align: left;
-    font-size: 13px;
+    text-decoration: none;
+    font-size: 14px;
+    line-height: 22px;
+    font-weight: 500;
+    color: #8f959e;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+
+    &:hover {
+      color: @primary;
+      background: rgba(51, 112, 255, 0.06);
+    }
+  }
+
+  .catalogue__list-item.active .catalogue__item-title {
+    font-weight: 600;
     color: @primary;
-    border-radius: @radius-sm;
+
+    &:hover {
+      color: @primary-hover;
+      background: rgba(51, 112, 255, 0.06);
+    }
+  }
+
+  .catalogue__item-text {
+    display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    background: none;
-    border: none;
-    cursor: pointer;
-    transition: all 0.15s;
-
-    &:hover { background: @bg-hover; color: @primary-hover; }
   }
 
-  .sidebar-level-1 { padding-left: 8px; font-weight: 600; font-size: 14px; }
-  .sidebar-level-2 { padding-left: 16px; font-weight: 500; }
-  .sidebar-level-3 { padding-left: 24px; }
-  .sidebar-level-4 { padding-left: 32px; font-size: 12px; }
-  .sidebar-level-5 { padding-left: 40px; font-size: 12px; }
+  .indent-level-2 .catalogue__item-title {
+    padding-left: 10px;
+    font-size: 13px;
+  }
+
+  .indent-level-3 .catalogue__item-title {
+    padding-left: 18px;
+    font-size: 13px;
+  }
+
+  .indent-level-4 .catalogue__item-title {
+    padding-left: 26px;
+    font-size: 12px;
+  }
+
+  .indent-level-5 .catalogue__item-title {
+    padding-left: 34px;
+    font-size: 12px;
+  }
+
+  .indent-level-6 .catalogue__item-title {
+    padding-left: 42px;
+    font-size: 12px;
+  }
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -41,3 +41,6 @@ export interface HeadingItem {
   text: string;
   id: string;
 }
+
+/** 侧栏目录中与「文档标题」输入行对应的首项 id（与 Sidebar 一致） */
+export const DOC_TITLE_CATALOGUE_ID = '__document-title__';

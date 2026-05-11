@@ -9,9 +9,9 @@
 .slash-menu-feishu {
   position: fixed;
   z-index: 9999;
-  /* 与飞书 slash 面板接近：容纳 6 列栅格 +「常用」列表留白 */
-  width: 296px;
   box-sizing: border-box;
+  width: min(230px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   max-height: min(560px, 74vh);
   overflow-y: auto;
   overflow-x: hidden;
@@ -52,11 +52,14 @@
 
   .slash-section--grid {
     .slash-basic-grid {
-      display: grid;
-      grid-template-columns: repeat(6, 32px);
+      display: flex;
+      flex-wrap: wrap;
       gap: 4px 6px;
       padding: 0 14px 12px;
-      justify-content: center;
+      justify-content: flex-start;
+      align-content: flex-start;
+      width: 100%;
+      box-sizing: border-box;
     }
 
     .slash-basic-cell {

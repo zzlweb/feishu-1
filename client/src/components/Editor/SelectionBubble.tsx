@@ -126,6 +126,46 @@ function copySelectedPlainText(editor: Editor) {
   void navigator.clipboard?.writeText(text);
 }
 
+/** 气泡「块类型」触发器：列表先于内层 paragraph，避免列表内仍显示正文图标 */
+function resolveBlockStyleTrigger(editor: Editor): { icon: ReactNode; label: string } {
+  const hiColor = editor.getAttributes('highlight').color as string | undefined;
+  const isHighlightCallout =
+    editor.isActive('highlight')
+    && (hiColor === CALLOUT_HIGHLIGHT || hiColor?.toUpperCase() === CALLOUT_HIGHLIGHT.toUpperCase());
+
+  for (let i = 1; i <= 6; i++) {
+    if (!editor.isActive('heading', { level: i })) continue;
+    if (i === 1)
+      return { icon: <SlashGlyphHeading1 size={GLYPH} fill={PRIMARY} />, label: 'H1' };
+    if (i === 2)
+      return { icon: <SlashGlyphHeading2 size={GLYPH} fill={PRIMARY} />, label: 'H2' };
+    if (i === 3)
+      return { icon: <SlashGlyphHeading3 size={GLYPH} fill={PRIMARY} />, label: 'H3' };
+    return { icon: <SlashGlyphHeading3 size={GLYPH} fill={PRIMARY} />, label: `H${i}` };
+  }
+
+  if (editor.isActive('blockquote')) {
+    return { icon: <SlashGlyphQuote size={GLYPH} fill={PRIMARY} />, label: '引用' };
+  }
+  if (editor.isActive('taskList')) {
+    return { icon: <SlashGlyphTaskList size={GLYPH} fill={PRIMARY} />, label: '任务' };
+  }
+  if (editor.isActive('orderedList')) {
+    return { icon: <SlashGlyphOrderedList size={GLYPH} fill={PRIMARY} />, label: '有序列表' };
+  }
+  if (editor.isActive('bulletList')) {
+    return { icon: <SlashGlyphBulletList size={GLYPH} fill={PRIMARY} />, label: '无序列表' };
+  }
+  if (isHighlightCallout) {
+    return { icon: <SlashGlyphHighlight size={GLYPH} fill={PRIMARY} />, label: '高亮块' };
+  }
+  if (editor.isActive('paragraph')) {
+    return { icon: <ContextGlyphText size={GLYPH} fill={PRIMARY} />, label: '正文' };
+  }
+
+  return { icon: <ContextGlyphText size={GLYPH} fill={ICON_MUTED} />, label: '正文' };
+}
+
 export default function SelectionBubble({ editor }: SelectionBubbleProps) {
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   const [showHeadingMenu, setShowHeadingMenu] = useState(false);
@@ -187,12 +227,7 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
     [cancelMoreHeadingClose],
   );
 
-  const getCurrentHeading = useCallback(() => {
-    for (let i = 1; i <= 6; i++) {
-      if (editor.isActive('heading', { level: i })) return `H${i}`;
-    }
-    return '正文';
-  }, [editor]);
+  const blockStyleTrigger = resolveBlockStyleTrigger(editor);
 
   const closeHeadingStylePanel = () => {
     cancelMoreHeadingClose();
@@ -260,9 +295,10 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
               className="selection-bubble-submenu selection-bubble-heading-trigger"
               onMouseDown={e => e.preventDefault()}
               onClick={() => setShowHeadingMenu(!showHeadingMenu)}
+              title={blockStyleTrigger.label}
             >
               <span className="selection-bubble-heading-icon selection-bubble-color-b500" aria-hidden>
-              {getCurrentHeading()}
+                {blockStyleTrigger.icon}
               </span>
               <SelGlyphChevronDown size={GLYPH_SM} className="selection-bubble-chevron" />
             </button>

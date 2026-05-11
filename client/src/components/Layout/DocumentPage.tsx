@@ -3,16 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Loading } from 'tdesign-react';
 import { getDocument, updateDocument } from '../../api/documents';
 import type { Document, HeadingItem } from '../../types';
+import { DOC_TITLE_CATALOGUE_ID } from '../../types';
 import Editor from '../Editor/Editor';
 import Sidebar from './Sidebar';
 import DocumentHeader from './DocumentHeader';
 import './Layout.less';
-
-/** 与编辑器 normalize 逻辑一致：仅当有「真实标题」时才显示大纲侧栏 */
-function titleAllowsOutlineSidebar(displayTitle: string): boolean {
-  const t = displayTitle.trim();
-  return t.length > 0 && t !== '未命名文档';
-}
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,11 +18,17 @@ export default function DocumentPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'idle'>('idle');
-  /** 标题输入快照（来自编辑器回调 + 文档加载同步），用于控制大纲侧栏显隐 */
+  const outlineWasVisibleRef = useRef(false);
+  const mainScrollRef = useRef<HTMLElement>(null);
+  const [sidebarTop, setSidebarTop] = useState(0);
+  /** 标题输入快照（与编辑器同步），用于目录首行与侧栏显隐 */
   const [titleInputSnapshot, setTitleInputSnapshot] = useState('');
-  const outlineHadTitleRef = useRef(false);
+  /** 目录当前高亮项：随文档标题焦点 / 正文光标所在章节变化 */
+  const [catalogueActiveId, setCatalogueActiveId] = useState<string | null>(null);
 
-  const showOutlineSidebar = titleAllowsOutlineSidebar(titleInputSnapshot);
+  const catalogueTitleDisplay = titleInputSnapshot.trim();
+  /** 有正文标题块或已填写文档标题时显示目录 */
+  const showOutlineSidebar = headings.length > 0 || catalogueTitleDisplay.length > 0;
 
   const handleTitleInputChange = useCallback((t: string) => {
     setTitleInputSnapshot(t);
@@ -39,14 +40,27 @@ export default function DocumentPage() {
   }, [doc?.id, doc?.title]);
 
   useEffect(() => {
-    outlineHadTitleRef.current = false;
+    outlineWasVisibleRef.current = false;
+    setCatalogueActiveId(null);
   }, [doc?.id]);
 
+  /** 标题块增删后 pos 变化，剔除已不存在的目录高亮 */
   useEffect(() => {
-    if (showOutlineSidebar && !outlineHadTitleRef.current) {
+    if (catalogueActiveId === null) return;
+    if (catalogueActiveId === DOC_TITLE_CATALOGUE_ID) {
+      if (catalogueTitleDisplay.length === 0) setCatalogueActiveId(null);
+      return;
+    }
+    if (!headings.some(h => h.id === catalogueActiveId)) {
+      setCatalogueActiveId(null);
+    }
+  }, [headings, catalogueTitleDisplay, catalogueActiveId]);
+
+  useEffect(() => {
+    if (showOutlineSidebar && !outlineWasVisibleRef.current) {
       setSidebarCollapsed(false);
     }
-    outlineHadTitleRef.current = showOutlineSidebar;
+    outlineWasVisibleRef.current = showOutlineSidebar;
   }, [showOutlineSidebar]);
 
   const loadDocument = useCallback(async () => {
@@ -65,7 +79,7 @@ export default function DocumentPage() {
     loadDocument();
   }, [loadDocument]);
 
-  const handleSave = async (data: { title?: string; content?: string }) => {
+  const handleSave = async (data: { title?: string; content?: string; icon?: string; cover_url?: string }) => {
     if (!id) return;
     setSaveStatus('saving');
     const res = await updateDocument(id, data);
@@ -75,6 +89,36 @@ export default function DocumentPage() {
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 2000);
   };
+
+  const handleRemoveCover = useCallback(async () => {
+    if (!id) return;
+    setSaveStatus('saving');
+    const res = await updateDocument(id, { cover_url: '' });
+    if (res.code === 0 && res.data) {
+      setDoc(prev => (prev ? { ...prev, cover_url: '', updated_at: res.data!.updated_at } : null));
+    }
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 2000);
+  }, [id]);
+
+  /** 动态计算侧边栏 top：封面可见时在封面下方，滚过封面后吸顶 */
+  useEffect(() => {
+    const el = mainScrollRef.current;
+    if (!el) return;
+    const updateTop = () => {
+      const cover = el.querySelector('.doc-cover-wrapper') as HTMLElement | null;
+      const coverH = cover ? cover.offsetHeight : 0;
+      setSidebarTop(Math.max(0, coverH - el.scrollTop));
+    };
+    updateTop();
+    el.addEventListener('scroll', updateTop, { passive: true });
+    const obs = new MutationObserver(updateTop);
+    obs.observe(el, { childList: true });
+    return () => {
+      el.removeEventListener('scroll', updateTop);
+      obs.disconnect();
+    };
+  }, [doc?.cover_url]);
 
   if (loading) {
     return (
@@ -93,20 +137,37 @@ export default function DocumentPage() {
       <div className="doc-page-body">
         {showOutlineSidebar && (
           <Sidebar
+            documentTitle={catalogueTitleDisplay}
             headings={headings}
+            activeId={catalogueActiveId}
+            onTocItemActivate={setCatalogueActiveId}
             collapsed={sidebarCollapsed}
             onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+            style={{ top: sidebarTop }}
           />
         )}
-        <main className="doc-page-main">
+        <main className="doc-page-main" ref={mainScrollRef}>
+          {doc.cover_url && (
+            <div className="doc-cover-wrapper">
+              <img className="doc-cover-img" src={doc.cover_url} alt="" referrerPolicy="no-referrer" />
+              <div className="doc-cover-actions">
+                <button type="button" className="cover-action-btn" onClick={handleRemoveCover}>
+                  移除封面
+                </button>
+              </div>
+            </div>
+          )}
           <Editor
             content={doc.content}
             title={doc.title}
             author={doc.author}
             updatedAt={doc.updated_at}
+            icon={doc.icon}
+            coverUrl={doc.cover_url}
             onSave={handleSave}
             onHeadingsChange={setHeadings}
             onTitleInputChange={handleTitleInputChange}
+            onCatalogueActiveIdChange={setCatalogueActiveId}
             readOnly={readOnly}
           />
         </main>

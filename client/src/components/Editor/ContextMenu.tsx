@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { ComponentType } from 'react';
 import type { Editor } from '@tiptap/react';
@@ -30,6 +30,9 @@ import {
   SlashGlyphHeading1,
   SlashGlyphHeading2,
   SlashGlyphHeading3,
+  SlashGlyphHeading4,
+  SlashGlyphHeading5,
+  SlashGlyphHeading6,
   SlashGlyphOrderedList,
   SlashGlyphBulletList,
   SlashGlyphTaskList,
@@ -57,6 +60,10 @@ interface ContextMenuProps {
   x: number;
   y: number;
   onClose: () => void;
+  /** 块柄按钮：指针移回标签时保持面板打开；离开整套 UI 时收起 */
+  anchorRef?: RefObject<HTMLElement | null>;
+  /** 鼠标离开面板区域时的收起（可与 onClose 分流以顺便收起块柄） */
+  onHoverDismiss?: () => void;
 }
 
 type RowKind = 'heading' | 'block' | 'highlight' | 'noop';
@@ -87,6 +94,9 @@ const ROW_1: GridRowDef[] = [
   { label: '一级标题', value: 1, type: 'heading', Icon: SlashGlyphHeading1, tint: TBOX.b500 },
   { label: '二级标题', value: 2, type: 'heading', Icon: SlashGlyphHeading2, tint: TBOX.b500 },
   { label: '三级标题', value: 3, type: 'heading', Icon: SlashGlyphHeading3, tint: TBOX.b500 },
+  { label: '四级标题', value: 4, type: 'heading', Icon: SlashGlyphHeading4, tint: TBOX.b500 },
+  { label: '五级标题', value: 5, type: 'heading', Icon: SlashGlyphHeading5, tint: TBOX.b500 },
+  { label: '六级标题', value: 6, type: 'heading', Icon: SlashGlyphHeading6, tint: TBOX.b500 },
   { label: '有序列表', value: 'orderedList', type: 'block', Icon: SlashGlyphOrderedList, tint: TBOX.i500 },
   { label: '无序列表', value: 'bulletList', type: 'block', Icon: SlashGlyphBulletList, tint: TBOX.i500 },
 ];
@@ -98,6 +108,9 @@ const ROW_2: GridRowDef[] = [
   { label: '高亮块', value: CALLOUT_HIGHLIGHT, type: 'highlight', Icon: SlashGlyphHighlight, tint: TBOX.o500 },
   { label: '同步块', value: 'noopSync', type: 'noop', Icon: ContextGlyphSynced, tint: TBOX.n1 },
 ];
+
+/** 与飞书 flatten-item-list 一致：单行 flex 自动换行 */
+const BLOCK_TYPE_ICON_GRID: GridRowDef[] = [...ROW_1, ...ROW_2];
 
 const ALIGN_OPTIONS = [
   { label: '左对齐', value: 'left', Icon: AlignTextLeft },
@@ -113,7 +126,7 @@ const ICON_MUTED = '#646a73';
 function isGridActive(editor: Editor, item: GridRowDef): boolean {
   if (item.type === 'heading') {
     if (item.value === 0) return editor.isActive('paragraph');
-    return editor.isActive('heading', { level: item.value as 1 | 2 | 3 });
+    return editor.isActive('heading', { level: item.value as 1 | 2 | 3 | 4 | 5 | 6 });
   }
   if (item.type === 'block') return editor.isActive(item.value as string);
   if (item.type === 'highlight') {
@@ -128,7 +141,7 @@ function getCurrentTextAlign(editor: Editor): string {
   return (p || h || 'left') as string;
 }
 
-export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps) {
+export default function ContextMenu({ editor, x, y, onClose, anchorRef, onHoverDismiss }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const alignTriggerRef = useRef<HTMLDivElement>(null);
   const colorTriggerRef = useRef<HTMLDivElement>(null);
@@ -137,6 +150,7 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
   const colorFlyoutRef = useRef<HTMLDivElement>(null);
   const addBelowFlyoutRef = useRef<HTMLDivElement>(null);
   const subMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [subMenu, setSubMenu] = useState<string | null>(null);
   const [alignFlyoutPos, setAlignFlyoutPos] = useState<{ top: number; left: number } | null>(null);
   const [colorFlyoutPos, setColorFlyoutPos] = useState<{ top: number; left: number } | null>(null);
@@ -149,9 +163,53 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
     }
   };
 
+  const clearHoverDismissTimer = () => {
+    if (hoverDismissTimerRef.current) {
+      clearTimeout(hoverDismissTimerRef.current);
+      hoverDismissTimerRef.current = null;
+    }
+  };
+
+  const dismissByHover = () => {
+    clearHoverDismissTimer();
+    (onHoverDismiss ?? onClose)();
+  };
+
+  const scheduleHoverDismiss = () => {
+    clearHoverDismissTimer();
+    hoverDismissTimerRef.current = window.setTimeout(() => {
+      hoverDismissTimerRef.current = null;
+      dismissByHover();
+    }, 250);
+  };
+
+  const pointerStillInShell = (next: EventTarget | null): boolean => {
+    if (!next || !(next instanceof Element)) return false;
+    if (menuRef.current?.contains(next)) return true;
+    if (alignFlyoutRef.current?.contains(next)) return true;
+    if (colorFlyoutRef.current?.contains(next)) return true;
+    if (addBelowFlyoutRef.current?.contains(next)) return true;
+    if (anchorRef?.current?.contains(next)) return true;
+    if (next.closest('.block-inline-tools')) return true;
+    if (next.closest('.context-menu')) return true;
+    if (next.closest('.context-submenu-flyout')) return true;
+    if (next.closest('.context-add-below-flyout')) return true;
+    return false;
+  };
+
   const scheduleSubmenuClose = () => {
     clearSubMenuCloseTimer();
     subMenuCloseTimerRef.current = setTimeout(() => setSubMenu(null), 220);
+  };
+
+  const handleShellMouseLeave = (e: React.MouseEvent) => {
+    if (pointerStillInShell(e.relatedTarget)) return;
+    scheduleHoverDismiss();
+  };
+
+  const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
+    scheduleSubmenuClose();
+    handleShellMouseLeave(e);
   };
 
   useLayoutEffect(() => {
@@ -160,7 +218,8 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
     setAddBelowFlyoutPos(null);
 
     const pad = 8;
-    const gap = 4;
+    /** 与主菜单侧边紧贴，避免视觉缝隙 */
+    const gap = 0;
 
     if (subMenu === 'align') {
       const el = alignTriggerRef.current;
@@ -235,12 +294,15 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
       document.removeEventListener('mousedown', handleClick);
       document.removeEventListener('keydown', handleEscape);
       clearSubMenuCloseTimer();
+      clearHoverDismissTimer();
     };
   }, [onClose]);
 
-  const menuW = 268;
-  const adjustedX = Math.min(x, window.innerWidth - menuW - 12);
-  const adjustedY = Math.min(y, window.innerHeight - 420);
+  const menuW = 230;
+  const padClamp = 8;
+  const estH = 420;
+  const adjustedX = Math.min(Math.max(x, padClamp), window.innerWidth - menuW - padClamp);
+  const adjustedY = Math.min(Math.max(y, padClamp), window.innerHeight - estH);
 
   const setHeading = (level: number) => {
     if (level === 0) {
@@ -340,8 +402,11 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
           left: alignFlyoutPos.left,
           zIndex: 10060,
         }}
-        onMouseEnter={clearSubMenuCloseTimer}
-        onMouseLeave={scheduleSubmenuClose}
+        onMouseEnter={() => {
+          clearSubMenuCloseTimer();
+          clearHoverDismissTimer();
+        }}
+        onMouseLeave={handleFlyoutMouseLeave}
         onMouseDown={e => e.preventDefault()}
       >
         {ALIGN_OPTIONS.map(a => {
@@ -412,8 +477,11 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
           left: colorFlyoutPos.left,
           zIndex: 10060,
         }}
-        onMouseEnter={clearSubMenuCloseTimer}
-        onMouseLeave={scheduleSubmenuClose}
+        onMouseEnter={() => {
+          clearSubMenuCloseTimer();
+          clearHoverDismissTimer();
+        }}
+        onMouseLeave={handleFlyoutMouseLeave}
         onMouseDown={e => e.preventDefault()}
       >
         <FeishuColorPickerPanel editor={editor} onAfterPick={onClose} />
@@ -434,8 +502,11 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
           left: addBelowFlyoutPos.left,
           zIndex: 10060,
         }}
-        onMouseEnter={clearSubMenuCloseTimer}
-        onMouseLeave={scheduleSubmenuClose}
+        onMouseEnter={() => {
+          clearSubMenuCloseTimer();
+          clearHoverDismissTimer();
+        }}
+        onMouseLeave={handleFlyoutMouseLeave}
         onMouseDown={e => e.preventDefault()}
       >
         {SLASH_SECTIONS.map(section => (
@@ -506,34 +577,22 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
 
   return (
     <Fragment>
-    <div ref={menuRef} className="context-menu context-menu-feishu" style={{ left: adjustedX, top: adjustedY }}>
+    <div
+      ref={menuRef}
+      className="context-menu context-menu-feishu"
+      style={{ left: adjustedX, top: adjustedY }}
+      onMouseEnter={() => clearHoverDismissTimer()}
+      onMouseLeave={handleShellMouseLeave}
+    >
       <div className="context-menu-section context-menu-section--grid">
-        <div className="context-block-types">
-          {ROW_1.map(item => {
+        <div className="context-block-types context-block-types--icon-grid">
+          {BLOCK_TYPE_ICON_GRID.map(item => {
             const active = isGridActive(editor, item);
             const Icon = item.Icon;
             const fill = gridIconFill(active, item.tint);
             return (
               <button
-                key={`r1-${item.value}`}
-                type="button"
-                className={`context-block-btn ${active ? 'active' : ''}`}
-                title={item.label}
-                onClick={() => handleGridClick(item)}
-              >
-                <Icon size={17} strokeWidth={1.65} fill={fill} />
-              </button>
-            );
-          })}
-        </div>
-        <div className="context-block-types">
-          {ROW_2.map(item => {
-            const active = isGridActive(editor, item);
-            const Icon = item.Icon;
-            const fill = gridIconFill(active, item.tint);
-            return (
-              <button
-                key={`r2-${item.value}`}
+                key={`grid-${item.type}-${item.value}`}
                 type="button"
                 className={`context-block-btn ${active ? 'active' : ''}`}
                 title={item.label}
@@ -553,6 +612,7 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
         className="context-menu-item has-submenu"
         onMouseEnter={() => {
           clearSubMenuCloseTimer();
+          clearHoverDismissTimer();
           setSubMenu('align');
         }}
         onMouseLeave={scheduleSubmenuClose}
@@ -571,6 +631,7 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
         className="context-menu-item has-submenu"
         onMouseEnter={() => {
           clearSubMenuCloseTimer();
+          clearHoverDismissTimer();
           setSubMenu('color');
         }}
         onMouseLeave={scheduleSubmenuClose}
@@ -651,6 +712,7 @@ export default function ContextMenu({ editor, x, y, onClose }: ContextMenuProps)
         className="context-menu-item has-submenu"
         onMouseEnter={() => {
           clearSubMenuCloseTimer();
+          clearHoverDismissTimer();
           setSubMenu('addBelow');
         }}
         onMouseLeave={scheduleSubmenuClose}

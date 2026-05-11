@@ -4,6 +4,9 @@ import {
   SlashGlyphHeading1,
   SlashGlyphHeading2,
   SlashGlyphHeading3,
+  SlashGlyphHeading4,
+  SlashGlyphHeading5,
+  SlashGlyphHeading6,
   SlashGlyphBulletList,
   SlashGlyphOrderedList,
   SlashGlyphTaskList,
@@ -112,6 +115,33 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
         },
       },
       {
+        Icon: SlashGlyphHeading4,
+        iconColor: '#646a73',
+        label: '四级标题',
+        matchText: 'H4 标题四',
+        action: e => {
+          e.chain().focus().deleteRange(getSlashRange(e)).setHeading({ level: 4 }).run();
+        },
+      },
+      {
+        Icon: SlashGlyphHeading5,
+        iconColor: '#646a73',
+        label: '五级标题',
+        matchText: 'H5 标题五',
+        action: e => {
+          e.chain().focus().deleteRange(getSlashRange(e)).setHeading({ level: 5 }).run();
+        },
+      },
+      {
+        Icon: SlashGlyphHeading6,
+        iconColor: '#646a73',
+        label: '六级标题',
+        matchText: 'H6 标题六',
+        action: e => {
+          e.chain().focus().deleteRange(getSlashRange(e)).setHeading({ level: 6 }).run();
+        },
+      },
+      {
         Icon: SlashGlyphOrderedList,
         iconColor: '#646a73',
         label: '有序列表',
@@ -144,7 +174,7 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
         label: '代码块',
         matchText: 'code',
         action: e => {
-          e.chain().focus().deleteRange(getSlashRange(e)).toggleCodeBlock().run();
+          e.chain().focus().deleteRange(getSlashRange(e)).setCodeBlock({ language: 'plaintext' }).run();
         },
       },
       {
@@ -233,6 +263,15 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
         label: '高亮块',
         action: e => {
           e.chain().focus().deleteRange(getSlashRange(e)).toggleHighlight({ color: '#fff7e6' }).run();
+        },
+      },
+      {
+        Icon: SlashGlyphCode,
+        iconColor: '#646a73',
+        label: '代码块',
+        matchText: 'code',
+        action: e => {
+          e.chain().focus().deleteRange(getSlashRange(e)).setCodeBlock({ language: 'plaintext' }).run();
         },
       },
       {

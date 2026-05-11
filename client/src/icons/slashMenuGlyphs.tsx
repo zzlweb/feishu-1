@@ -58,6 +58,55 @@ export const SlashGlyphHeading3: SlashIcon = ({ size = 18, fill = 'currentColor'
   </FsFill>
 );
 
+/** H4Outlined / H5Outlined：与飞书文档块菜单 SVG 一致（用户提供 DOM） */
+export const SlashGlyphHeading4: SlashIcon = ({ size = 18, fill = 'currentColor', className }) => (
+  <FsFill size={size} fill={fill} className={className}>
+    <path
+      d="M2 3a1 1 0 0 0-1 1v16a1 1 0 1 0 2 0v-7h9v7a1 1 0 1 0 2 0V4a1 1 0 1 0-2 0v7H3V4a1 1 0 0 0-1-1Zm19.681 7.19c0-.658-.486-1.19-1.143-1.19-.402 0-.824.204-1.043.542l-4.428 6.821a.266.266 0 0 0-.043.145v1.62c0 .22.18.4.4.4h4.404v1.363c0 .512.43.927.941.927a.914.914 0 0 0 .912-.927v-1.363h.4a.954.954 0 0 0 .943-.956.934.934 0 0 0-.944-.932h-.399v-6.45Zm-4.53 6.45 2.677-4.177v4.177H17.15Z"
+      fill={fill}
+    />
+  </FsFill>
+);
+
+export const SlashGlyphHeading5: SlashIcon = ({ size = 18, fill = 'currentColor', className }) => (
+  <FsFill size={size} fill={fill} className={className}>
+    <path
+      d="M2 3a1 1 0 0 0-1 1v16a1 1 0 1 0 2 0v-7h9v7a1 1 0 1 0 2 0V4a1 1 0 1 0-2 0v7H3V4a1 1 0 0 0-1-1Zm17.758 9.728a2.98 2.98 0 0 0-1.252.258c-.264.108-.509.26-.735.457l.21-2.395h3.422c.566 0 1.024-.475 1.024-1.04A1.01 1.01 0 0 0 21.403 9h-4.666a.4.4 0 0 0-.398.366l-.5 5.867a.4.4 0 0 0 .398.434l1.228.002c.116 0 .22-.069.278-.17.16-.275.36-.479.61-.622.258-.154.582-.23.975-.23.57 0 .986.19 1.262.574.301.403.46.973.46 1.69 0 .648-.18 1.163-.526 1.547a1.698 1.698 0 0 1-1.29.558c-.468 0-.841-.123-1.105-.351-.176-.154-.34-.508-.444-.858l-.004.001a.973.973 0 1 0-1.829.653c.218.65.557 1.251.992 1.64.657.595 1.458.899 2.377.899 1.004 0 1.874-.355 2.61-1.064.796-.795 1.19-1.807 1.19-3.04 0-1.266-.303-2.29-.903-3.037-.601-.75-1.397-1.131-2.36-1.131Z"
+      fill={fill}
+    />
+  </FsFill>
+);
+
+/** H6：左侧竖画与飞书一致；右侧为实心「6」字标（与其它标题同为填充风格，避免描边显得细） */
+const SLASH_HEADING_LEFT_BAR =
+  'M2 3a1 1 0 0 0-1 1v16a1 1 0 1 0 2 0v-7h9v7a1 1 0 1 0 2 0V4a1 1 0 1 0-2 0v7H3V4a1 1 0 0 0-1-1Z';
+
+export const SlashGlyphHeading6: SlashIcon = ({ size = 18, fill = 'currentColor', className }) => (
+  <FsFill size={size} fill={fill} className={className}>
+    <path d={SLASH_HEADING_LEFT_BAR} fill={fill} />
+    <text
+      x="17.85"
+      y="16.95"
+      dominantBaseline="central"
+      textAnchor="middle"
+      fontSize={11.75}
+      fontWeight={900}
+      fill={fill}
+      stroke={fill}
+      strokeWidth={0.55}
+      paintOrder="stroke fill"
+      strokeLinejoin="round"
+      strokeLinecap="round"
+      style={{
+        fontFamily:
+          'system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif',
+      }}
+    >
+      6
+    </text>
+  </FsFill>
+);
+
 export const SlashGlyphOrderedList: SlashIcon = ({ size = 18, fill = 'currentColor', className }) => (
   <FsFill size={size} fill={fill} className={className}>
     <path

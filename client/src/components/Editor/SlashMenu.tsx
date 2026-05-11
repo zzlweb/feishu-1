@@ -9,11 +9,14 @@ interface Props {
   position: { top: number; left: number };
   query: string;
   onClose: () => void;
+  onBeforeSelect?: () => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
   /** fixed：跟随输入 `/` 时的视口坐标；anchored：作为加号子元素，在触发器下方展开 */
   variant?: 'fixed' | 'anchored';
 }
 
-export default function SlashMenu({ editor, position, query, onClose, variant = 'fixed' }: Props) {
+export default function SlashMenu({ editor, position, query, onClose, onBeforeSelect, onMouseEnter, onMouseLeave, variant = 'fixed' }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -51,6 +54,7 @@ export default function SlashMenu({ editor, position, query, onClose, variant = 
         setActiveIdx(i => Math.max(i - 1, 0));
       } else if (e.key === 'Enter') {
         e.preventDefault();
+        onBeforeSelect?.();
         allItems[activeIdx]?.action(editor);
         onClose();
       } else if (e.key === 'Escape') {
@@ -59,7 +63,7 @@ export default function SlashMenu({ editor, position, query, onClose, variant = 
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [allItems, activeIdx, editor, onClose]);
+  }, [allItems, activeIdx, editor, onBeforeSelect, onClose]);
 
   if (allItems.length === 0) {
     return null;
@@ -75,6 +79,8 @@ export default function SlashMenu({ editor, position, query, onClose, variant = 
       className={`slash-menu slash-menu-feishu ${variant === 'anchored' ? 'slash-menu--anchored' : ''}`}
       ref={menuRef}
       style={variant === 'anchored' ? undefined : { top: position.top, left: position.left }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       {filteredSections.map(section => (
         <div
@@ -97,6 +103,7 @@ export default function SlashMenu({ editor, position, query, onClose, variant = 
                     onMouseEnter={() => setActiveIdx(idx)}
                     onMouseDown={e => {
                       e.preventDefault();
+                      onBeforeSelect?.();
                       item.action(editor);
                       onClose();
                     }}
@@ -123,6 +130,7 @@ export default function SlashMenu({ editor, position, query, onClose, variant = 
                   onMouseEnter={() => setActiveIdx(idx)}
                   onMouseDown={e => {
                     e.preventDefault();
+                    onBeforeSelect?.();
                     item.action(editor);
                     onClose();
                   }}
