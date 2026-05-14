@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import documentsRouter from './routes/documents';
+import uploadsRouter from './routes/uploads';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3005);
@@ -16,6 +17,7 @@ app.use('/static', express.static(path.resolve(__dirname, '..', 'public')));
 
 // Routes
 app.use('/api/documents', documentsRouter);
+app.use('/api/uploads', uploadsRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {

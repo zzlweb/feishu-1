@@ -43,11 +43,20 @@ export const saveAsTemplate = (id: string) =>
   request<Template>(`/documents/${id}/save-as-template`, { method: 'POST' });
 
 // Comments
-export const getComments = (docId: string) =>
-  request<Comment[]>(`/documents/${docId}/comments`);
+export const getComments = (docId: string, blockId?: string) =>
+  request<Comment[]>(`/documents/${docId}/comments${blockId ? `?block_id=${encodeURIComponent(blockId)}` : ''}`);
 
 export const addComment = (docId: string, data: Partial<Comment>) =>
   request<Comment>(`/documents/${docId}/comments`, {
     method: 'POST',
     body: JSON.stringify(data),
   });
+
+export const updateComment = (docId: string, commentId: string, data: Partial<Comment>) =>
+  request<Comment>(`/documents/${docId}/comments/${commentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+
+export const deleteComment = (docId: string, commentId: string) =>
+  request<void>(`/documents/${docId}/comments/${commentId}`, { method: 'DELETE' });

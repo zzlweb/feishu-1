@@ -8,6 +8,8 @@ import {
   deleteDocumentById,
   getCommentsByDocId,
   createCommentRecord,
+  updateCommentRecord,
+  deleteCommentRecord,
   getAllTemplates,
   createTemplateRecord,
 } from '../database';
@@ -126,7 +128,9 @@ router.post('/:id/to-child', (req: Request, res: Response) => {
 // GET /api/documents/:id/comments
 router.get('/:id/comments', (req: Request, res: Response) => {
   try {
-    const comments = getCommentsByDocId(req.params.id);
+    const blockId = typeof req.query.block_id === 'string' ? req.query.block_id : '';
+    const comments = getCommentsByDocId(req.params.id)
+      .filter(comment => !blockId || comment.block_id === blockId);
     res.json({ code: 0, data: comments });
   } catch (err: any) {
     res.status(500).json({ code: -1, message: err.message });
@@ -137,18 +141,59 @@ router.get('/:id/comments', (req: Request, res: Response) => {
 router.post('/:id/comments', (req: Request, res: Response) => {
   try {
     const id = uuidv4();
-    const { content, author = '张正亮', position_from, position_to } = req.body;
+    const { content, author = '张正亮', block_id = '', position_from = 0, position_to = 0 } = req.body;
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ code: -1, message: '评论内容不能为空' });
+    }
+    const now = new Date().toISOString();
     const comment = createCommentRecord({
       id,
       document_id: req.params.id,
-      content,
+      block_id,
+      content: content.trim(),
       author,
       position_from,
       position_to,
-      created_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
       resolved: 0,
     });
     res.status(201).json({ code: 0, data: comment });
+  } catch (err: any) {
+    res.status(500).json({ code: -1, message: err.message });
+  }
+});
+
+// PATCH /api/documents/:id/comments/:commentId
+router.patch('/:id/comments/:commentId', (req: Request, res: Response) => {
+  try {
+    const updates: any = {};
+    if (req.body.content !== undefined) {
+      const t = String(req.body.content).trim();
+      if (!t) {
+        return res.status(400).json({ code: -1, message: '评论内容不能为空' });
+      }
+      updates.content = t;
+    }
+    if (req.body.resolved !== undefined) updates.resolved = req.body.resolved ? 1 : 0;
+    const comment = updateCommentRecord(req.params.commentId, updates);
+    if (!comment || comment.document_id !== req.params.id) {
+      return res.status(404).json({ code: -1, message: '评论不存在' });
+    }
+    res.json({ code: 0, data: comment });
+  } catch (err: any) {
+    res.status(500).json({ code: -1, message: err.message });
+  }
+});
+
+// DELETE /api/documents/:id/comments/:commentId
+router.delete('/:id/comments/:commentId', (req: Request, res: Response) => {
+  try {
+    const ok = deleteCommentRecord(req.params.id, req.params.commentId);
+    if (!ok) {
+      return res.status(404).json({ code: -1, message: '评论不存在' });
+    }
+    res.json({ code: 0, message: '删除成功' });
   } catch (err: any) {
     res.status(500).json({ code: -1, message: err.message });
   }

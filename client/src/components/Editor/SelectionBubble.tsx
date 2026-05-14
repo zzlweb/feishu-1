@@ -6,17 +6,21 @@ import { isTextSelection } from '@tiptap/core';
 import type { EditorView } from '@tiptap/pm/view';
 import type { EditorState } from '@tiptap/pm/state';
 import FeishuColorPickerPanel from './FeishuColorPickerPanel';
-import { ContextGlyphText, ContextGlyphSynced, FEISHU_TOOLBOX } from '../../icons/contextMenuGlyphs';
+import { ContextGlyphText, FEISHU_TOOLBOX } from '../../icons/contextMenuGlyphs';
 import {
   SlashGlyphHeading1,
   SlashGlyphHeading2,
   SlashGlyphHeading3,
+  SlashGlyphHeading4,
+  SlashGlyphHeading5,
+  SlashGlyphHeading6,
   SlashGlyphOrderedList,
   SlashGlyphBulletList,
   SlashGlyphTaskList,
   SlashGlyphCode,
   SlashGlyphQuote,
   SlashGlyphHighlight,
+  SlashGlyphSyncMuted,
 } from '../../icons/slashMenuGlyphs';
 import {
   SelGlyphChevronDown,
@@ -32,12 +36,23 @@ import {
   SelGlyphShare,
   SelGlyphComment,
 } from '../../icons/selectionToolbarGlyphs';
+import { IndentRightIcon, IndentLeftIcon } from 'tdesign-icons-react';
+import { wrapIcon } from '../../icons/wrap';
+import {
+  getEditorIndentUiState,
+  applyEditorIndentIncrease,
+  applyEditorIndentDecrease,
+} from './blockIndent';
 import './SelectionBubble.less';
+import { openCommentSidebarForEditorSelection } from './commentBlockAnchor';
+
+const IndentRight = wrapIcon(IndentRightIcon);
+const IndentLeft = wrapIcon(IndentLeftIcon);
+const SUBMENU_ICON_STROKE = { strokeWidth: 2.75 as const };
 
 const GLYPH = 16;
 const GLYPH_SM = 10;
 const STYLE_ICON = 17;
-const CALLOUT_HIGHLIGHT = '#fff7e6';
 const ICON_MUTED = '#646a73';
 const PRIMARY = FEISHU_TOOLBOX.b500;
 const TINT_LIST = FEISHU_TOOLBOX.i500;
@@ -82,12 +97,14 @@ function StyleMenuRow({
 
 const ALIGN_OPTIONS: { key: 'left' | 'center' | 'right'; label: string }[] = [
   { key: 'left', label: '左对齐' },
-  { key: 'center', label: '居中' },
+  { key: 'center', label: '居中对齐' },
   { key: 'right', label: '右对齐' },
 ];
 
 interface SelectionBubbleProps {
   editor: Editor;
+  /** 与路由文档 id 一致，避免仅靠 editor.__documentId 时出现未挂载导致评论无响应 */
+  documentId: string;
 }
 
 function shouldShowBubble({
@@ -128,11 +145,6 @@ function copySelectedPlainText(editor: Editor) {
 
 /** 气泡「块类型」触发器：列表先于内层 paragraph，避免列表内仍显示正文图标 */
 function resolveBlockStyleTrigger(editor: Editor): { icon: ReactNode; label: string } {
-  const hiColor = editor.getAttributes('highlight').color as string | undefined;
-  const isHighlightCallout =
-    editor.isActive('highlight')
-    && (hiColor === CALLOUT_HIGHLIGHT || hiColor?.toUpperCase() === CALLOUT_HIGHLIGHT.toUpperCase());
-
   for (let i = 1; i <= 6; i++) {
     if (!editor.isActive('heading', { level: i })) continue;
     if (i === 1)
@@ -156,7 +168,7 @@ function resolveBlockStyleTrigger(editor: Editor): { icon: ReactNode; label: str
   if (editor.isActive('bulletList')) {
     return { icon: <SlashGlyphBulletList size={GLYPH} fill={PRIMARY} />, label: '无序列表' };
   }
-  if (isHighlightCallout) {
+  if (editor.isActive('highlightBlock')) {
     return { icon: <SlashGlyphHighlight size={GLYPH} fill={PRIMARY} />, label: '高亮块' };
   }
   if (editor.isActive('paragraph')) {
@@ -166,13 +178,14 @@ function resolveBlockStyleTrigger(editor: Editor): { icon: ReactNode; label: str
   return { icon: <ContextGlyphText size={GLYPH} fill={ICON_MUTED} />, label: '正文' };
 }
 
-export default function SelectionBubble({ editor }: SelectionBubbleProps) {
+export default function SelectionBubble({ editor, documentId }: SelectionBubbleProps) {
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   const [showHeadingMenu, setShowHeadingMenu] = useState(false);
   const [showAlignMenu, setShowAlignMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
   const [showLinkInput, setShowLinkInput] = useState(false);
+  const [linkText, setLinkText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
   const headingRef = useRef<HTMLDivElement>(null);
   const alignRef = useRef<HTMLDivElement>(null);
@@ -250,18 +263,30 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
     || editor.isActive('heading', { level: 6 });
 
   const setLink = () => {
-    if (linkUrl) {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: linkUrl }).run();
+    const href = linkUrl.trim();
+    const text = linkText.trim();
+    if (!href) return;
+    if (text) {
+      editor.chain().focus().deleteSelection().insertContent({
+        type: 'text',
+        text,
+        marks: [{ type: 'link', attrs: { href } }],
+      }).run();
     } else {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+      editor.chain().focus().extendMarkRange('link').setLink({ href }).run();
     }
     setShowLinkInput(false);
+    setLinkText('');
     setLinkUrl('');
   };
 
   const handleLinkClick = () => {
     const existingHref = editor.getAttributes('link').href as string | undefined;
+    const { from, to } = editor.state.selection;
+    const selectedText = editor.state.doc.textBetween(from, to, '\n');
+    setLinkText(selectedText);
     if (existingHref) setLinkUrl(existingHref);
+    else setLinkUrl('');
     setShowLinkInput(!showLinkInput);
     setTimeout(() => linkInputRef.current?.focus(), 50);
   };
@@ -270,6 +295,8 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
     (editor.getAttributes('paragraph').textAlign as string | undefined)
     ?? (editor.getAttributes('heading').textAlign as string | undefined)
     ?? 'left';
+
+  const indentUi = getEditorIndentUiState(editor);
 
   return (
     <BubbleMenu
@@ -382,7 +409,7 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
                     >
                       <StyleMenuRow
                         icon={
-                          <SlashGlyphHeading3
+                          <SlashGlyphHeading4
                             size={STYLE_ICON}
                             fill={editor.isActive('heading', { level: 4 }) ? PRIMARY : ICON_MUTED}
                           />
@@ -394,7 +421,7 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
                       />
                       <StyleMenuRow
                         icon={
-                          <SlashGlyphHeading3
+                          <SlashGlyphHeading5
                             size={STYLE_ICON}
                             fill={editor.isActive('heading', { level: 5 }) ? PRIMARY : ICON_MUTED}
                           />
@@ -406,7 +433,7 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
                       />
                       <StyleMenuRow
                         icon={
-                          <SlashGlyphHeading3
+                          <SlashGlyphHeading6
                             size={STYLE_ICON}
                             fill={editor.isActive('heading', { level: 6 }) ? PRIMARY : ICON_MUTED}
                           />
@@ -493,16 +520,19 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
                   }}
                 />
                 <StyleMenuRow
-                  icon={<SlashGlyphHighlight size={STYLE_ICON} fill={editor.isActive('highlight') ? PRIMARY : TINT_HI} />}
-                  active={editor.isActive('highlight')}
+                  icon={<SlashGlyphHighlight size={STYLE_ICON} fill={editor.isActive('highlightBlock') ? PRIMARY : TINT_HI} />}
+                  active={editor.isActive('highlightBlock')}
                   label="高亮块"
                   onClick={() => {
-                    editor.chain().focus().toggleHighlight({ color: CALLOUT_HIGHLIGHT }).run();
+                    editor.chain().focus().toggleWrap('highlightBlock', {
+                      bgColor: '#fff0d9',
+                      borderColor: '#ffb057',
+                    }).run();
                     closeHeadingStylePanel();
                   }}
                 />
                 <StyleMenuRow
-                  icon={<ContextGlyphSynced size={STYLE_ICON} fill={TINT_SYNC} />}
+                  icon={<SlashGlyphSyncMuted size={STYLE_ICON} fill={TINT_SYNC} />}
                   active={false}
                   label="同步块"
                   trailing={null}
@@ -543,6 +573,49 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
                     {a.label}
                   </button>
                 ))}
+                <div className="selection-bubble-menu-divider" aria-hidden />
+                <button
+                  type="button"
+                  className="selection-bubble-indent-row"
+                  disabled={!indentUi.canIncrease}
+                  title={!indentUi.canIncrease ? indentUi.increaseDisabledTitle : undefined}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => {
+                    if (!indentUi.canIncrease) return;
+                    applyEditorIndentIncrease(editor);
+                    setShowAlignMenu(false);
+                  }}
+                >
+                  <span className="selection-bubble-indent-row-icon" aria-hidden>
+                    <IndentRight
+                      {...SUBMENU_ICON_STROKE}
+                      size={16}
+                      fill={!indentUi.canIncrease ? '#c5c9ce' : ICON_MUTED}
+                    />
+                  </span>
+                  <span className="selection-bubble-indent-row-label">增加缩进</span>
+                </button>
+                <button
+                  type="button"
+                  className="selection-bubble-indent-row"
+                  disabled={!indentUi.canDecrease}
+                  title={!indentUi.canDecrease ? indentUi.decreaseDisabledTitle : undefined}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => {
+                    if (!indentUi.canDecrease) return;
+                    applyEditorIndentDecrease(editor);
+                    setShowAlignMenu(false);
+                  }}
+                >
+                  <span className="selection-bubble-indent-row-icon" aria-hidden>
+                    <IndentLeft
+                      {...SUBMENU_ICON_STROKE}
+                      size={16}
+                      fill={!indentUi.canDecrease ? '#c5c9ce' : ICON_MUTED}
+                    />
+                  </span>
+                  <span className="selection-bubble-indent-row-label">减少缩进</span>
+                </button>
               </div>
             )}
           </div>
@@ -598,21 +671,50 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
             </button>
             {showLinkInput && (
               <div className="selection-bubble-link-pop">
-                <input
-                  ref={linkInputRef}
-                  type="url"
-                  placeholder="链接地址"
-                  value={linkUrl}
-                  onChange={e => setLinkUrl(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') setLink();
-                    if (e.key === 'Escape') {
-                      setShowLinkInput(false);
-                      setLinkUrl('');
-                    }
-                  }}
-                />
-                <button type="button" className="selection-bubble-link-ok" onMouseDown={e => e.preventDefault()} onClick={setLink}>
+                <div className="selection-bubble-link-form">
+                  <label className="selection-bubble-link-row">
+                    <span className="selection-bubble-link-label">文本</span>
+                    <input
+                      ref={linkInputRef}
+                      type="text"
+                      placeholder="输入文本"
+                      value={linkText}
+                      onChange={e => setLinkText(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') setLink();
+                        if (e.key === 'Escape') {
+                          setShowLinkInput(false);
+                          setLinkText('');
+                          setLinkUrl('');
+                        }
+                      }}
+                    />
+                  </label>
+                  <label className="selection-bubble-link-row">
+                    <span className="selection-bubble-link-label">链接</span>
+                    <input
+                      type="url"
+                      placeholder="粘贴或输入链接"
+                      value={linkUrl}
+                      onChange={e => setLinkUrl(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') setLink();
+                        if (e.key === 'Escape') {
+                          setShowLinkInput(false);
+                          setLinkText('');
+                          setLinkUrl('');
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  className="selection-bubble-link-ok"
+                  disabled={!linkUrl.trim()}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={setLink}
+                >
                   确定
                 </button>
               </div>
@@ -693,10 +795,11 @@ export default function SelectionBubble({ editor }: SelectionBubbleProps) {
           <button
             type="button"
             className="selection-bubble-btn selection-bubble-btn--icon-quiet"
-            onMouseDown={e => e.preventDefault()}
-            onClick={() => {}}
-            title="评论（即将支持）"
-            disabled
+            onMouseDown={e => {
+              e.preventDefault();
+              openCommentSidebarForEditorSelection(editor, documentId);
+            }}
+            title="评论"
           >
             <SelGlyphComment size={GLYPH} />
           </button>

@@ -14,11 +14,13 @@ export interface Document {
 export interface Comment {
   id: string;
   document_id: string;
+  block_id: string;
   content: string;
   author: string;
   position_from: number;
   position_to: number;
   created_at: string;
+  updated_at: string;
   resolved: number;
 }
 

@@ -1,4 +1,5 @@
-import { useEditor, EditorContent, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
+import { useEditor, EditorContent, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type Editor as TipTapEditor, type NodeViewProps } from '@tiptap/react';
+import { Extension, Node as TiptapNode } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -10,9 +11,11 @@ import TextStyle from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import Image from '@tiptap/extension-image';
+import HorizontalRule from '@tiptap/extension-horizontal-rule';
 import { TextSelection } from '@tiptap/pm/state';
 import { common, createLowlight } from 'lowlight';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ContextMenu from './ContextMenu';
 import SlashMenu from './SlashMenu';
 import SelectionBubble from './SelectionBubble';
@@ -22,6 +25,9 @@ import { wrapIcon } from '../../icons/wrap';
 import { IconAddOutlined, IconDragOutlined } from '../../icons/feishuDoc';
 import BlockGutterGlyph from './BlockGutterGlyph';
 import EmojiPicker from './EmojiPicker';
+import { HighlightBlock } from './HighlightBlock';
+import { BlockIndent } from './blockIndent';
+import { scrollToBlockFromHash } from './blockLink';
 import './Editor.less';
 
 const Notebook = wrapIcon(BookOpenIcon);
@@ -29,7 +35,77 @@ const Help = wrapIcon(HelpCircleIcon);
 
 const lowlight = createLowlight(common);
 
+/** 为段落/标题等块挂稳定 id，便于评论锚点写入 HTML 并可滚动定位。 */
+const CommentAnchorAttributes = Extension.create({
+  name: 'commentAnchorAttributes',
+  addGlobalAttributes() {
+    return [
+      {
+        types: ['paragraph', 'heading'],
+        attributes: {
+          blockId: {
+            default: null,
+            parseHTML: element =>
+              element.getAttribute('data-block-id') || element.getAttribute('id'),
+            renderHTML: (attributes: { blockId?: string | null }) =>
+              attributes.blockId
+                ? { id: attributes.blockId, 'data-block-id': attributes.blockId }
+                : {},
+          },
+        },
+      },
+    ];
+  },
+});
+
 const normalizeTitle = (value: string) => value === '未命名文档' ? '' : value;
+
+function normalizeLinkHref(raw: string): string {
+  const t = raw.trim();
+  if (!t) return '';
+  if (/^(https?:|mailto:|tel:)/i.test(t)) return t;
+  if (t.startsWith('//')) return `https:${t}`;
+  if (t.startsWith('/') || t.startsWith('#')) return t;
+  return `https://${t}`;
+}
+
+function computePageLinkPopPosition(editor: TipTapEditor): { top: number; left: number } {
+  const gap = 8;
+  const pad = 8;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 800;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 600;
+  const approxPopW = Math.min(452, vw - 24);
+  const approxPopH = 200;
+
+  let coords: { top: number; bottom: number; left: number };
+  try {
+    coords = editor.view.coordsAtPos(editor.state.selection.head);
+  } catch {
+    return { top: pad, left: pad };
+  }
+
+  let top = coords.bottom + gap;
+  if (top + approxPopH > vh - pad) {
+    top = coords.top - approxPopH - gap;
+  }
+  if (top < pad) top = pad;
+
+  let left = coords.left;
+  left = Math.max(pad, Math.min(left, vw - pad - approxPopW));
+  return { top, left };
+}
+
+const FeishuLink = Link.extend({
+  addKeyboardShortcuts() {
+    return {
+      'Mod-k': () => {
+        if (!this.editor.isEditable) return false;
+        window.dispatchEvent(new CustomEvent('feishu-open-page-link-dialog'));
+        return true;
+      },
+    };
+  },
+});
 
 const CODE_BLOCK_LANGUAGES = [
   { label: 'Plain Text', value: 'plaintext' },
@@ -44,6 +120,160 @@ const CODE_BLOCK_LANGUAGES = [
   { label: 'SQL', value: 'sql' },
 ];
 
+// ── Divider NodeView ──────────────────────────────────────────────────────────
+function FeishuDividerView({ selected, getPos, editor }: NodeViewProps) {
+  const handleClick = () => {
+    if (typeof getPos === 'function') {
+      const pos = getPos();
+      (editor as any).commands.setNodeSelection(pos);
+    }
+  };
+  return (
+    <NodeViewWrapper
+      as="div"
+      className={`feishu-divider${selected ? ' feishu-divider--selected' : ''}`}
+      contentEditable={false}
+      onClick={handleClick}
+    >
+      <div className="feishu-divider__line" />
+    </NodeViewWrapper>
+  );
+}
+
+/** 使用官方 HorizontalRule（含 Markdown `---`/输入规则、`canInsertNode` 与安全插入光标逻辑），编辑器内用 NodeView 飞书样式替换 `<hr>` 展示 */
+const FeishuHorizontalRule = HorizontalRule.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(FeishuDividerView);
+  },
+});
+
+const LocalFileBlock = TiptapNode.create({
+  name: 'localFileBlock',
+  group: 'block',
+  atom: true,
+  addAttributes() {
+    return { name: { default: '视频或文件' }, url: { default: '' }, size: { default: 0 }, mime: { default: '' } };
+  },
+  parseHTML() {
+    return [{ tag: 'div[data-local-block="file"]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    const size = Number(HTMLAttributes.size || 0);
+    const sizeText = size > 0 ? `${(size / 1024 / 1024).toFixed(2)} MB` : '文件';
+    const mime = String(HTMLAttributes.mime || '');
+    const isVideo = mime.startsWith('video/');
+    const isAudio = mime.startsWith('audio/');
+    const preview = HTMLAttributes.url && isVideo
+      ? ['video', { class: 'feishu-file-preview', src: HTMLAttributes.url, controls: 'true', preload: 'metadata' }]
+      : HTMLAttributes.url && isAudio
+        ? ['audio', { class: 'feishu-file-preview feishu-file-preview--audio', src: HTMLAttributes.url, controls: 'true', preload: 'metadata' }]
+        : null;
+    const card = ['div', { class: `feishu-local-card feishu-local-card--file${preview ? ' feishu-local-card--media' : ''}` }, ['div', { class: 'feishu-local-card__icon' }, isVideo ? '▶' : isAudio ? '♪' : '🔗'], ['div', { class: 'feishu-local-card__body' }, ['div', { class: 'feishu-local-card__title' }, HTMLAttributes.name || '视频或文件'], ['div', { class: 'feishu-local-card__desc' }, sizeText]], HTMLAttributes.url ? ['a', { class: 'feishu-local-card__action', href: HTMLAttributes.url, download: HTMLAttributes.name || 'file' }, '下载'] : ['span', { class: 'feishu-local-card__action' }, '文件']];
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'file', class: 'feishu-file-block' }, ...(preview ? [preview] : []), card];
+  },
+});
+
+const LocalColumnsBlock = TiptapNode.create({
+  name: 'localColumnsBlock',
+  group: 'block',
+  atom: true,
+  parseHTML() {
+    return [{ tag: 'div[data-local-block="columns"]' }];
+  },
+  renderHTML() {
+    return ['div', { 'data-local-block': 'columns', class: 'feishu-columns-block' }, ['div', { class: 'feishu-columns-block__col' }, '分栏内容'], ['div', { class: 'feishu-columns-block__col' }, '分栏内容']];
+  },
+});
+
+const LocalDivTableBlock = TiptapNode.create({
+  name: 'localDivTableBlock',
+  group: 'block',
+  atom: true,
+  addAttributes() {
+    return { rows: { default: 3 }, cols: { default: 3 }, header: { default: false } };
+  },
+  parseHTML() {
+    return [{ tag: 'div[data-local-block="div-table"]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    const rows = Math.max(1, Number(HTMLAttributes.rows || 3));
+    const cols = Math.max(1, Number(HTMLAttributes.cols || 3));
+    const hasHeader = HTMLAttributes.header === true || HTMLAttributes.header === 'true';
+    const tableRows = Array.from({ length: rows }, (_, rowIndex) => [
+      'div',
+      { class: 'feishu-div-table__row' },
+      ...Array.from({ length: cols }, (_, colIndex) => [
+        'div',
+        { class: `feishu-div-table__cell${hasHeader && rowIndex === 0 ? ' feishu-div-table__cell--header' : ''}${colIndex === cols - 1 ? ' feishu-div-table__cell--last-col' : ''}${rowIndex === rows - 1 ? ' feishu-div-table__cell--last-row' : ''}` },
+        ['span', { class: 'feishu-div-table__placeholder' }, ''],
+      ]),
+    ]);
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'div-table', class: 'feishu-div-table', style: `--feishu-table-cols:${cols}` }, ...tableRows];
+  },
+});
+
+const LocalSyncBlock = TiptapNode.create({
+  name: 'localSyncBlock',
+  group: 'block',
+  content: 'block+',
+  parseHTML() {
+    return [{ tag: 'div[data-local-block="sync"]' }];
+  },
+  renderHTML() {
+    return ['div', { 'data-local-block': 'sync', class: 'feishu-sync-block' }, ['div', { class: 'feishu-sync-block__label' }, '同步块'], ['div', { class: 'feishu-sync-block__content' }, 0]];
+  },
+});
+
+const LocalButtonBlock = TiptapNode.create({
+  name: 'localButtonBlock',
+  group: 'block',
+  atom: true,
+  addAttributes() {
+    return { text: { default: '按钮' } };
+  },
+  parseHTML() {
+    return [{ tag: 'button[data-local-block="button"]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['button', { ...HTMLAttributes, type: 'button', 'data-local-block': 'button', class: 'feishu-action-button' }, HTMLAttributes.text || '按钮'];
+  },
+});
+
+const LocalFormulaBlock = TiptapNode.create({
+  name: 'localFormulaBlock',
+  group: 'block',
+  atom: true,
+  addAttributes() {
+    return { formula: { default: 'E = mc²' } };
+  },
+  parseHTML() {
+    return [{ tag: 'div[data-local-block="formula"]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'formula', class: 'feishu-formula-block' }, HTMLAttributes.formula || 'E = mc²'];
+  },
+});
+
+const LocalEmbedBlock = TiptapNode.create({
+  name: 'localEmbedBlock',
+  group: 'block',
+  atom: true,
+  addAttributes() {
+    return { title: { default: '内容块' }, desc: { default: '' }, kind: { default: 'embed' }, href: { default: '' } };
+  },
+  parseHTML() {
+    return [{ tag: 'div[data-local-block="embed"]' }, { tag: 'a[data-local-block="embed"]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    const content = [['div', { class: 'feishu-local-card__icon' }, '＋'], ['div', { class: 'feishu-local-card__body' }, ['div', { class: 'feishu-local-card__title' }, HTMLAttributes.title || '内容块'], ['div', { class: 'feishu-local-card__desc' }, HTMLAttributes.desc || '']]];
+    if (HTMLAttributes.href) {
+      return ['a', { ...HTMLAttributes, href: HTMLAttributes.href, 'data-local-block': 'embed', class: `feishu-local-card feishu-local-card--link feishu-local-card--${HTMLAttributes.kind || 'embed'}` }, ...content];
+    }
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'embed', class: `feishu-local-card feishu-local-card--${HTMLAttributes.kind || 'embed'}` }, ...content];
+  },
+});
+
+// ── Code Block NodeView ───────────────────────────────────────────────────────
 function FeishuCodeBlockView({ node, updateAttributes }: any) {
   const [wrap, setWrap] = useState(false);
   const language = node.attrs.language || 'plaintext';
@@ -88,11 +318,24 @@ const FeishuCodeBlock = CodeBlockLowlight.extend({
 
 /** 从当前选区解析光标所在的块级 DOM（仅悬停「+」时用于行背景） */
 function getBlockDomFromEditor(editorInstance: {
-  view: { dom: HTMLElement; domAtPos: (pos: number) => { node: Node; offset: number } };
+  view: { dom: HTMLElement; domAtPos: (pos: number) => { node: Node; offset: number }; nodeDOM?: (pos: number) => Node | null | undefined };
   state: { selection: { from: number } };
 }): HTMLElement | null {
   const root = editorInstance.view.dom as HTMLElement;
   const from = editorInstance.state.selection.from;
+
+  // For NodeSelection (atom nodes like divider), domAtPos may point to the root.
+  // Use nodeDOM to directly get the NodeView DOM element.
+  try {
+    const nodeEl = editorInstance.view.nodeDOM?.(from);
+    if (nodeEl instanceof Element && root.contains(nodeEl)) {
+      const divider = (nodeEl as HTMLElement).classList?.contains('feishu-divider')
+        ? (nodeEl as HTMLElement)
+        : (nodeEl.querySelector?.('.feishu-divider') as HTMLElement | null);
+      if (divider) return divider;
+    }
+  } catch { /* ignore */ }
+
   const domAt = editorInstance.view.domAtPos(from);
   let n: Node | null = domAt.node;
   if (n.nodeType === Node.TEXT_NODE) n = (n as Text).parentElement;
@@ -100,6 +343,10 @@ function getBlockDomFromEditor(editorInstance: {
   while (el && el !== root) {
     const feishuCodeBlock = el.closest?.('.feishu-code-block') as HTMLElement | null;
     if (feishuCodeBlock && root.contains(feishuCodeBlock)) return feishuCodeBlock;
+    const highlightBlock = el.closest?.('.feishu-highlight-block') as HTMLElement | null;
+    if (highlightBlock && root.contains(highlightBlock)) return highlightBlock;
+    const dividerWrapper = el.closest?.('.feishu-divider') as HTMLElement | null;
+    if (dividerWrapper && root.contains(dividerWrapper)) return dividerWrapper;
     const tag = el.tagName?.toLowerCase() ?? '';
     if (/^(p|h[1-6]|blockquote|pre|hr)$/.test(tag)) return el;
     if (tag === 'li') return el;
@@ -179,6 +426,7 @@ function getBlockToolsAnchorTop(
     const tr = toolbar?.getBoundingClientRect();
     if (tr) return tr.top + tr.height / 2 - areaRectTop;
   }
+  // For .feishu-divider, center vertically within the wrapper
   return rr.top + rr.height / 2 - areaRectTop;
 }
 
@@ -228,6 +476,7 @@ function computePlusMenuPosition(anchor: DOMRect, menuW = 230, menuH = 560, pad 
 const DEFAULT_COVER_URL = '/static/01.gif';
 
 interface EditorProps {
+  documentId: string;
   content: string;
   title: string;
   author: string;
@@ -244,6 +493,10 @@ interface EditorProps {
   /** 侧栏目录高亮：文档标题焦点、正文光标所在章节 */
   onCatalogueActiveIdChange?: (id: string | null) => void;
   readOnly?: boolean;
+  /** 当前折叠的标题 id 集合 */
+  collapsedHeadingIds?: Set<string>;
+  /** 切换标题折叠 */
+  onToggleHeadingCollapse?: (headingId: string) => void;
 }
 
 function formatModifiedTime(iso?: string): string {
@@ -261,6 +514,7 @@ function formatModifiedTime(iso?: string): string {
 }
 
 export default function Editor({
+  documentId,
   content,
   title,
   author,
@@ -272,6 +526,8 @@ export default function Editor({
   onHeadingsChange,
   onCatalogueActiveIdChange,
   readOnly = false,
+  collapsedHeadingIds,
+  onToggleHeadingCollapse,
 }: EditorProps) {
   const [docTitle, setDocTitle] = useState(normalizeTitle(title));
   const [docIcon, setDocIcon] = useState(icon || '');
@@ -285,12 +541,19 @@ export default function Editor({
   const [slashQuery, setSlashQuery] = useState('');
   /** 面板是否由段落旁「+」悬停/点击打开（与输入 `/` 打开的菜单分流，便于嵌套在同一 hover 容器内） */
   const [slashMenuFromPlus, setSlashMenuFromPlus] = useState(false);
+  const [pageLinkDialogVisible, setPageLinkDialogVisible] = useState(false);
+  const [pageLinkPopPos, setPageLinkPopPos] = useState({ top: 0, left: 0 });
+  const [pageLinkText, setPageLinkText] = useState('');
+  const [pageLinkUrl, setPageLinkUrl] = useState('');
   const [blockTools, setBlockTools] = useState({ visible: false, top: 0, type: 'paragraph', isEmpty: true });
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const plusMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contextMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const blockAddButtonRef = useRef<HTMLButtonElement>(null);
   const blockDragRowRef = useRef<HTMLButtonElement>(null);
+  /** 「在下方添加」打开链接弹窗时在 confirm 用 insertContentAt */
+  const pageLinkInsertPosRef = useRef<number | null>(null);
   const menuClosedAtRef = useRef<number>(0);
   /** 当前块工具对应的块 DOM */
   const activeBlockElRef = useRef<HTMLElement | null>(null);
@@ -298,6 +561,71 @@ export default function Editor({
   const catalogueActiveCbRef = useRef<EditorProps['onCatalogueActiveIdChange']>(undefined);
   const editorRefForCatalogue = useRef<any>(null);
   catalogueActiveCbRef.current = onCatalogueActiveIdChange;
+
+  /** 检测当前块是否为有子内容的标题（在它与下一个同级/更高级别标题之间有其他块） */
+  const headingHasChildren = useCallback((blockEl: HTMLElement | null): boolean => {
+    if (!blockEl) return false;
+    const tag = blockEl.tagName.toLowerCase();
+    const m = /^h([1-6])$/.exec(tag);
+    if (!m) return false;
+    const level = Number(m[1]);
+    let sibling = blockEl.nextElementSibling as HTMLElement | null;
+    while (sibling) {
+      const sibTag = sibling.tagName.toLowerCase();
+      const sibMatch = /^h([1-6])$/.exec(sibTag);
+      if (sibMatch && Number(sibMatch[1]) <= level) return false; // same or higher level heading found first
+      // any non-empty content node counts as a child
+      if (sibling.textContent?.trim() || sibling.querySelector('img, hr, pre, table, [data-local-block]')) {
+        return true;
+      }
+      sibling = sibling.nextElementSibling as HTMLElement | null;
+    }
+    return false;
+  }, []);
+
+  /** 切换标题折叠状态 */
+  const toggleHeadingCollapse = useCallback(() => {
+    const blockEl = activeBlockElRef.current;
+    if (!blockEl || !onToggleHeadingCollapse) return;
+    const tag = blockEl.tagName.toLowerCase();
+    const m = /^h([1-6])$/.exec(tag);
+    if (!m) return;
+    const level = Number(m[1]);
+    const headingId = blockEl.id || `heading-fold-${blockEl.textContent?.trim()}`;
+    if (!blockEl.id) blockEl.id = headingId;
+
+    const isCurrentlyCollapsed = collapsedHeadingIds?.has(headingId);
+    if (isCurrentlyCollapsed) {
+      // show siblings
+      let sib = blockEl.nextElementSibling as HTMLElement | null;
+      while (sib) {
+        const sibTag = sib.tagName.toLowerCase();
+        const sibMatch = /^h([1-6])$/.exec(sibTag);
+        if (sibMatch && Number(sibMatch[1]) <= level) break;
+        sib.style.display = '';
+        sib.classList.remove('heading-collapsed-child');
+        sib = sib.nextElementSibling as HTMLElement | null;
+      }
+      blockEl.classList.remove('heading-collapsed');
+    } else {
+      // hide siblings
+      let sib = blockEl.nextElementSibling as HTMLElement | null;
+      while (sib) {
+        const sibTag = sib.tagName.toLowerCase();
+        const sibMatch = /^h([1-6])$/.exec(sibTag);
+        if (sibMatch && Number(sibMatch[1]) <= level) break;
+        sib.style.display = 'none';
+        sib.classList.add('heading-collapsed-child');
+        sib = sib.nextElementSibling as HTMLElement | null;
+      }
+      blockEl.classList.add('heading-collapsed');
+    }
+    onToggleHeadingCollapse(headingId);
+  }, [collapsedHeadingIds, onToggleHeadingCollapse]);
+
+  const isCurrentBlockHeading = /^h[1-6]$/.test(blockTools.type);
+  const currentBlockHasChildren = isCurrentBlockHeading && headingHasChildren(activeBlockElRef.current);
+  const isCurrentBlockCollapsed = isCurrentBlockHeading && activeBlockElRef.current ? (collapsedHeadingIds?.has(activeBlockElRef.current.id || '') ?? false) : false;
 
   const closeSlashMenu = useCallback(() => {
     if (plusMenuCloseTimerRef.current) {
@@ -323,6 +651,13 @@ export default function Editor({
       closeSlashMenu();
     }, 250);
   }, [cancelPlusMenuClose, closeSlashMenu]);
+
+  const cancelContextMenuClose = useCallback(() => {
+    if (contextMenuCloseTimerRef.current) {
+      clearTimeout(contextMenuCloseTimerRef.current);
+      contextMenuCloseTimerRef.current = null;
+    }
+  }, []);
 
   const handleCatalogueTitleFocus = useCallback(() => {
     const cb = catalogueActiveCbRef.current;
@@ -352,7 +687,15 @@ export default function Editor({
     if (codeBlockWrapper && editorAreaRef.current.contains(codeBlockWrapper)) {
       return { element: codeBlockWrapper, type: 'codeBlock', isEmpty: false };
     }
-    const block = target.closest('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,hr') as HTMLElement | null;
+    const highlightBlockWrapper = target.closest('.feishu-highlight-block') as HTMLElement | null;
+    if (highlightBlockWrapper && editorAreaRef.current.contains(highlightBlockWrapper)) {
+      return { element: highlightBlockWrapper, type: 'highlightBlock', isEmpty: false };
+    }
+    const dividerWrapper = target.closest('.feishu-divider') as HTMLElement | null;
+    if (dividerWrapper && editorAreaRef.current.contains(dividerWrapper)) {
+      return { element: dividerWrapper, type: 'hr', isEmpty: false };
+    }
+    const block = target.closest('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre') as HTMLElement | null;
     if (!block || !editorAreaRef.current.contains(block)) return null;
 
     let type = 'paragraph';
@@ -364,7 +707,6 @@ export default function Editor({
       else type = 'bulletList';
     } else if (tag === 'blockquote') type = 'blockquote';
     else if (tag === 'pre') type = 'codeBlock';
-    else if (tag === 'hr') type = 'hr';
 
     const isEmpty = block.textContent?.trim() === '' && tag === 'p';
     return { element: block, type, isEmpty };
@@ -379,6 +721,8 @@ export default function Editor({
     if (editorInstance.isActive('bulletList')) return 'bulletList';
     if (editorInstance.isActive('blockquote')) return 'blockquote';
     if (editorInstance.isActive('codeBlock')) return 'codeBlock';
+    if (editorInstance.isActive('highlightBlock')) return 'highlightBlock';
+    if (editorInstance.isActive('horizontalRule')) return 'hr';
     return 'paragraph';
   }, []);
 
@@ -456,15 +800,30 @@ export default function Editor({
       StarterKit.configure({
         heading: { levels: [1, 2, 3, 4, 5, 6] },
         codeBlock: false,
+        horizontalRule: false,
       }),
+      CommentAnchorAttributes,
+      FeishuHorizontalRule,
       FeishuCodeBlock.configure({ lowlight }),
       Underline,
-      Link.configure({
+      FeishuLink.configure({
         openOnClick: false,
         HTMLAttributes: { class: 'editor-link' },
       }),
       TaskList,
       TaskItem.configure({ nested: true }),
+      Image.configure({
+        inline: false,
+        allowBase64: true,
+        HTMLAttributes: { class: 'feishu-image' },
+      }),
+      LocalFileBlock,
+      LocalColumnsBlock,
+      LocalDivTableBlock,
+      LocalSyncBlock,
+      LocalButtonBlock,
+      LocalFormulaBlock,
+      LocalEmbedBlock,
       Placeholder.configure({
         includeChildren: false,
         showOnlyCurrent: false,
@@ -479,11 +838,13 @@ export default function Editor({
       TextAlign.configure({
         types: ['heading', 'paragraph'],
       }),
+      BlockIndent,
       TextStyle,
       Color,
       Highlight.configure({
         multicolor: true,
       }),
+      HighlightBlock,
     ],
     content: content || '<p></p>',
     editable: !readOnly,
@@ -649,10 +1010,40 @@ export default function Editor({
   }, [content, editor, extractHeadings]);
 
   useEffect(() => {
-    const n = normalizeTitle(title);
-    setDocTitle(n);
-    onTitleInputChange?.(n);
-  }, [title, onTitleInputChange]);
+    if (!editor) return;
+    const scroll = () => {
+      window.requestAnimationFrame(() => {
+        scrollToBlockFromHash();
+      });
+    };
+    scroll();
+    window.addEventListener('hashchange', scroll);
+    return () => window.removeEventListener('hashchange', scroll);
+  }, [content, editor]);
+
+  useLayoutEffect(() => {
+    if (editor) (editor as any).__documentId = documentId;
+  }, [documentId, editor]);
+
+  useEffect(() => {
+    const openPageLinkDialog = (ev: Event) => {
+      if (!editor || readOnly) return;
+      closeSlashMenu();
+      const insertAt = (ev as CustomEvent<{ insertAt?: number }>).detail?.insertAt;
+      pageLinkInsertPosRef.current = typeof insertAt === 'number' ? insertAt : null;
+      const { from, to } = editor.state.selection;
+      setPageLinkText(editor.state.doc.textBetween(from, to, '\n'));
+      setPageLinkUrl('');
+      setPageLinkPopPos(computePageLinkPopPosition(editor));
+      setPageLinkDialogVisible(true);
+    };
+    window.addEventListener('feishu-open-page-link-dialog', openPageLinkDialog as EventListener);
+    return () => window.removeEventListener('feishu-open-page-link-dialog', openPageLinkDialog as EventListener);
+  }, [closeSlashMenu, editor, readOnly]);
+
+  useEffect(() => {
+    setDocTitle(normalizeTitle(title));
+  }, [title]);
 
   useEffect(() => {
     setDocIcon(icon || '');
@@ -661,18 +1052,6 @@ export default function Editor({
   useEffect(() => {
     setDocCover(coverUrl || '');
   }, [coverUrl]);
-
-  const handleIconSelect = useCallback((emoji: string) => {
-    setDocIcon(emoji);
-    setShowEmojiPicker(false);
-    onSave({ icon: emoji });
-  }, [onSave]);
-
-  const handleIconRemove = useCallback(() => {
-    setDocIcon('');
-    setShowEmojiPicker(false);
-    onSave({ icon: '' });
-  }, [onSave]);
 
   const handleAddCover = useCallback(() => {
     setDocCover(DEFAULT_COVER_URL);
@@ -683,6 +1062,74 @@ export default function Editor({
     setDocCover('');
     onSave({ cover_url: '' });
   }, [onSave]);
+
+  const handleIconSelect = useCallback((emoji: string) => {
+    setDocIcon(emoji);
+    setShowEmojiPicker(false);
+    setTitleHovered(false);
+    onSave({ icon: emoji });
+  }, [onSave]);
+
+  const handleIconRemove = useCallback(() => {
+    setDocIcon('');
+    setShowEmojiPicker(false);
+    setTitleHovered(false);
+    onSave({ icon: '' });
+  }, [onSave]);
+
+  const closePageLinkDialog = useCallback(() => {
+    setPageLinkDialogVisible(false);
+    setPageLinkText('');
+    setPageLinkUrl('');
+    pageLinkInsertPosRef.current = null;
+  }, []);
+
+  const confirmPageLink = useCallback(() => {
+    if (!editor) return;
+    const href = normalizeLinkHref(pageLinkUrl);
+    const text = pageLinkText.trim() || href;
+    if (!href) return;
+    const markContent = { type: 'text', text, marks: [{ type: 'link', attrs: { href } }] };
+    const insertPos = pageLinkInsertPosRef.current;
+    if (insertPos != null) {
+      editor.chain().focus().insertContentAt(insertPos, { type: 'paragraph', content: [markContent] }).run();
+      pageLinkInsertPosRef.current = null;
+    } else {
+      editor.chain().focus().insertContent(markContent).run();
+    }
+    closePageLinkDialog();
+  }, [closePageLinkDialog, editor, pageLinkText, pageLinkUrl]);
+
+  useEffect(() => {
+    if (!pageLinkDialogVisible || !editor) return;
+    const reposition = () => setPageLinkPopPos(computePageLinkPopPosition(editor));
+    reposition();
+    window.addEventListener('resize', reposition);
+    document.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      document.removeEventListener('scroll', reposition, true);
+    };
+  }, [editor, pageLinkDialogVisible]);
+
+  useEffect(() => {
+    if (!pageLinkDialogVisible) return;
+    let removed: (() => void) | null = null;
+    const timer = window.setTimeout(() => {
+      const handleOutside = (e: MouseEvent) => {
+        const target = e.target as Element | null;
+        if (target?.closest('.editor-page-link-pop')) return;
+        if (target?.closest('.slash-menu')) return;
+        closePageLinkDialog();
+      };
+      document.addEventListener('mousedown', handleOutside);
+      removed = () => document.removeEventListener('mousedown', handleOutside);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      removed?.();
+    };
+  }, [closePageLinkDialog, pageLinkDialogVisible]);
 
   useEffect(() => {
     if (editor) {
@@ -750,6 +1197,7 @@ export default function Editor({
 
   /** 指针离开面板关闭菜单时，若未悬停在正文区则一并收起块柄 */
   const dismissContextMenuFromHover = useCallback(() => {
+    cancelContextMenuClose();
     setContextMenu(null);
     menuClosedAtRef.current = Date.now();
     window.requestAnimationFrame(() => {
@@ -758,13 +1206,32 @@ export default function Editor({
       setPlusHovered(false);
       setBlockTools(prev => ({ ...prev, visible: false }));
     });
-  }, []);
+  }, [cancelContextMenuClose]);
+
+  const scheduleContextMenuClose = useCallback(() => {
+    cancelContextMenuClose();
+    contextMenuCloseTimerRef.current = window.setTimeout(() => {
+      contextMenuCloseTimerRef.current = null;
+      dismissContextMenuFromHover();
+    }, 200);
+  }, [cancelContextMenuClose, dismissContextMenuFromHover]);
 
   const openBlockConfigMenu = () => {
     if (slashMenuVisible && slashMenuFromPlus) return;
     // Prevent re-opening if just closed by a click (300ms cooldown)
     if (Date.now() - menuClosedAtRef.current < 300) return;
-    editor?.commands.focus();
+    cancelContextMenuClose();
+    // For atom blocks (divider), ensure a NodeSelection so context menu actions target the right node
+    if (blockTools.type === 'hr' && activeBlockElRef.current && editor) {
+      try {
+        const pos = editor.view.posAtDOM(activeBlockElRef.current, 0);
+        editor.commands.setNodeSelection(pos);
+      } catch {
+        editor.commands.focus();
+      }
+    } else {
+      editor?.commands.focus();
+    }
     closeSlashMenu();
     const btn = blockDragRowRef.current;
     if (btn?.isConnected) {
@@ -806,6 +1273,7 @@ export default function Editor({
   }, [editor]);
 
   useEffect(() => () => cancelPlusMenuClose(), [cancelPlusMenuClose]);
+  useEffect(() => () => cancelContextMenuClose(), [cancelContextMenuClose]);
 
   useEffect(() => {
     if (!contextMenu || readOnly) return;
@@ -996,11 +1464,12 @@ export default function Editor({
                       if (next instanceof Element && next.closest('.context-menu')) return;
                       if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
                       if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
+                      scheduleContextMenuClose();
                     }}
                     onClick={openBlockConfigMenu}
-                    title="块配置"
                     aria-label="块配置"
                   >
+                    {!contextMenu && <span className="block-drag-row-tooltip">块配置</span>}
                     <div className="hover-drag-icon-wrapper">
                       <div className="hover-block-type-icon-container">
                         <span className="menu_ud_icon color-b-500">
@@ -1011,17 +1480,79 @@ export default function Editor({
                         <IconDragOutlined size={16} color="#8f959e" />
                       </span>
                     </div>
-                    <span className="block-drag-caret" aria-hidden>
-                      <svg width="8" height="5" viewBox="0 0 8 5" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M4 5 0 0h8L4 5Z" fill="#1f2329" />
-                      </svg>
-                    </span>
+                  </button>
+                )}
+                {currentBlockHasChildren && (
+                  <button
+                    type="button"
+                    className={`heading-collapse-toggle${isCurrentBlockCollapsed ? ' heading-collapse-toggle--collapsed' : ''}`}
+                    title={isCurrentBlockCollapsed ? '展开' : '收起'}
+                    aria-label={isCurrentBlockCollapsed ? '展开' : '收起'}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleHeadingCollapse();
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                      <path d="M6 3.5L11 8L6 12.5" fill="currentColor" />
+                    </svg>
                   </button>
                 )}
               </div>
             )}
             <EditorContent editor={editor} />
-            {!readOnly && <SelectionBubble editor={editor} />}
+            {!readOnly && editor && (
+              <SelectionBubble editor={editor} documentId={documentId} />
+            )}
+            {pageLinkDialogVisible && !readOnly && (
+              <div
+                className="editor-page-link-pop"
+                style={{ top: pageLinkPopPos.top, left: pageLinkPopPos.left }}
+              >
+                <div className="editor-page-link-form">
+                  <label className="editor-page-link-row">
+                    <span className="editor-page-link-label">文本</span>
+                    <input
+                      className="editor-page-link-input"
+                      type="text"
+                      placeholder="输入文本"
+                      value={pageLinkText}
+                      onChange={e => setPageLinkText(e.target.value)}
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') confirmPageLink();
+                        if (e.key === 'Escape') closePageLinkDialog();
+                      }}
+                    />
+                  </label>
+                  <div className="editor-page-link-row editor-page-link-row--with-action">
+                    <label className="editor-page-link-url-field">
+                      <span className="editor-page-link-label">链接</span>
+                      <input
+                        className="editor-page-link-input"
+                        type="text"
+                        placeholder="粘贴或输入链接"
+                        value={pageLinkUrl}
+                        onChange={e => setPageLinkUrl(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') confirmPageLink();
+                          if (e.key === 'Escape') closePageLinkDialog();
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="editor-page-link-ok"
+                      disabled={!normalizeLinkHref(pageLinkUrl)}
+                      onClick={confirmPageLink}
+                    >
+                      确认
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1043,8 +1574,10 @@ export default function Editor({
           x={contextMenu.x}
           y={contextMenu.y}
           anchorRef={blockDragRowRef}
+          blockAnchorRef={activeBlockElRef}
           onClose={closeContextMenu}
           onHoverDismiss={dismissContextMenuFromHover}
+          onMouseEnterCancel={cancelContextMenuClose}
         />
       )}
 

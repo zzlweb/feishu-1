@@ -8,9 +8,11 @@ export interface FeishuColorPickerPanelProps {
   editor: Editor;
   /** 选好颜色后的回调（如关闭宿主菜单）；右键菜单可把整菜单关掉 */
   onAfterPick?: () => void;
+  /** 在应用颜色前（例如将选区对齐到块柄所指的块） */
+  onBeforeApply?: () => void;
 }
 
-export default function FeishuColorPickerPanel({ editor, onAfterPick }: FeishuColorPickerPanelProps) {
+export default function FeishuColorPickerPanel({ editor, onAfterPick, onBeforeApply }: FeishuColorPickerPanelProps) {
   const currentTextColor = (editor.getAttributes('textStyle').color as string) || '';
   const currentBgColor = (editor.getAttributes('highlight').color as string) || '';
 
@@ -19,6 +21,7 @@ export default function FeishuColorPickerPanel({ editor, onAfterPick }: FeishuCo
   };
 
   const pickFontColor = (value: string) => {
+    onBeforeApply?.();
     if (value) {
       editor.chain().focus().setColor(value).run();
     } else {
@@ -28,6 +31,7 @@ export default function FeishuColorPickerPanel({ editor, onAfterPick }: FeishuCo
   };
 
   const pickBg = (value: string | undefined, clear: boolean) => {
+    onBeforeApply?.();
     if (clear || !value) {
       editor.chain().focus().unsetHighlight().run();
     } else {
@@ -37,6 +41,7 @@ export default function FeishuColorPickerPanel({ editor, onAfterPick }: FeishuCo
   };
 
   const restoreDefault = () => {
+    onBeforeApply?.();
     editor.chain().focus().unsetColor().unsetHighlight().run();
     notify();
   };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Editor } from '@tiptap/react';
 import { IconChevronMenuEnd } from '../../icons/feishuDoc';
+import type { SlashMenuItem } from './slashMenuConfig';
 import { SLASH_SECTIONS, itemMatchesQuery } from './slashMenuConfig';
 import './SlashMenu.less';
 
@@ -19,6 +20,8 @@ interface Props {
 export default function SlashMenu({ editor, position, query, onClose, onBeforeSelect, onMouseEnter, onMouseLeave, variant = 'fixed' }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [activeIdx, setActiveIdx] = useState(0);
+  const [tooltipItem, setTooltipItem] = useState<{ item: SlashMenuItem; rect: DOMRect } | null>(null);
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const filteredSections = SLASH_SECTIONS.map(s => ({
     ...s,
@@ -74,13 +77,28 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const gridStroke = 1.65;
   const listStroke = 1.55;
 
+  const showTooltip = (item: SlashMenuItem, el: HTMLElement) => {
+    clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = setTimeout(() => {
+      setTooltipItem({ item, rect: el.getBoundingClientRect() });
+    }, 400);
+  };
+
+  const hideTooltip = () => {
+    clearTimeout(tooltipTimerRef.current);
+    setTooltipItem(null);
+  };
+
+  const hasTooltipContent = (item: SlashMenuItem) =>
+    item.tooltip && (item.tooltip.shortcut || item.tooltip.markdown);
+
   return (
     <div
       className={`slash-menu slash-menu-feishu ${variant === 'anchored' ? 'slash-menu--anchored' : ''}`}
       ref={menuRef}
       style={variant === 'anchored' ? undefined : { top: position.top, left: position.left }}
       onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
+      onMouseLeave={() => { hideTooltip(); onMouseLeave?.(); }}
     >
       {filteredSections.map(section => (
         <div
@@ -99,10 +117,15 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                     key={`${section.title}-${item.label}`}
                     type="button"
                     className={`slash-basic-cell ${idx === activeIdx ? 'active' : ''}`}
-                    title={item.label}
-                    onMouseEnter={() => setActiveIdx(idx)}
+                    title={hasTooltipContent(item) ? undefined : item.label}
+                    onMouseEnter={e => {
+                      setActiveIdx(idx);
+                      if (hasTooltipContent(item)) showTooltip(item, e.currentTarget);
+                    }}
+                    onMouseLeave={hideTooltip}
                     onMouseDown={e => {
                       e.preventDefault();
+                      e.stopPropagation();
                       onBeforeSelect?.();
                       item.action(editor);
                       onClose();
@@ -126,10 +149,15 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                   className={`slash-item ${idx === activeIdx ? 'active' : ''}`}
                   role="button"
                   tabIndex={0}
-                  title={item.label}
-                  onMouseEnter={() => setActiveIdx(idx)}
+                  title={hasTooltipContent(item) ? undefined : item.label}
+                  onMouseEnter={e => {
+                    setActiveIdx(idx);
+                    if (hasTooltipContent(item)) showTooltip(item, e.currentTarget);
+                  }}
+                  onMouseLeave={hideTooltip}
                   onMouseDown={e => {
                     e.preventDefault();
+                    e.stopPropagation();
                     onBeforeSelect?.();
                     item.action(editor);
                     onClose();
@@ -150,6 +178,31 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
           )}
         </div>
       ))}
+
+      {/* Custom tooltip */}
+      {tooltipItem && hasTooltipContent(tooltipItem.item) && (
+        <div
+          className="slash-tooltip"
+          style={{
+            position: 'fixed',
+            top: tooltipItem.rect.top - 8,
+            left: tooltipItem.rect.left + tooltipItem.rect.width / 2,
+            transform: 'translate(-50%, -100%)',
+          }}
+        >
+          <div className="slash-tooltip__line1">
+            {tooltipItem.item.label}
+            {tooltipItem.item.tooltip!.shortcut && (
+              <span className="slash-tooltip__shortcut"> ({tooltipItem.item.tooltip!.shortcut})</span>
+            )}
+          </div>
+          {tooltipItem.item.tooltip!.markdown && (
+            <div className="slash-tooltip__line2">
+              Markdown: {tooltipItem.item.tooltip!.markdown}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

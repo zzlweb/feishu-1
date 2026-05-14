@@ -6,34 +6,46 @@
   --text-secondary: #646a73;
   --text-placeholder: #8f959e;
   --bg-white: #ffffff;
-  --bg-hover: #f0f1f2;
+  --bg-hover: #f5f6f7;
   --shadow-lg: 0 12px 32px rgba(31, 35, 41, 0.1), 0 2px 8px rgba(31, 35, 41, 0.06);
   --radius-md: 8px;
-  --radius-sm: 6px;
+  --radius-sm: 4px;
   --primary-color: #3370ff;
 
   background: var(--bg-white);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  padding: 8px 0;
+  padding: 0;
   box-sizing: border-box;
-  width: min(230px, calc(100vw - 24px));
+  width: min(236px, calc(100vw - 24px));
   min-width: 0;
   max-width: calc(100vw - 24px);
   z-index: 10050;
   max-height: 78vh;
   overflow-y: auto;
+  overflow-x: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.context-menu-feishu.context-menu::-webkit-scrollbar {
+  width: 10px;
+}
+
+.context-menu-feishu.context-menu::-webkit-scrollbar-thumb {
+  background: #c7ccd2;
+  border: 3px solid var(--bg-white);
+  border-radius: 999px;
 }
 
 .context-menu-section--grid {
-  padding: 10px 14px 8px;
+  padding: 10px 14px 9px;
 }
 
 .context-menu-feishu .context-block-types {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: 5px 7px;
   margin-bottom: 0;
   justify-content: flex-start;
   align-content: flex-start;
@@ -43,12 +55,12 @@
 }
 
 .context-menu-feishu .context-block-types--icon-grid {
-  margin-bottom: 6px;
+  margin-bottom: 0;
 }
 
 .context-menu-feishu .context-block-btn {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -58,7 +70,7 @@
   border: none;
   background: transparent;
   color: var(--text-primary);
-  transition: background 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .context-menu-feishu .context-block-btn:hover {
@@ -67,6 +79,7 @@
 
 .context-menu-feishu .context-block-btn.active {
   background: var(--primary-color);
+  box-shadow: none;
 }
 
 .context-menu-feishu .context-block-btn svg {
@@ -75,30 +88,31 @@
 
 .context-menu-feishu .context-menu-divider {
   height: 1px;
-  background: var(--border-light);
-  margin: 6px 12px;
+  background: var(--border-color);
+  margin: 0;
 }
 
 .context-menu-feishu .context-menu-divider--inset {
-  margin: 6px 0;
+  margin: 5px 0;
 }
 
 .context-menu-feishu .context-menu-item {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 8px 14px;
-  border-radius: 6px;
+  padding: 0 12px;
+  border-radius: 0;
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 34px;
+  height: 34px;
   color: var(--text-primary);
   cursor: pointer;
   position: relative;
   text-align: left;
   background: none;
   border: none;
-  margin: 0 6px;
-  width: calc(100% - 12px);
+  margin: 0;
+  width: 100%;
 }
 
 .context-menu-feishu .context-menu-item--disabled {
@@ -112,8 +126,8 @@
 }
 
 .context-menu-feishu .context-menu-icon {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -141,6 +155,7 @@
   margin-left: auto;
   color: var(--text-placeholder);
   font-size: 12px;
+  transform: translateY(0.5px);
 }
 
 .context-menu-feishu .context-color-dot {
@@ -181,7 +196,7 @@
   --text-primary: #1f2329;
   --text-secondary: #646a73;
   --bg-white: #ffffff;
-  --bg-hover: #f0f1f2;
+  --bg-hover: #f5f6f7;
   --shadow-lg: 0 12px 32px rgba(31, 35, 41, 0.1), 0 2px 8px rgba(31, 35, 41, 0.06);
   --radius-md: 8px;
   --primary-color: #3370ff;
@@ -190,10 +205,11 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .context-align-flyout {
-  padding: 6px;
+  padding: 6px 0;
   min-width: 200px;
   z-index: 10;
 }
@@ -203,8 +219,9 @@
   align-items: center;
   gap: 11px;
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 6px;
+  padding: 0 12px;
+  height: 34px;
+  border-radius: 0;
   border: none;
   background: none;
   cursor: pointer;
@@ -261,4 +278,43 @@
   padding: 12px;
   max-height: min(420px, 78vh);
   overflow-y: auto;
+}
+
+.context-color-flyout::-webkit-scrollbar {
+  width: 10px;
+}
+
+.context-color-flyout::-webkit-scrollbar-thumb {
+  background: #c7ccd2;
+  border: 3px solid #fff;
+  border-radius: 999px;
+}
+
+/* ── Grid tooltip (portal, position: fixed) ── */
+.context-grid-tooltip {
+  max-width: 220px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #1f2329;
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.context-grid-tooltip__line1 {
+  font-weight: 500;
+}
+
+.context-grid-tooltip__shortcut {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.context-grid-tooltip__line2 {
+  margin-top: 2px;
+  font-weight: 400;
+  opacity: 0.7;
 }

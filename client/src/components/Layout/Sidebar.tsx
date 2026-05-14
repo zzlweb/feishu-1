@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import React, { useCallback, forwardRef } from 'react';
 import { DOC_TITLE_CATALOGUE_ID, type HeadingItem } from '../../types';
 import './Layout.less';
 
@@ -12,8 +12,10 @@ interface SidebarProps {
   onTocItemActivate: (id: string) => void;
   collapsed: boolean;
   onToggle: () => void;
-  /** 外部动态注入的样式（如 top 偏移） */
-  style?: React.CSSProperties;
+  /** 折叠中的标题 id 集合 */
+  collapsedHeadingIds?: Set<string>;
+  /** 点击目录项折叠指示器时切换 */
+  onToggleHeadingCollapse?: (headingId: string) => void;
 }
 
 /** 目录收起/展开图标（用户提供 data URI） */
@@ -39,15 +41,19 @@ function nonEmptyHeadingElements(root: ParentNode): HTMLElement[] {
   );
 }
 
-export default function Sidebar({
-  documentTitle,
-  headings,
-  activeId,
-  onTocItemActivate,
-  collapsed,
-  onToggle,
-  style,
-}: SidebarProps) {
+const Sidebar = forwardRef<HTMLDivElement, SidebarProps>(function Sidebar(
+  {
+    documentTitle,
+    headings,
+    activeId,
+    onTocItemActivate,
+    collapsed,
+    onToggle,
+    collapsedHeadingIds,
+    onToggleHeadingCollapse,
+  }: SidebarProps,
+  ref: React.ForwardedRef<HTMLDivElement>,
+) {
   const scrollToDocumentTitle = useCallback(() => {
     document.querySelector('.editor-title-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     onTocItemActivate(DOC_TITLE_CATALOGUE_ID);
@@ -68,7 +74,7 @@ export default function Sidebar({
   );
 
   return (
-    <div className={`catalogue-aside${collapsed ? ' catalogue-aside--collapsed' : ''}`} style={style}>
+    <div ref={ref} className={`catalogue-aside${collapsed ? ' catalogue-aside--collapsed' : ''}`}>
       <div className="catalogue-inner">
         <button
           type="button"
@@ -102,33 +108,67 @@ export default function Sidebar({
                   </a>
                 </li>
               )}
-              {headings.map(heading => (
-                <li
-                  key={heading.id}
-                  className={`catalogue__list-item indent-level-${heading.level}${
-                    activeId === heading.id ? ' active' : ''
-                  }`}
-                  data-id={heading.id}
-                  data-source-level={heading.level}
-                >
-                  <a
-                    href="#"
-                    className="catalogue__item-title"
-                    onClick={e => {
-                      e.preventDefault();
-                      scrollToHeading(heading.id);
-                    }}
+              {headings.map((heading, idx) => {
+                // Determine if this heading has children (deeper-level headings after it)
+                const hasChildren = idx < headings.length - 1 && headings[idx + 1].level > heading.level;
+                const isCollapsed = collapsedHeadingIds?.has(heading.id) ?? false;
+
+                // Check if this heading should be hidden because a parent heading is collapsed
+                let hidden = false;
+                for (let j = idx - 1; j >= 0; j--) {
+                  if (headings[j].level < heading.level && collapsedHeadingIds?.has(headings[j].id)) {
+                    hidden = true;
+                    break;
+                  }
+                  if (headings[j].level <= heading.level) break;
+                }
+                // Also check any ancestor at any level above
+                if (!hidden) {
+                  const ancestors: number[] = [];
+                  for (let j = idx - 1; j >= 0; j--) {
+                    if (headings[j].level < heading.level) {
+                      if (collapsedHeadingIds?.has(headings[j].id)) {
+                        hidden = true;
+                        break;
+                      }
+                      ancestors.push(headings[j].level);
+                      if (headings[j].level === 1) break;
+                    }
+                  }
+                }
+
+                if (hidden) return null;
+
+                return (
+                  <li
+                    key={heading.id}
+                    className={`catalogue__list-item indent-level-${heading.level}${
+                      activeId === heading.id ? ' active' : ''
+                    }${isCollapsed ? ' catalogue__list-item--collapsed' : ''}`}
+                    data-id={heading.id}
+                    data-source-level={heading.level}
                   >
-                    <span className="catalogue__item-text" dir="auto">
-                      {heading.text}
-                    </span>
-                  </a>
-                </li>
-              ))}
+                    <a
+                      href="#"
+                      className="catalogue__item-title"
+                      onClick={e => {
+                        e.preventDefault();
+                        scrollToHeading(heading.id);
+                      }}
+                    >
+                      <span className="catalogue__item-text" dir="auto">
+                        {heading.text}
+                      </span>
+                    </a>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
       </div>
     </div>
   );
-}
+});
+
+export default Sidebar;

@@ -17,11 +17,13 @@ export interface DocumentRecord {
 export interface CommentRecord {
   id: string;
   document_id: string;
+  block_id: string;
   content: string;
   author: string;
   position_from: number;
   position_to: number;
   created_at: string;
+  updated_at: string;
   resolved: number;
 }
 
@@ -129,7 +131,8 @@ export function getCommentsByDocId(docId: string): CommentRecord[] {
   const db = loadDb();
   return db.comments
     .filter(c => c.document_id === docId)
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    .map(c => ({ ...c, block_id: c.block_id || '', updated_at: c.updated_at || c.created_at }))
+    .sort((a, b) => Number(a.resolved) - Number(b.resolved) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
 export function createCommentRecord(comment: CommentRecord): CommentRecord {
@@ -137,6 +140,28 @@ export function createCommentRecord(comment: CommentRecord): CommentRecord {
   db.comments.push(comment);
   saveDb(db);
   return comment;
+}
+
+export function updateCommentRecord(commentId: string, updates: Partial<CommentRecord>): CommentRecord | undefined {
+  const db = loadDb();
+  const idx = db.comments.findIndex(c => c.id === commentId);
+  if (idx === -1) return undefined;
+  const comment = db.comments[idx];
+  if (updates.content !== undefined) comment.content = updates.content;
+  if (updates.resolved !== undefined) comment.resolved = updates.resolved;
+  comment.updated_at = nowStr();
+  db.comments[idx] = comment;
+  saveDb(db);
+  return { ...comment, block_id: comment.block_id || '', updated_at: comment.updated_at || comment.created_at };
+}
+
+export function deleteCommentRecord(docId: string, commentId: string): boolean {
+  const db = loadDb();
+  const idx = db.comments.findIndex(c => c.id === commentId && c.document_id === docId);
+  if (idx === -1) return false;
+  db.comments.splice(idx, 1);
+  saveDb(db);
+  return true;
 }
 
 // ---- Templates ----

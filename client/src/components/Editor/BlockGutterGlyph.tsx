@@ -6,6 +6,7 @@ import {
   SlashGlyphCode,
   SlashGlyphQuote,
   SlashGlyphDivider,
+  SlashGlyphHighlight,
 } from '../../icons/slashMenuGlyphs';
 
 const S = 16;
@@ -45,6 +46,8 @@ export default function BlockGutterGlyph({ type }: { type: string }) {
       return <SlashGlyphQuote size={S} fill={b500} />;
     case 'codeBlock':
       return <SlashGlyphCode size={S} fill={g500} />;
+    case 'highlightBlock':
+      return <SlashGlyphHighlight size={S} fill="#fa8c16" />;
     case 'hr':
       return <SlashGlyphDivider size={S} fill={n1} />;
     case 'paragraph':
