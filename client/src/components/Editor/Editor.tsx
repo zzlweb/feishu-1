@@ -743,7 +743,7 @@ export default function Editor({
     if (dividerWrapper && editorAreaRef.current.contains(dividerWrapper)) {
       return { element: dividerWrapper, type: 'hr', isEmpty: false };
     }
-    const tableWrapper = (target.closest('.tableWrapper') ?? target.closest('table.feishu-table')) as HTMLElement | null;
+    const tableWrapper = target.closest('.tableWrapper') as HTMLElement | null;
     if (tableWrapper && editorAreaRef.current.contains(tableWrapper)) {
       const cell = target.closest('td, th') as HTMLElement | null;
       const anchor = (cell?.querySelector('p') ?? cell ?? tableWrapper) as HTMLElement;
@@ -1520,151 +1520,100 @@ export default function Editor({
             onClick={handleEditorBlankClick}
           >
             <EditorContent editor={editor} />
-            {blockTools.visible && !readOnly && (() => {
-              const hoveredTable = activeBlockElRef.current?.closest('table.feishu-table, .tableWrapper') as HTMLElement | null;
-              const hoveredCell = activeBlockElRef.current?.closest('td, th') as HTMLElement | null;
-              const areaRect = editorAreaRef.current?.getBoundingClientRect();
-              const cellRect = hoveredCell?.getBoundingClientRect();
-              return (
-                <div
-                  className="block-inline-tools"
-                  style={
-                    hoveredTable && cellRect && areaRect
-                      ? {
-                          top: cellRect.top - areaRect.top + Math.max(0, (cellRect.height - 28) / 2),
-                          left: cellRect.left - areaRect.left - 32,
-                        }
-                      : { top: blockTools.top }
-                  }
-                  onMouseEnter={() => setBlockGutterHoveredState(true)}
-                  onMouseLeave={(e) => {
-                    const next = getRelatedNode(e.relatedTarget);
-                    if (next && e.currentTarget.contains(next)) return;
-                    if (next instanceof Element && next.closest('.context-menu')) return;
-                    if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
-                    if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
-                    if (next instanceof Element && next.closest('.slash-menu')) return;
-                    if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
-                    if (next instanceof Element && next.closest('.feishu-table-overlay')) return;
-                    setBlockGutterHoveredState(false);
-                  }}
-                >
-                  {(slashMenuVisible && slashMenuFromPlus) || (blockTools.isEmpty && blockTools.type === 'paragraph') || hoveredTable ? (
-                    <div
-                      className="block-add-hover-wrap"
-                      onMouseEnter={openPlusMenu}
-                      onMouseLeave={(e) => {
-                        const next = getRelatedNode(e.relatedTarget);
-                        if (next && e.currentTarget.contains(next)) return;
-                        if (next instanceof Element && next.closest('.slash-menu')) return;
-                        schedulePlusMenuClose();
-                      }}
-                    >
-                      <button
-                        ref={blockAddButtonRef}
-                        type="button"
-                        className="block-add-btn"
-                        onMouseDown={e => e.preventDefault()}
-                        onClick={() => {
-                          openPlusMenu();
-                        }}
-                        title="点击或悬浮添加内容"
-                        aria-label="插入内容"
-                      >
-                        <span className="block-add-btn-box">
-                          <IconAddOutlined size={14} color="currentColor" />
-                        </span>
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      ref={blockDragRowRef}
-                      type="button"
-                      className="block-drag-row"
-                      onMouseDown={e => e.preventDefault()}
-                      onMouseEnter={blockTools.type === 'table' ? undefined : openBlockConfigMenu}
-                      onMouseLeave={(e) => {
-                        const next = getRelatedNode(e.relatedTarget);
-                        if (next && e.currentTarget.contains(next)) return;
-                        if (next instanceof Element && next.closest('.context-menu')) return;
-                        if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
-                        if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
-                        scheduleContextMenuClose();
-                      }}
-                      onClick={openBlockConfigMenu}
-                      aria-label="块配置"
-                    >
-                      {!contextMenu && <span className="block-drag-row-tooltip">块配置</span>}
-                      <div className="hover-drag-icon-wrapper">
-                        <div className="hover-block-type-icon-container">
-                          <span className="menu_ud_icon color-b-500">
-                            <BlockGutterGlyph type={blockTools.type} />
-                          </span>
-                        </div>
-                        <span className="drag-handle" aria-hidden>
-                          <IconDragOutlined size={16} color="#8f959e" />
-                        </span>
-                      </div>
-                    </button>
-                  )}
-                  {currentBlockHasChildren && (
-                    <button
-                      type="button"
-                      className={`heading-collapse-toggle${isCurrentBlockCollapsed ? ' heading-collapse-toggle--collapsed' : ''}${isCurrentBlockHeading ? ' color-b-500' : ''}`}
-                      title={isCurrentBlockCollapsed ? '展开' : '收起'}
-                      aria-label={isCurrentBlockCollapsed ? '展开' : '收起'}
-                      onMouseDown={e => e.preventDefault()}
-                      onClick={e => {
-                        e.stopPropagation();
-                        toggleHeadingCollapse();
-                      }}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                        <path d="M6 3.5L11 8L6 12.5" fill="currentColor" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
-            {(() => {
-              const hoveredTable = activeBlockElRef.current?.closest('table.feishu-table, .tableWrapper') as HTMLElement | null;
-              if (blockTools.visible && hoveredTable && !readOnly && editorAreaRef.current) {
-                return (
+            {blockTools.visible && !readOnly && (
+              <div
+                className="block-inline-tools"
+                style={{ top: blockTools.top }}
+                onMouseEnter={() => setBlockGutterHoveredState(true)}
+                onMouseLeave={(e) => {
+                  const next = getRelatedNode(e.relatedTarget);
+                  if (next && e.currentTarget.contains(next)) return;
+                  if (next instanceof Element && next.closest('.context-menu')) return;
+                  if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
+                  if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
+                  if (next instanceof Element && next.closest('.slash-menu')) return;
+                  if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
+                  if (next instanceof Element && next.closest('.feishu-table-overlay')) return;
+                  setBlockGutterHoveredState(false);
+                }}
+              >
+                {(slashMenuVisible && slashMenuFromPlus) || (blockTools.isEmpty && blockTools.type === 'paragraph') ? (
                   <div
-                    className="block-inline-tools"
-                    style={{
-                      position: 'absolute',
-                      top: hoveredTable.getBoundingClientRect().top - editorAreaRef.current.getBoundingClientRect().top - 20,
-                      left: hoveredTable.getBoundingClientRect().left - editorAreaRef.current.getBoundingClientRect().left - 32,
-                      zIndex: 201,
+                    className="block-add-hover-wrap"
+                    onMouseEnter={openPlusMenu}
+                    onMouseLeave={(e) => {
+                      const next = getRelatedNode(e.relatedTarget);
+                      if (next && e.currentTarget.contains(next)) return;
+                      if (next instanceof Element && next.closest('.slash-menu')) return;
+                      schedulePlusMenuClose();
                     }}
                   >
                     <button
-                      ref={blockDragRowRef}
+                      ref={blockAddButtonRef}
                       type="button"
-                      className="block-drag-row"
+                      className="block-add-btn"
                       onMouseDown={e => e.preventDefault()}
-                      onClick={openBlockConfigMenu}
-                      aria-label="表格配置"
+                      onClick={() => {
+                        openPlusMenu();
+                      }}
+                      title="点击或悬浮添加内容"
+                      aria-label="插入内容"
                     >
-                      {!contextMenu && <span className="block-drag-row-tooltip">表格配置</span>}
-                      <div className="hover-drag-icon-wrapper">
-                        <div className="hover-block-type-icon-container">
-                          <span className="menu_ud_icon color-b-500">
-                            <BlockGutterGlyph type="table" />
-                          </span>
-                        </div>
-                        <span className="drag-handle" aria-hidden>
-                          <IconDragOutlined size={16} color="#8f959e" />
-                        </span>
-                      </div>
+                      <span className="block-add-btn-box">
+                        <IconAddOutlined size={14} color="currentColor" />
+                      </span>
                     </button>
                   </div>
-                );
-              }
-              return null;
-            })()}
+                ) : (
+                  <button
+                    ref={blockDragRowRef}
+                    type="button"
+                    className="block-drag-row"
+                    onMouseDown={e => e.preventDefault()}
+                    onMouseEnter={blockTools.type === 'table' ? undefined : openBlockConfigMenu}
+                    onMouseLeave={(e) => {
+                      const next = getRelatedNode(e.relatedTarget);
+                      if (next && e.currentTarget.contains(next)) return;
+                      if (next instanceof Element && next.closest('.context-menu')) return;
+                      if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
+                      if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
+                      scheduleContextMenuClose();
+                    }}
+                    onClick={openBlockConfigMenu}
+                    aria-label="块配置"
+                  >
+                    {!contextMenu && <span className="block-drag-row-tooltip">块配置</span>}
+                    <div className="hover-drag-icon-wrapper">
+                      <div className="hover-block-type-icon-container">
+                        <span className="menu_ud_icon color-b-500">
+                          <BlockGutterGlyph type={blockTools.type} />
+                        </span>
+                      </div>
+                      <span className="drag-handle" aria-hidden>
+                        <IconDragOutlined size={16} color="#8f959e" />
+                      </span>
+                    </div>
+                  </button>
+                )}
+                {currentBlockHasChildren && (
+                  <button
+                    type="button"
+                    className={`heading-collapse-toggle${isCurrentBlockCollapsed ? ' heading-collapse-toggle--collapsed' : ''}${isCurrentBlockHeading ? ' color-b-500' : ''}`}
+                    title={isCurrentBlockCollapsed ? '展开' : '收起'}
+                    aria-label={isCurrentBlockCollapsed ? '展开' : '收起'}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleHeadingCollapse();
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                      <path d="M6 3.5L11 8L6 12.5" fill="currentColor" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            )}
             {rowHighlightBand && (
               <div
                 className="block-row-gutter-highlight-band"
