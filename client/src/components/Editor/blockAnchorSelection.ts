@@ -1,5 +1,6 @@
 import { TextSelection } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/react';
+import { getTableElementFromHost, resolveTableHostFromElement } from './tableDom';
 
 function trySetTextCaret(editor: Editor, el: HTMLElement, offset: number): boolean {
   try {
@@ -19,9 +20,8 @@ function trySetTextCaret(editor: Editor, el: HTMLElement, offset: number): boole
 }
 
 function syncSelectionToTableBlock(editor: Editor, blockEl: HTMLElement): boolean {
-  const table = blockEl.classList.contains('tableWrapper')
-    ? blockEl.querySelector('table')
-    : blockEl.closest('.tableWrapper')?.querySelector('table');
+  const host = resolveTableHostFromElement(blockEl) ?? blockEl;
+  const table = getTableElementFromHost(host);
   const cell =
     (blockEl.closest('td, th') as HTMLElement | null)
     ?? (table?.querySelector('td, th') as HTMLElement | null);
@@ -40,7 +40,7 @@ export function syncEditorSelectionToAnchoredBlock(editor: Editor, blockEl: HTML
 
   const view = editor.view;
 
-  if (blockEl.classList.contains('tableWrapper') || blockEl.closest('.tableWrapper')) {
+  if (resolveTableHostFromElement(blockEl)) {
     syncSelectionToTableBlock(editor, blockEl);
     return;
   }

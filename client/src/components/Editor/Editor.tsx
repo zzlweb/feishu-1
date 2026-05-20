@@ -17,6 +17,8 @@ import { TextSelection } from '@tiptap/pm/state';
 import { common, createLowlight } from 'lowlight';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ContextMenu from './ContextMenu';
+import TableContextMenu from './TableContextMenu';
+import { computeTableBlockMenuPosition } from './tableMenu';
 import SlashMenu from './SlashMenu';
 import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH } from './slashMenuConfig';
 import SelectionBubble from './SelectionBubble';
@@ -31,8 +33,16 @@ import { BlockIndent } from './blockIndent';
 import { scrollToBlockFromHash } from './blockLink';
 import { syncEditorSelectionToAnchoredBlock } from './blockAnchorSelection';
 import { FeishuBlockBackspace } from './feishuBlockBackspace';
+import { FeishuBoxSelectionKeyboard } from './feishuBoxSelectionKeyboard';
+import BoxBlockSelectionLayer from './FeishuBoxBlockSelection';
 import { FeishuHeading, readHeadingId } from './feishuHeading';
 import { feishuTableExtensions } from './feishuTable';
+import FeishuTableOverlay from './FeishuTableOverlay';
+import {
+  resolveTableHostFromEditor,
+  resolveTableHostFromElement,
+} from './tableDom';
+import { selectTableNodeFromHost } from './tableInsert';
 import {
   getHeadingIdFromBlockEl,
   headingBlockHasChildren,
@@ -382,6 +392,7 @@ const editorExtensions = [
   }),
   HighlightBlock,
   FeishuBlockBackspace,
+  FeishuBoxSelectionKeyboard,
 ];
 
 /** 从当前选区解析光标所在的块级 DOM（仅悬停「+」时用于行背景） */
@@ -415,6 +426,8 @@ function getBlockDomFromEditor(editorInstance: {
     if (highlightBlock && root.contains(highlightBlock)) return highlightBlock;
     const dividerWrapper = el.closest?.('.feishu-divider') as HTMLElement | null;
     if (dividerWrapper && root.contains(dividerWrapper)) return dividerWrapper;
+    const tableHost = resolveTableHostFromElement(el);
+    if (tableHost && root.contains(tableHost)) return tableHost;
     const tag = el.tagName?.toLowerCase() ?? '';
     if (/^(p|h[1-6]|blockquote|pre|hr)$/.test(tag)) return el;
     if (tag === 'li') return el;
@@ -494,7 +507,7 @@ function getBlockToolsAnchorTop(
     const tr = toolbar?.getBoundingClientRect();
     if (tr) return tr.top + tr.height / 2 - areaRectTop;
   }
-  if (blockEl.classList.contains('tableWrapper')) {
+  if (blockEl.classList.contains('tableWrapper') || blockEl.classList.contains('feishu-table-host')) {
     return rr.top + 20 - areaRectTop;
   }
   return rr.top + rr.height / 2 - areaRectTop;
@@ -628,7 +641,11 @@ export default function Editor({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [titleHovered, setTitleHovered] = useState(false);
   const emojiPickerAnchorRef = useRef<HTMLDivElement>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    variant: 'block' | 'table';
+  } | null>(null);
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
   const [slashMenuPos, setSlashMenuPos] = useState({ top: 0, left: 0 });
   const [slashQuery, setSlashQuery] = useState('');
@@ -639,12 +656,15 @@ export default function Editor({
   const [pageLinkText, setPageLinkText] = useState('');
   const [pageLinkUrl, setPageLinkUrl] = useState('');
   const [blockTools, setBlockTools] = useState({ visible: false, top: 0, type: 'paragraph', isEmpty: true });
+  const [activeTableHost, setActiveTableHost] = useState<HTMLElement | null>(null);
+  const [tableHandleHovered, setTableHandleHovered] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const plusMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contextMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const blockAddButtonRef = useRef<HTMLButtonElement>(null);
   const blockDragRowRef = useRef<HTMLButtonElement>(null);
+  const tableHandleRef = useRef<HTMLButtonElement>(null);
   /** 「在下方添加」打开链接弹窗时在 confirm 用 insertContentAt */
   const pageLinkInsertPosRef = useRef<number | null>(null);
   const menuClosedAtRef = useRef<number>(0);
@@ -743,12 +763,11 @@ export default function Editor({
     if (dividerWrapper && editorAreaRef.current.contains(dividerWrapper)) {
       return { element: dividerWrapper, type: 'hr', isEmpty: false };
     }
-    const tableWrapper = target.closest('.tableWrapper') as HTMLElement | null;
-    if (tableWrapper && editorAreaRef.current.contains(tableWrapper)) {
-      const cell = target.closest('td, th') as HTMLElement | null;
-      const anchor = (cell?.querySelector('p') ?? cell ?? tableWrapper) as HTMLElement;
-      const isEmpty = anchor.tagName.toLowerCase() === 'p' && anchor.textContent?.trim() === '';
-      return { element: anchor, type: 'table', isEmpty };
+    const tableHost = resolveTableHostFromElement(target);
+    if (tableHost && editorAreaRef.current.contains(tableHost)) {
+      const cell = target instanceof Element ? target.closest('td, th') : null;
+      const isEmpty = !cell?.textContent?.trim();
+      return { element: tableHost, type: 'table', isEmpty };
     }
     const block = target.closest('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre') as HTMLElement | null;
     if (!block || !editorAreaRef.current.contains(block)) return null;
@@ -804,10 +823,14 @@ export default function Editor({
       top = (c.top + c.bottom) / 2 - areaRect.top;
     }
 
+    const blockType = getCurrentBlockType(editorInstance);
+    const tableHost = blockType === 'table' ? resolveTableHostFromEditor(editorInstance) : null;
+    if (tableHost) setActiveTableHost(tableHost);
+
     setBlockTools({
       visible: true,
       top,
-      type: getCurrentBlockType(editorInstance),
+      type: blockType,
       isEmpty,
     });
   }, [getCurrentBlockType, readOnly]);
@@ -819,15 +842,17 @@ export default function Editor({
     if (next instanceof Element && next.closest('.selection-bubble')) return;
     if (next instanceof Element && next.closest('.slash-menu')) return;
     if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
-    if (next instanceof Element && next.closest('.feishu-table-overlay')) return;
+    if (next instanceof Element && next.closest('.feishu-table-chrome')) return;
     if (next instanceof Element && next.closest('.context-menu')) return;
     if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
     if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
 
     window.setTimeout(() => {
+      if (document.querySelector('.feishu-table-host:hover, .tableWrapper:hover')) return;
       if (!document.querySelector('.context-menu') && !document.querySelector('.slash-menu')) {
         setPlusHoveredState(false);
         setBlockTools(prev => ({ ...prev, visible: false }));
+        setActiveTableHost(null);
       }
     }, 250);
   }, []);
@@ -839,7 +864,7 @@ export default function Editor({
     if (next instanceof Element && next.closest('.selection-bubble')) return;
     if (next instanceof Element && next.closest('.slash-menu')) return;
     if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
-    if (next instanceof Element && next.closest('.feishu-table-overlay')) return;
+    if (next instanceof Element && next.closest('.feishu-table-chrome')) return;
     // 子菜单 Portal 在 body 下，移入浮层不应当作离开编辑器外壳
     if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
     if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
@@ -853,12 +878,16 @@ export default function Editor({
     setContextMenu(null);
     setPlusHoveredState(false);
     setBlockTools(prev => ({ ...prev, visible: false }));
+    setActiveTableHost(null);
   }, [closeSlashMenu, contextMenu, schedulePlusMenuClose, slashMenuFromPlus, slashMenuVisible]);
 
   const editor = useEditor({
     extensions: editorExtensions,
     content: content || '<p></p>',
     editable: !readOnly,
+    onCreate: ({ editor: ed }) => {
+      ed.commands.fixTables();
+    },
     onUpdate: ({ editor }) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
@@ -895,6 +924,8 @@ export default function Editor({
     },
     onSelectionUpdate: ({ editor }) => {
       updateBlockTools(editor);
+      const tableHost = resolveTableHostFromEditor(editor);
+      if (tableHost) setActiveTableHost(tableHost);
       const catCb = catalogueActiveCbRef.current;
       if (catCb && isEditorTypingFocused(editor)) {
         catCb(resolveCatalogueActiveId(editor));
@@ -972,6 +1003,15 @@ export default function Editor({
   const syncRowHighlightBandRef = useRef(syncRowHighlightBand);
   syncRowHighlightBandRef.current = syncRowHighlightBand;
 
+  const handleEditorPointerOver = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (readOnly || !editorAreaRef.current) return;
+      const host = resolveTableHostFromElement(e.target);
+      if (host && editorAreaRef.current.contains(host)) setActiveTableHost(host);
+    },
+    [readOnly],
+  );
+
   const handleEditorMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (readOnly || !editorAreaRef.current || !editor) return;
@@ -982,6 +1022,7 @@ export default function Editor({
 
       const areaRect = editorAreaRef.current.getBoundingClientRect();
       activeBlockElRef.current = info.element;
+      if (info.type === 'table') setActiveTableHost(info.element);
       const centerY = getBlockToolsAnchorTop(editor, info.element, areaRect.top);
       setBlockTools({
         visible: true,
@@ -1278,13 +1319,25 @@ export default function Editor({
 
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
+    setTableHandleHovered(false);
     menuClosedAtRef.current = Date.now();
   }, []);
+
+  useLayoutEffect(() => {
+    const host = activeTableHost;
+    if (!host?.isConnected) return;
+    const highlighted = tableHandleHovered || contextMenu?.variant === 'table';
+    host.classList.toggle('is-table-block-active', highlighted);
+    return () => {
+      host.classList.remove('is-table-block-active');
+    };
+  }, [activeTableHost, tableHandleHovered, contextMenu?.variant]);
 
   /** 指针离开面板关闭菜单时，若未悬停在正文区则一并收起块柄 */
   const dismissContextMenuFromHover = useCallback(() => {
     cancelContextMenuClose();
     setContextMenu(null);
+    setTableHandleHovered(false);
     menuClosedAtRef.current = Date.now();
     window.requestAnimationFrame(() => {
       const area = editorAreaRef.current;
@@ -1302,10 +1355,16 @@ export default function Editor({
     }, 200);
   }, [cancelContextMenuClose, dismissContextMenuFromHover]);
 
-  const openBlockConfigMenu = () => {
+  const openBlockConfigMenu = (options?: { skipCooldown?: boolean }) => {
     if (slashMenuVisible && slashMenuFromPlus) return;
-    // Prevent re-opening if just closed by a click (300ms cooldown)
-    if (Date.now() - menuClosedAtRef.current < 300) return;
+    const isTableTarget = blockTools.type === 'table' || Boolean(activeTableHost);
+    if (
+      !options?.skipCooldown
+      && !isTableTarget
+      && Date.now() - menuClosedAtRef.current < 300
+    ) {
+      return;
+    }
     cancelContextMenuClose();
     // For atom blocks (divider), ensure a NodeSelection so context menu actions target the right node
     if (blockTools.type === 'hr' && activeBlockElRef.current && editor) {
@@ -1315,23 +1374,34 @@ export default function Editor({
       } catch {
         editor.commands.focus();
       }
-    } else if (blockTools.type === 'table' && activeBlockElRef.current && editor) {
-      syncEditorSelectionToAnchoredBlock(editor, activeBlockElRef.current);
+    } else if ((blockTools.type === 'table' || activeTableHost) && editor) {
+      const host = activeTableHost ?? activeBlockElRef.current;
+      if (host) {
+        setTableHandleHovered(true);
+        selectTableNodeFromHost(editor, host);
+      }
     } else {
       editor?.commands.focus();
     }
     closeSlashMenu();
+    const tableBtn = blockTools.type === 'table' || activeTableHost ? tableHandleRef.current : null;
+    if (tableBtn?.isConnected) {
+      const pos = computeTableBlockMenuPosition(tableBtn.getBoundingClientRect());
+      setContextMenu({ ...pos, variant: 'table' });
+      return;
+    }
     const btn = blockDragRowRef.current;
     if (btn?.isConnected) {
-      setContextMenu(computeBlockPanelPosition(btn.getBoundingClientRect()));
+      const pos = computeBlockPanelPosition(btn.getBoundingClientRect());
+      setContextMenu({ ...pos, variant: 'block' });
       return;
     }
     const area = editorAreaRef.current;
     if (area) {
       const ar = area.getBoundingClientRect();
-      setContextMenu({ x: ar.left - 8, y: ar.top + blockTools.top + 30 });
+      setContextMenu({ x: ar.left - 8, y: ar.top + blockTools.top + 30, variant: 'block' });
     } else {
-      setContextMenu({ x: 24, y: blockTools.top + 30 });
+      setContextMenu({ x: 24, y: blockTools.top + 30, variant: 'block' });
     }
   };
 
@@ -1366,13 +1436,17 @@ export default function Editor({
   useEffect(() => {
     if (!contextMenu || readOnly) return;
     const updatePos = () => {
-      const button = blockDragRowRef.current;
+      const isTableMenu = contextMenu?.variant === 'table';
+      const button = isTableMenu ? tableHandleRef.current : blockDragRowRef.current;
       if (!button?.isConnected) return;
-      const next = computeBlockPanelPosition(button.getBoundingClientRect());
+      const nextRect = button.getBoundingClientRect();
+      const next = isTableMenu
+        ? computeTableBlockMenuPosition(nextRect)
+        : computeBlockPanelPosition(nextRect);
       setContextMenu(prev => {
         if (!prev) return null;
         if (prev.x === next.x && prev.y === next.y) return prev;
-        return next;
+        return { ...next, variant: prev.variant };
       });
     };
     updatePos();
@@ -1515,12 +1589,16 @@ export default function Editor({
             ref={editorAreaRef}
             className="editor-content-area"
             aria-label="文档正文编辑区"
+            onPointerOver={handleEditorPointerOver}
             onMouseMove={handleEditorMouseMove}
             onMouseLeave={handleEditorMouseLeave}
             onClick={handleEditorBlankClick}
           >
             <EditorContent editor={editor} />
-            {blockTools.visible && !readOnly && (
+            {!readOnly && (
+              <BoxBlockSelectionLayer editor={editor} editorAreaRef={editorAreaRef} readOnly={readOnly} />
+            )}
+            {blockTools.visible && !readOnly && blockTools.type !== 'table' && (
               <div
                 className="block-inline-tools"
                 style={{ top: blockTools.top }}
@@ -1533,7 +1611,7 @@ export default function Editor({
                   if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
                   if (next instanceof Element && next.closest('.slash-menu')) return;
                   if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
-                  if (next instanceof Element && next.closest('.feishu-table-overlay')) return;
+                  if (next instanceof Element && next.closest('.feishu-table-chrome')) return;
                   setBlockGutterHoveredState(false);
                 }}
               >
@@ -1570,7 +1648,7 @@ export default function Editor({
                     type="button"
                     className="block-drag-row"
                     onMouseDown={e => e.preventDefault()}
-                    onMouseEnter={blockTools.type === 'table' ? undefined : openBlockConfigMenu}
+                    onMouseEnter={blockTools.type === 'table' ? undefined : () => openBlockConfigMenu()}
                     onMouseLeave={(e) => {
                       const next = getRelatedNode(e.relatedTarget);
                       if (next && e.currentTarget.contains(next)) return;
@@ -1579,7 +1657,7 @@ export default function Editor({
                       if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
                       scheduleContextMenuClose();
                     }}
-                    onClick={openBlockConfigMenu}
+                    onClick={() => openBlockConfigMenu()}
                     aria-label="块配置"
                   >
                     {!contextMenu && <span className="block-drag-row-tooltip">块配置</span>}
@@ -1614,7 +1692,25 @@ export default function Editor({
                 )}
               </div>
             )}
-            {rowHighlightBand && (
+            {!readOnly && editor && (() => {
+              const host =
+                activeTableHost?.isConnected
+                  ? activeTableHost
+                  : resolveTableHostFromEditor(editor);
+              return host?.isConnected ? (
+              <FeishuTableOverlay
+                editor={editor}
+                tableHost={host}
+                handleRef={tableHandleRef}
+                pinChrome={tableHandleHovered || contextMenu?.variant === 'table'}
+                onTableHandleActiveChange={setTableHandleHovered}
+                onOpenBlockMenu={() => openBlockConfigMenu({ skipCooldown: true })}
+                onScheduleCloseBlockMenu={scheduleContextMenuClose}
+                onCancelCloseBlockMenu={cancelContextMenuClose}
+              />
+              ) : null;
+            })()}
+            {rowHighlightBand && blockTools.type !== 'table' && (
               <div
                 className="block-row-gutter-highlight-band"
                 style={{ top: rowHighlightBand.top, height: rowHighlightBand.height }}
@@ -1692,7 +1788,19 @@ export default function Editor({
       )}
 
       {/* Context Menu */}
-      {contextMenu && (
+      {contextMenu?.variant === 'table' && (
+        <TableContextMenu
+          editor={editor}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          anchorRef={tableHandleRef}
+          blockAnchorRef={activeBlockElRef}
+          onClose={closeContextMenu}
+          onHoverDismiss={dismissContextMenuFromHover}
+          onMouseEnterCancel={cancelContextMenuClose}
+        />
+      )}
+      {contextMenu?.variant === 'block' && (
         <ContextMenu
           editor={editor}
           x={contextMenu.x}

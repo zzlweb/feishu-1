@@ -1,0 +1,51 @@
+.feishu-box-selection-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 120;
+  pointer-events: none;
+
+  &--armed {
+    pointer-events: auto;
+    cursor: crosshair;
+  }
+
+  &--dragging {
+    pointer-events: auto;
+    cursor: crosshair;
+    user-select: none;
+  }
+}
+
+.feishu-box-selection-rect {
+  position: absolute;
+  z-index: 121;
+  pointer-events: none;
+  border: 1px solid rgba(51, 112, 255, 0.55);
+  background: rgba(51, 112, 255, 0.08);
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+.feishu-box-selection-band {
+  position: absolute;
+  z-index: 119;
+  pointer-events: none;
+  background: rgba(51, 112, 255, 0.12);
+  outline: 1px solid rgba(51, 112, 255, 0.35);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+body.feishu-box-select-dragging {
+  user-select: none;
+  cursor: crosshair;
+}
+
+.editor-content-area.feishu-box-select-armed {
+  cursor: crosshair;
+
+  .tiptap,
+  .ProseMirror {
+    cursor: crosshair;
+  }
+}

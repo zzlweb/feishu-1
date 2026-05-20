@@ -1,0 +1,217 @@
+@blue: #3370ff;
+@rail-bg: #f5f6f7;
+@dot: #c9cdd4;
+@hit-size: 20px;
+
+/**
+ * 飞书表格操作层：鼠标进入表格显示全部边界灰点；悬停某一边界变为蓝 +。
+ */
+.feishu-table-chrome {
+  position: absolute;
+  inset: 0;
+  z-index: 210;
+  pointer-events: none;
+  overflow: visible;
+
+  &__handle {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 4px 7px;
+    margin: 0;
+    border: 1px solid #dee0e3;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(31, 35, 41, 0.08);
+    cursor: pointer;
+    /* 块柄在表格外侧，始终可接收鼠标，避免 opacity 隐藏后无法再次 hover */
+    pointer-events: auto;
+    line-height: 0;
+    opacity: 0;
+    transition:
+      opacity 0.12s ease,
+      box-shadow 0.12s ease;
+
+    &:hover,
+    &.is-hovered {
+      box-shadow: 0 2px 8px rgba(31, 35, 41, 0.12);
+    }
+  }
+
+  &--visible &__handle,
+  &:hover &__handle,
+  &__handle.is-hovered {
+    opacity: 1;
+  }
+
+  &__handle-divider {
+    width: 1px;
+    height: 14px;
+    background: #e8e9eb;
+  }
+
+  &__rail-top,
+  &__rail-left {
+    position: absolute;
+    background: @rail-bg;
+    pointer-events: auto;
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+
+  &__rail-top {
+    z-index: 2;
+    overflow: visible;
+  }
+
+  &__rail-left {
+    z-index: 2;
+  }
+
+  &__hit {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: @hit-size;
+    height: @hit-size;
+    pointer-events: auto;
+    z-index: 1;
+
+    &--col {
+      top: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    &--row {
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    &:hover .feishu-table-chrome__rail-plus,
+    &.is-active .feishu-table-chrome__rail-plus {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: auto;
+      transition-delay: 0.08s;
+    }
+
+  }
+
+  &__dot {
+    display: block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: @dot;
+    opacity: 0;
+    transition:
+      opacity 0.1s ease,
+      transform 0.12s ease;
+  }
+
+  &__rail-plus {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: @blue;
+    cursor: pointer;
+    opacity: 0;
+    transform: scale(0.6);
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(51, 112, 255, 0.35);
+    transition:
+      opacity 0.12s ease,
+      transform 0.12s ease;
+
+    &:hover {
+      background: #2860e1;
+    }
+  }
+
+  &__rail-plus-icon {
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  &__insert-col,
+  &__insert-row {
+    position: absolute;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  &__insert-col {
+    width: 2px;
+    margin-left: -1px;
+  }
+
+  &__insert-row {
+    height: 2px;
+    margin-top: -1px;
+  }
+
+  &__line {
+    position: absolute;
+    background: @blue;
+    pointer-events: none;
+
+    &--col {
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+    }
+
+    &--row {
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+    }
+  }
+}
+
+/* 操作层在表格宿主内：JS 类 + --visible 控制轨道与灰点（不依赖 :has / 外层 hover） */
+.feishu-table-host--chrome-hot .feishu-table-chrome__rail-top,
+.feishu-table-host--chrome-hot .feishu-table-chrome__rail-left,
+.tableWrapper.feishu-table-host--chrome-hot .feishu-table-chrome__rail-top,
+.tableWrapper.feishu-table-host--chrome-hot .feishu-table-chrome__rail-left,
+.feishu-table-chrome--visible .feishu-table-chrome__rail-top,
+.feishu-table-chrome--visible .feishu-table-chrome__rail-left {
+  opacity: 1;
+}
+
+.feishu-table-host--chrome-hot .feishu-table-chrome__handle,
+.tableWrapper.feishu-table-host--chrome-hot .feishu-table-chrome__handle,
+.feishu-table-chrome--visible .feishu-table-chrome__handle,
+.feishu-table-chrome__handle.is-hovered,
+.feishu-table-chrome__handle:hover {
+  opacity: 1;
+}
+
+.feishu-table-host--chrome-hot .feishu-table-chrome__hit:not(:hover):not(.is-active) .feishu-table-chrome__dot,
+.tableWrapper.feishu-table-host--chrome-hot .feishu-table-chrome__hit:not(:hover):not(.is-active) .feishu-table-chrome__dot,
+.feishu-table-chrome--visible .feishu-table-chrome__hit:not(:hover):not(.is-active) .feishu-table-chrome__dot {
+  opacity: 1;
+}
+
+/* 内联 style 优先；无 JS 时仍可通过 --visible 显示灰点 */
+.feishu-table-chrome--visible .feishu-table-chrome__dot {
+  opacity: 1;
+}
+
+.feishu-table-chrome__hit.is-active .feishu-table-chrome__dot,
+.feishu-table-chrome__hit:hover .feishu-table-chrome__dot {
+  opacity: 0;
+}

@@ -1161,21 +1161,71 @@
           min-height: 20px;
         }
 
-        .tableWrapper {
+        .tableWrapper,
+        .feishu-table-host {
+          position: relative;
+          display: block;
+          box-sizing: border-box;
+          width: 100%;
           max-width: 100%;
-          margin: 12px 0;
+          isolation: isolate;
+          /* 为顶/左轨道与块柄留出内边距（操作层在宿主内定位） */
+          padding: 12px 0 0 12px;
+          /* 为块柄留出版心外边距 */
+          margin: 28px 0 12px 8px;
+          /* 列多时横向滚动，不撑出文档版心 */
           overflow-x: auto;
+          overflow-y: visible;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: thin;
+          scrollbar-color: rgba(31, 35, 41, 0.28) transparent;
+
+          &::-webkit-scrollbar {
+            height: 8px;
+          }
+
+          &::-webkit-scrollbar-thumb {
+            background: rgba(31, 35, 41, 0.28);
+            border-radius: 4px;
+          }
+
+          &::-webkit-scrollbar-track {
+            background: transparent;
+          }
         }
 
-        // 飞书风格表格：细灰色边框 + 白底单元格 + 浅灰表头，与飞书官方视觉完美一致
+        /* 块柄悬停 / 表格菜单打开：整表蓝色选中态（对齐飞书） */
+        .feishu-table-host.is-table-block-active,
+        .feishu-table-host.ProseMirror-selectednode {
+          table.feishu-table {
+            th,
+            td {
+              background: rgba(51, 112, 255, 0.08) !important;
+            }
+          }
+        }
+
+        .feishu-table-chrome-mount {
+          position: absolute;
+          inset: 0;
+          z-index: 210;
+          pointer-events: none;
+          overflow: visible;
+        }
+
+        // 飞书风格表格：细灰边框、首行浅灰表头
         table.feishu-table,
-        .tableWrapper table.feishu-table {
-          width: 100% !important;
+        .tableWrapper table.feishu-table,
+        .feishu-table-host table.feishu-table {
+          width: auto !important;
+          min-width: 100% !important;
+          max-width: none !important;
           border-collapse: collapse !important;
           border: 1px solid #dee0e3 !important;
           background: #ffffff !important;
-          margin: 12px 0 !important;
+          margin: 0 !important;
           display: table !important;
+          table-layout: fixed !important;
 
           tr {
             display: table-row !important;
@@ -1208,15 +1258,43 @@
             }
           }
 
-          th {
-            font-weight: 500 !important;
+          /* 仅开启「标题行/列」时（th）：浅灰底 + 正文加粗 */
+          th,
+          .feishu-table__header-cell {
+            font-weight: 600 !important;
             background: #f5f6f7 !important;
             color: #1f2329 !important;
             border: 1px solid #dee0e3 !important;
+
+            p,
+            li,
+            span,
+            a {
+              font-weight: 600 !important;
+              color: #1f2329 !important;
+            }
+
+            strong,
+            b {
+              font-weight: 700 !important;
+            }
+          }
+
+          td:not(.feishu-table__header-cell) {
+            font-weight: 400 !important;
+
+            p,
+            li {
+              font-weight: 400 !important;
+            }
           }
 
           .selectedCell {
             background: rgba(51, 112, 255, 0.08) !important;
+          }
+
+          .selectedCell::after {
+            background: rgba(51, 112, 255, 0.12) !important;
           }
         }
 
