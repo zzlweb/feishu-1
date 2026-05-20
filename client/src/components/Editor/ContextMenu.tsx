@@ -50,6 +50,7 @@ import {
   applyEditorIndentIncrease,
   applyEditorIndentDecrease,
 } from './blockIndent';
+import { getActiveTableContext, insertTableColumnAt, insertTableRowAt } from './tableInsert';
 import './ContextMenu.less';
 import './SlashMenu.less';
 
@@ -148,6 +149,31 @@ function getCurrentTextAlign(editor: Editor): string {
   const p = editor.getAttributes('paragraph').textAlign as string | undefined;
   const h = editor.getAttributes('heading').textAlign as string | undefined;
   return (p || h || 'left') as string;
+}
+
+function getActiveTableFlags(editor: Editor) {
+  const { $from } = editor.state.selection;
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (node.type.name !== 'table') continue;
+    const firstRow = node.firstChild;
+    let hasHeaderRow = false;
+    if (firstRow) {
+      hasHeaderRow = true;
+      firstRow.forEach(cell => {
+        if (cell.type.name !== 'tableHeader') hasHeaderRow = false;
+      });
+    }
+    let hasHeaderCol = node.childCount > 0;
+    for (let i = 0; i < node.childCount; i++) {
+      if (node.child(i).firstChild?.type.name !== 'tableHeader') {
+        hasHeaderCol = false;
+        break;
+      }
+    }
+    return { hasHeaderRow, hasHeaderCol };
+  }
+  return { hasHeaderRow: false, hasHeaderCol: false };
 }
 
 export default function ContextMenu({ editor, x, y, onClose, anchorRef, blockAnchorRef, onHoverDismiss, onMouseEnterCancel }: ContextMenuProps) {
@@ -457,6 +483,8 @@ export default function ContextMenu({ editor, x, y, onClose, anchorRef, blockAnc
 
   const indentUi = getEditorIndentUiState(editor);
   const currentAlign = getCurrentTextAlign(editor);
+  const isInTable = editor.isActive('table');
+  const tableFlags = isInTable ? getActiveTableFlags(editor) : { hasHeaderRow: false, hasHeaderCol: false };
 
   const alignFlyout =
     subMenu === 'align' &&
@@ -654,6 +682,179 @@ export default function ContextMenu({ editor, x, y, onClose, anchorRef, blockAnc
       document.body,
     );
 
+  if (isInTable) {
+    return (
+      <Fragment>
+      <div
+        ref={menuRef}
+        className="context-menu context-menu-feishu"
+        style={{ left: finalPos.x, top: finalPos.y, visibility: posVisible ? 'visible' : 'hidden' }}
+        onMouseEnter={() => { clearHoverDismissTimer(); onMouseEnterCancel?.(); }}
+        onMouseLeave={(e) => { hideGridTooltip(); handleShellMouseLeave(e); }}
+        onScroll={hideGridTooltip}
+      >
+        <button type="button" className="context-menu-item context-menu-item--disabled">
+          <span className="context-menu-icon">🗂</span>
+          <span style={{ flex: 1 }}>同步块</span>
+        </button>
+
+        <div
+          ref={alignTriggerRef}
+          className="context-menu-item has-submenu"
+          onMouseEnter={() => {
+            clearSubMenuCloseTimer();
+            clearHoverDismissTimer();
+            setSubMenu('align');
+          }}
+          onMouseLeave={scheduleSubmenuClose}
+        >
+          <span className="context-menu-icon">
+            <IndentRight {...submenuIconStroke} size={18} fill={ICON_MUTED} />
+          </span>
+          <span style={{ flex: 1 }}>缩进</span>
+          <span className="context-menu-arrow-feishu">
+            <IconChevronMenuEnd size={14} />
+          </span>
+        </div>
+
+        <button type="button" className="context-menu-item" onClick={handleCut}>
+          <span className="context-menu-icon">
+            <ContextGlyphCut size={18} fill={ICON_MUTED} />
+          </span>
+          <span style={{ flex: 1 }}>剪切</span>
+          <span className="context-menu-shortcut">Ctrl+X</span>
+        </button>
+        <button type="button" className="context-menu-item" onClick={handleCopy}>
+          <span className="context-menu-icon">
+            <ContextGlyphCopy size={18} fill={ICON_MUTED} />
+          </span>
+          <span style={{ flex: 1 }}>复制</span>
+          <span className="context-menu-shortcut">Ctrl+C</span>
+        </button>
+        <button type="button" className="context-menu-item context-menu-item--danger" onClick={() => {
+          alignSelectionToBlockAnchor();
+          editor.chain().focus().deleteTable().run();
+          onClose();
+        }}>
+          <span className="context-menu-icon">
+            <ContextGlyphDelete size={18} fill={ICON_MUTED} />
+          </span>
+          <span style={{ flex: 1 }}>删除</span>
+          <span className="context-menu-shortcut">Del</span>
+        </button>
+
+        <div className="context-menu-divider" />
+
+        <button type="button" className="context-menu-item" onClick={onClose}>
+          <span className="context-menu-icon">
+            <ContextGlyphShare size={18} fill={ICON_MUTED} />
+          </span>
+          <span style={{ flex: 1 }}>分享</span>
+        </button>
+        <button type="button" className="context-menu-item" onClick={onClose}>
+          <span className="context-menu-icon">
+            <ContextGlyphTemplate size={18} fill={ICON_MUTED} />
+          </span>
+          <span style={{ flex: 1 }}>保存为模板</span>
+        </button>
+        <button type="button" className="context-menu-item" onClick={handleCopyBlockLink}>
+          <span className="context-menu-icon">
+            <ContextGlyphBlockLink size={18} fill={ICON_MUTED} />
+          </span>
+          <span style={{ flex: 1 }}>复制链接</span>
+        </button>
+
+        <div className="context-menu-divider" />
+
+        <button
+          type="button"
+          className="context-menu-item context-menu-item--toggle"
+          onClick={() => {
+            alignSelectionToBlockAnchor();
+            editor.chain().focus().toggleHeaderRow().run();
+            onClose();
+          }}
+        >
+          <span className="context-menu-icon">▦</span>
+          <span style={{ flex: 1 }}>标题行</span>
+          <span className={`context-menu-switch${tableFlags.hasHeaderRow ? ' is-on' : ''}`} aria-hidden />
+        </button>
+        <button
+          type="button"
+          className="context-menu-item context-menu-item--toggle"
+          onClick={() => {
+            alignSelectionToBlockAnchor();
+            editor.chain().focus().toggleHeaderColumn().run();
+            onClose();
+          }}
+        >
+          <span className="context-menu-icon">▥</span>
+          <span style={{ flex: 1 }}>标题列</span>
+          <span className={`context-menu-switch${tableFlags.hasHeaderCol ? ' is-on' : ''}`} aria-hidden />
+        </button>
+        <button
+          type="button"
+          className="context-menu-item"
+          onClick={() => {
+            alignSelectionToBlockAnchor();
+            editor.chain().focus().command(({ tr }) => {
+              const { selection } = tr;
+              let tableNode: any = null;
+              let tablePos = -1;
+              tr.doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+                if (node.type.name === 'table') {
+                  tableNode = node;
+                  tablePos = pos;
+                  return false;
+                }
+              });
+              if (tableNode) {
+                tableNode.descendants((node: any, pos: number) => {
+                  if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+                    tr.setNodeMarkup(tablePos + 1 + pos, undefined, {
+                      ...node.attrs,
+                      colwidth: null,
+                    });
+                  }
+                });
+              }
+              return true;
+            }).run();
+            onClose();
+          }}
+        >
+          <span className="context-menu-icon">▤</span>
+          <span style={{ flex: 1 }}>均分列宽</span>
+        </button>
+
+        <div className="context-menu-divider" />
+
+        <div
+          ref={addBelowTriggerRef}
+          className="context-menu-item has-submenu"
+          onMouseEnter={() => {
+            clearSubMenuCloseTimer();
+            clearHoverDismissTimer();
+            setSubMenu('addBelow');
+          }}
+          onMouseLeave={scheduleSubmenuClose}
+        >
+          <span className="context-menu-icon">
+            <ContextGlyphAddBelow size={18} fill={ICON_MUTED} />
+          </span>
+          <span style={{ flex: 1 }}>在下方添加</span>
+          <span className="context-menu-arrow-feishu">
+            <IconChevronMenuEnd size={14} />
+          </span>
+        </div>
+      </div>
+      {alignFlyout}
+      {colorFlyout}
+      {addBelowFlyout}
+      </Fragment>
+    );
+  }
+
   return (
     <Fragment>
     <div
@@ -690,6 +891,157 @@ export default function ContextMenu({ editor, x, y, onClose, anchorRef, blockAnc
       </div>
 
       <div className="context-menu-divider" />
+
+      {isInTable && (
+        <>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              const ctx = getActiveTableContext(editor);
+              if (ctx) insertTableRowAt(editor, ctx.tablePos, ctx.rowIndex, false);
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">+</span>
+            <span style={{ flex: 1 }}>向上插入行</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              const ctx = getActiveTableContext(editor);
+              if (ctx) insertTableRowAt(editor, ctx.tablePos, ctx.rowIndex, true);
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">+</span>
+            <span style={{ flex: 1 }}>向下插入行</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              const ctx = getActiveTableContext(editor);
+              if (ctx) insertTableColumnAt(editor, ctx.tablePos, ctx.colIndex, false);
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">+</span>
+            <span style={{ flex: 1 }}>向左插入列</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              const ctx = getActiveTableContext(editor);
+              if (ctx) insertTableColumnAt(editor, ctx.tablePos, ctx.colIndex, true);
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">+</span>
+            <span style={{ flex: 1 }}>向右插入列</span>
+          </button>
+          <div className="context-menu-divider" />
+          <button
+            type="button"
+            className="context-menu-item context-menu-item--toggle"
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              editor.chain().focus().toggleHeaderRow().run();
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">▦</span>
+            <span style={{ flex: 1 }}>标题行</span>
+            <span className={`context-menu-switch${tableFlags.hasHeaderRow ? ' is-on' : ''}`} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="context-menu-item context-menu-item--toggle"
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              editor.chain().focus().toggleHeaderColumn().run();
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">▥</span>
+            <span style={{ flex: 1 }}>标题列</span>
+            <span className={`context-menu-switch${tableFlags.hasHeaderCol ? ' is-on' : ''}`} aria-hidden />
+          </button>
+          <div className="context-menu-divider" />
+          <button
+            type="button"
+            className={`context-menu-item${!editor.can().mergeCells() ? ' is-disabled' : ''}`}
+            disabled={!editor.can().mergeCells()}
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              editor.chain().focus().mergeCells().run();
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">◪</span>
+            <span style={{ flex: 1 }}>合并单元格</span>
+          </button>
+          <button
+            type="button"
+            className={`context-menu-item${!editor.can().splitCell() ? ' is-disabled' : ''}`}
+            disabled={!editor.can().splitCell()}
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              editor.chain().focus().splitCell().run();
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">◩</span>
+            <span style={{ flex: 1 }}>拆分单元格</span>
+          </button>
+          <div className="context-menu-divider" />
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              editor.chain().focus().deleteRow().run();
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">−</span>
+            <span style={{ flex: 1 }}>删除当前行</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              editor.chain().focus().deleteColumn().run();
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">−</span>
+            <span style={{ flex: 1 }}>删除当前列</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item context-menu-item--danger"
+            onClick={() => {
+              alignSelectionToBlockAnchor();
+              editor.chain().focus().deleteTable().run();
+              onClose();
+            }}
+          >
+            <span className="context-menu-icon">
+              <ContextGlyphDelete size={18} fill={ICON_MUTED} />
+            </span>
+            <span style={{ flex: 1 }}>删除表格</span>
+          </button>
+          <div className="context-menu-divider" />
+        </>
+      )}
 
       <div
         ref={alignTriggerRef}

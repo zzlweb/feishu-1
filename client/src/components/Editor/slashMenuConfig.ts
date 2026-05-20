@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import type { Editor } from '@tiptap/react';
 import { TextSelection } from '@tiptap/pm/state';
+import { insertFeishuTable } from './tableInsert';
 import {
   SlashGlyphHeading1,
   SlashGlyphHeading2,
@@ -48,6 +49,8 @@ export interface SlashMenuItem {
   matchText?: string;
   desc?: string;
   hasArrow?: boolean;
+  /** 悬停展开子面板（如表格尺寸选择） */
+  submenu?: 'tableGrid';
   /** 悬停提示：第一行为"名称 (快捷键)"，第二行为 Markdown 语法 */
   tooltip?: { shortcut?: string; markdown?: string };
   action: (editor: Editor) => void;
@@ -208,6 +211,10 @@ function insertHighlightBlockFromSlash(editor: Editor) {
     return true;
   }).run();
 }
+
+/** 与 SlashMenu.less 中 width / max-height 保持一致，供定位计算使用 */
+export const SLASH_MENU_WIDTH = 252;
+export const SLASH_MENU_MAX_HEIGHT = 646;
 
 export const SLASH_SECTIONS: SlashMenuSection[] = [
   {
@@ -417,9 +424,10 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
         iconColor: '#52c41a',
         label: '表格',
         hasArrow: true,
+        submenu: 'tableGrid',
         tooltip: { markdown: '| 空格' },
         action: e => {
-          insertSlashContent(e, { type: 'localDivTableBlock', attrs: { rows: 3, cols: 3, header: false } });
+          insertFeishuTable(e, 3, 3);
         },
       },
       {

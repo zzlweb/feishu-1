@@ -35,12 +35,6 @@ function CatalogueToggleIcon({ mirrored }: { mirrored?: boolean }) {
   );
 }
 
-function nonEmptyHeadingElements(root: ParentNode): HTMLElement[] {
-  return Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6')).filter(
-    (el): el is HTMLElement => Boolean(el.textContent?.trim()),
-  );
-}
-
 const Sidebar = forwardRef<HTMLDivElement, SidebarProps>(function Sidebar(
   {
     documentTitle,
@@ -61,16 +55,13 @@ const Sidebar = forwardRef<HTMLDivElement, SidebarProps>(function Sidebar(
 
   const scrollToHeading = useCallback(
     (id: string) => {
-      const editorContent = document.querySelector('.editor-content-area .tiptap');
-      if (!editorContent) return;
-      const els = nonEmptyHeadingElements(editorContent);
-      const idx = headings.findIndex(h => h.id === id);
-      if (idx >= 0 && els[idx]) {
-        els[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const target = document.getElementById(id);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
       onTocItemActivate(id);
     },
-    [headings, onTocItemActivate],
+    [onTocItemActivate],
   );
 
   return (
@@ -156,6 +147,31 @@ const Sidebar = forwardRef<HTMLDivElement, SidebarProps>(function Sidebar(
                         scrollToHeading(heading.id);
                       }}
                     >
+                      {hasChildren && onToggleHeadingCollapse && (
+                        <span
+                          className={`catalogue__collapse-arrow${isCollapsed ? ' catalogue__collapse-arrow--collapsed' : ''}`}
+                          role="button"
+                          tabIndex={0}
+                          title={isCollapsed ? '展开' : '收起'}
+                          aria-label={isCollapsed ? '展开' : '收起'}
+                          onClick={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onToggleHeadingCollapse(heading.id);
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onToggleHeadingCollapse(heading.id);
+                            }
+                          }}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                            <path d="M6 3.5L11 8L6 12.5" fill="currentColor" />
+                          </svg>
+                        </span>
+                      )}
                       <span className="catalogue__item-text" dir="auto">
                         {heading.text}
                       </span>

@@ -271,6 +271,8 @@ export default function DocumentPage() {
                   onTocItemActivate={setCatalogueActiveId}
                   collapsed={sidebarCollapsed}
                   onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  collapsedHeadingIds={collapsedHeadingIds}
+                  onToggleHeadingCollapse={handleToggleHeadingCollapse}
                 />
               )}
 

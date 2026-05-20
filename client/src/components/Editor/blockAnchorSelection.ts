@@ -18,6 +18,19 @@ function trySetTextCaret(editor: Editor, el: HTMLElement, offset: number): boole
   }
 }
 
+function syncSelectionToTableBlock(editor: Editor, blockEl: HTMLElement): boolean {
+  const table = blockEl.classList.contains('tableWrapper')
+    ? blockEl.querySelector('table')
+    : blockEl.closest('.tableWrapper')?.querySelector('table');
+  const cell =
+    (blockEl.closest('td, th') as HTMLElement | null)
+    ?? (table?.querySelector('td, th') as HTMLElement | null);
+  if (!cell) return false;
+  const inner = cell.querySelector('p') ?? cell;
+  if (inner instanceof HTMLElement) return trySetTextCaret(editor, inner, 0);
+  return false;
+}
+
 /**
  * 块柄悬停打开的菜单与 ProseMirror 选区可能不一致（例如指针在块柄上时 target 不是正文）。
  * 在执行块级操作前调用，将选区移到块柄所对准的块内再执行命令。
@@ -26,6 +39,11 @@ export function syncEditorSelectionToAnchoredBlock(editor: Editor, blockEl: HTML
   if (!blockEl?.isConnected || !editor.view.dom.contains(blockEl)) return;
 
   const view = editor.view;
+
+  if (blockEl.classList.contains('tableWrapper') || blockEl.closest('.tableWrapper')) {
+    syncSelectionToTableBlock(editor, blockEl);
+    return;
+  }
 
   const divider =
     blockEl.classList.contains('feishu-divider')

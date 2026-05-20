@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
 import { IconChevronMenuEnd } from '../../icons/feishuDoc';
 import type { SlashMenuItem } from './slashMenuConfig';
 import { SLASH_SECTIONS, itemMatchesQuery } from './slashMenuConfig';
+import TableGridPicker from './TableGridPicker';
+import { insertFeishuTable } from './tableInsert';
 import './SlashMenu.less';
 
 interface Props {
@@ -13,14 +16,18 @@ interface Props {
   onBeforeSelect?: () => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
-  /** fixed：跟随输入 `/` 时的视口坐标；anchored：作为加号子元素，在触发器下方展开 */
   variant?: 'fixed' | 'anchored';
+  anchorRef?: RefObject<HTMLElement | null>;
 }
 
-export default function SlashMenu({ editor, position, query, onClose, onBeforeSelect, onMouseEnter, onMouseLeave, variant = 'fixed' }: Props) {
+export default function SlashMenu({ editor, position, query, onClose, onBeforeSelect, onMouseEnter, onMouseLeave, variant = 'fixed', anchorRef }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const tableFlyoutRef = useRef<HTMLDivElement>(null);
+  const tableSubMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
+  const [renderPos, setRenderPos] = useState(position);
   const [tooltipItem, setTooltipItem] = useState<{ item: SlashMenuItem; rect: DOMRect } | null>(null);
+  const [tableGridFlyoutPos, setTableGridFlyoutPos] = useState<{ top: number; left: number } | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const filteredSections = SLASH_SECTIONS.map(s => ({
@@ -30,21 +37,82 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
 
   const allItems = filteredSections.flatMap(s => s.items);
 
-  useEffect(() => {
-    if (allItems.length === 0) {
-      onClose();
+  const clearTableSubMenuTimer = () => {
+    if (tableSubMenuCloseTimerRef.current) {
+      clearTimeout(tableSubMenuCloseTimerRef.current);
+      tableSubMenuCloseTimerRef.current = null;
     }
+  };
+
+  const scheduleTableSubMenuClose = () => {
+    clearTableSubMenuTimer();
+    tableSubMenuCloseTimerRef.current = setTimeout(() => setTableGridFlyoutPos(null), 220);
+  };
+
+  const openTableGridFlyout = (el: HTMLElement) => {
+    clearTableSubMenuTimer();
+    const r = el.getBoundingClientRect();
+    const pad = 8;
+    const panelW = 220;
+    const gap = 0;
+    let left = r.right + gap;
+    if (left + panelW > window.innerWidth - pad) {
+      left = Math.max(pad, r.left - panelW - gap);
+    }
+    let top = r.top;
+    const panelH = 240;
+    if (top + panelH > window.innerHeight - pad) {
+      top = Math.max(pad, window.innerHeight - pad - panelH);
+    }
+    setTableGridFlyoutPos({ top, left });
+  };
+
+  useEffect(() => {
+    if (allItems.length === 0) onClose();
   }, [allItems.length, onClose]);
 
   useEffect(() => {
     setActiveIdx(0);
+    setTableGridFlyoutPos(null);
   }, [query]);
 
-  useEffect(() => {
-    if (menuRef.current) {
-      const active = menuRef.current.querySelector('.slash-item.active, .slash-basic-cell.active') as HTMLElement;
-      active?.scrollIntoView({ block: 'nearest' });
+  useLayoutEffect(() => {
+    if (variant === 'anchored') {
+      setRenderPos(position);
+      return;
     }
+    const menuEl = menuRef.current;
+    if (!menuEl) {
+      setRenderPos(position);
+      return;
+    }
+    const pad = 8;
+    const gap = 8;
+    const menuRect = menuEl.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let { left, top } = position;
+
+    const anchorEl = anchorRef?.current;
+    if (anchorEl?.isConnected) {
+      const anchor = anchorEl.getBoundingClientRect();
+      if (left + menuRect.width + gap > anchor.left) {
+        left = anchor.left - gap - menuRect.width;
+      }
+      if (left + menuRect.width + gap > anchor.left && left < anchor.right) {
+        const rightX = anchor.right + gap;
+        if (rightX + menuRect.width <= vw - pad) left = rightX;
+      }
+    }
+
+    left = Math.max(pad, Math.min(left, vw - menuRect.width - pad));
+    top = Math.max(pad, Math.min(top, vh - menuRect.height - pad));
+    setRenderPos(prev => (prev.left === left && prev.top === top ? prev : { left, top }));
+  }, [position, variant, anchorRef, query]);
+
+  useEffect(() => {
+    const active = menuRef.current?.querySelector('.slash-item.active, .slash-basic-cell.active') as HTMLElement | null;
+    active?.scrollIntoView({ block: 'nearest' });
   }, [activeIdx]);
 
   useEffect(() => {
@@ -65,19 +133,20 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
       }
     };
     window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
+    return () => {
+      window.removeEventListener('keydown', handler, true);
+      clearTableSubMenuTimer();
+    };
   }, [allItems, activeIdx, editor, onBeforeSelect, onClose]);
 
-  if (allItems.length === 0) {
-    return null;
-  }
+  if (allItems.length === 0) return null;
 
   let globalIdx = 0;
-
   const gridStroke = 1.65;
   const listStroke = 1.55;
 
   const showTooltip = (item: SlashMenuItem, el: HTMLElement) => {
+    if (item.submenu === 'tableGrid') return;
     clearTimeout(tooltipTimerRef.current);
     tooltipTimerRef.current = setTimeout(() => {
       setTooltipItem({ item, rect: el.getBoundingClientRect() });
@@ -92,117 +161,167 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const hasTooltipContent = (item: SlashMenuItem) =>
     item.tooltip && (item.tooltip.shortcut || item.tooltip.markdown);
 
+  const runItemAction = (item: SlashMenuItem) => {
+    onBeforeSelect?.();
+    item.action(editor);
+    onClose();
+  };
+
+  const handleTablePick = (rows: number, cols: number) => {
+    onBeforeSelect?.();
+    insertFeishuTable(editor, rows, cols);
+    onClose();
+  };
+
+  const tableGridFlyout =
+    tableGridFlyoutPos &&
+    createPortal(
+      <div
+        ref={tableFlyoutRef}
+        className="slash-table-grid-flyout"
+        style={{
+          position: 'fixed',
+          top: tableGridFlyoutPos.top,
+          left: tableGridFlyoutPos.left,
+          zIndex: 10060,
+        }}
+        onMouseEnter={() => {
+          clearTableSubMenuTimer();
+          onMouseEnter?.();
+        }}
+        onMouseLeave={() => {
+          scheduleTableSubMenuClose();
+          onMouseLeave?.();
+        }}
+        onMouseDown={e => e.preventDefault()}
+      >
+        <TableGridPicker onPick={handleTablePick} />
+      </div>,
+      document.body,
+    );
+
   return (
-    <div
-      className={`slash-menu slash-menu-feishu ${variant === 'anchored' ? 'slash-menu--anchored' : ''}`}
-      ref={menuRef}
-      style={variant === 'anchored' ? undefined : { top: position.top, left: position.left }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={() => { hideTooltip(); onMouseLeave?.(); }}
-    >
-      {filteredSections.map(section => (
-        <div
-          key={section.title}
-          className={`slash-section slash-section--${section.layout}${section.gridMuted ? ' slash-section--grid-muted' : ''}`}
-        >
-          <div className="slash-section-title">{section.title}</div>
-          {section.layout === 'grid' ? (
-            <div className="slash-basic-grid">
-              {section.items.map(item => {
+    <Fragment>
+      <div
+        className={`slash-menu slash-menu-feishu ${variant === 'anchored' ? 'slash-menu--anchored' : ''}`}
+        ref={menuRef}
+        style={variant === 'anchored' ? undefined : { top: renderPos.top, left: renderPos.left }}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={() => {
+          hideTooltip();
+          scheduleTableSubMenuClose();
+          onMouseLeave?.();
+        }}
+      >
+        {filteredSections.map(section => (
+          <div
+            key={section.title}
+            className={`slash-section slash-section--${section.layout}${section.gridMuted ? ' slash-section--grid-muted' : ''}`}
+          >
+            <div className="slash-section-title">{section.title}</div>
+            {section.layout === 'grid' ? (
+              <div className="slash-basic-grid">
+                {section.items.map(item => {
+                  const idx = globalIdx++;
+                  const Icon = item.Icon;
+                  const tint = item.iconColor ?? '#1f2329';
+                  return (
+                    <button
+                      key={`${section.title}-${item.label}`}
+                      type="button"
+                      className={`slash-basic-cell ${idx === activeIdx ? 'active' : ''}`}
+                      title={hasTooltipContent(item) ? undefined : item.label}
+                      onMouseEnter={e => {
+                        setActiveIdx(idx);
+                        if (hasTooltipContent(item)) showTooltip(item, e.currentTarget);
+                      }}
+                      onMouseLeave={hideTooltip}
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        runItemAction(item);
+                      }}
+                    >
+                      <span className="slash-basic-cell-icon" style={{ '--slash-icon-tint': tint } as CSSProperties}>
+                        <Icon size={18} strokeWidth={gridStroke} fill={tint} />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              section.items.map(item => {
                 const idx = globalIdx++;
                 const Icon = item.Icon;
                 const tint = item.iconColor ?? '#1f2329';
+                const isTableGrid = item.submenu === 'tableGrid';
                 return (
-                  <button
+                  <div
                     key={`${section.title}-${item.label}`}
-                    type="button"
-                    className={`slash-basic-cell ${idx === activeIdx ? 'active' : ''}`}
+                    className={`slash-item ${idx === activeIdx ? 'active' : ''}${isTableGrid ? ' slash-item--has-submenu' : ''}`}
+                    role="button"
+                    tabIndex={0}
                     title={hasTooltipContent(item) ? undefined : item.label}
                     onMouseEnter={e => {
                       setActiveIdx(idx);
-                      if (hasTooltipContent(item)) showTooltip(item, e.currentTarget);
+                      if (isTableGrid) {
+                        hideTooltip();
+                        openTableGridFlyout(e.currentTarget);
+                      } else if (hasTooltipContent(item)) {
+                        showTooltip(item, e.currentTarget);
+                      }
                     }}
-                    onMouseLeave={hideTooltip}
+                    onMouseLeave={() => {
+                      if (!isTableGrid) hideTooltip();
+                      if (isTableGrid) scheduleTableSubMenuClose();
+                    }}
                     onMouseDown={e => {
                       e.preventDefault();
                       e.stopPropagation();
-                      onBeforeSelect?.();
-                      item.action(editor);
-                      onClose();
+                      if (!isTableGrid) runItemAction(item);
                     }}
                   >
-                    <span className="slash-basic-cell-icon" style={{ '--slash-icon-tint': tint } as CSSProperties}>
-                      <Icon size={18} strokeWidth={gridStroke} fill={tint} />
+                    <span className="slash-icon-wrap" style={{ '--slash-icon-tint': tint } as CSSProperties}>
+                      <Icon size={18} strokeWidth={listStroke} fill={tint} />
                     </span>
-                  </button>
+                    <span className="slash-label">{item.label}</span>
+                    {item.hasArrow && (
+                      <span className="slash-arrow" aria-hidden>
+                        <IconChevronMenuEnd size={14} color="#8f959e" />
+                      </span>
+                    )}
+                  </div>
                 );
-              })}
-            </div>
-          ) : (
-            section.items.map(item => {
-              const idx = globalIdx++;
-              const Icon = item.Icon;
-              const tint = item.iconColor ?? '#1f2329';
-              return (
-                <div
-                  key={`${section.title}-${item.label}`}
-                  className={`slash-item ${idx === activeIdx ? 'active' : ''}`}
-                  role="button"
-                  tabIndex={0}
-                  title={hasTooltipContent(item) ? undefined : item.label}
-                  onMouseEnter={e => {
-                    setActiveIdx(idx);
-                    if (hasTooltipContent(item)) showTooltip(item, e.currentTarget);
-                  }}
-                  onMouseLeave={hideTooltip}
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onBeforeSelect?.();
-                    item.action(editor);
-                    onClose();
-                  }}
-                >
-                  <span className="slash-icon-wrap" style={{ '--slash-icon-tint': tint } as CSSProperties}>
-                    <Icon size={18} strokeWidth={listStroke} fill={tint} />
-                  </span>
-                  <span className="slash-label">{item.label}</span>
-                  {item.hasArrow && (
-                    <span className="slash-arrow" aria-hidden>
-                      <IconChevronMenuEnd size={14} color="#8f959e" />
-                    </span>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      ))}
-
-      {/* Custom tooltip */}
-      {tooltipItem && hasTooltipContent(tooltipItem.item) && (
-        <div
-          className="slash-tooltip"
-          style={{
-            position: 'fixed',
-            top: tooltipItem.rect.top - 8,
-            left: tooltipItem.rect.left + tooltipItem.rect.width / 2,
-            transform: 'translate(-50%, -100%)',
-          }}
-        >
-          <div className="slash-tooltip__line1">
-            {tooltipItem.item.label}
-            {tooltipItem.item.tooltip!.shortcut && (
-              <span className="slash-tooltip__shortcut"> ({tooltipItem.item.tooltip!.shortcut})</span>
+              })
             )}
           </div>
-          {tooltipItem.item.tooltip!.markdown && (
-            <div className="slash-tooltip__line2">
-              Markdown: {tooltipItem.item.tooltip!.markdown}
+        ))}
+
+        {tooltipItem && hasTooltipContent(tooltipItem.item) && (
+          <div
+            className="slash-tooltip"
+            style={{
+              position: 'fixed',
+              top: tooltipItem.rect.top - 8,
+              left: tooltipItem.rect.left + tooltipItem.rect.width / 2,
+              transform: 'translate(-50%, -100%)',
+            }}
+          >
+            <div className="slash-tooltip__line1">
+              {tooltipItem.item.label}
+              {tooltipItem.item.tooltip!.shortcut && (
+                <span className="slash-tooltip__shortcut"> ({tooltipItem.item.tooltip!.shortcut})</span>
+              )}
             </div>
-          )}
-        </div>
-      )}
-    </div>
+            {tooltipItem.item.tooltip!.markdown && (
+              <div className="slash-tooltip__line2">
+                Markdown: {tooltipItem.item.tooltip!.markdown}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {tableGridFlyout}
+    </Fragment>
   );
 }

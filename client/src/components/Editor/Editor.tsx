@@ -18,6 +18,7 @@ import { common, createLowlight } from 'lowlight';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ContextMenu from './ContextMenu';
 import SlashMenu from './SlashMenu';
+import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH } from './slashMenuConfig';
 import SelectionBubble from './SelectionBubble';
 import { DOC_TITLE_CATALOGUE_ID, type HeadingItem } from '../../types';
 import { HelpCircleIcon, BookOpenIcon } from 'tdesign-icons-react';
@@ -28,6 +29,15 @@ import EmojiPicker from './EmojiPicker';
 import { HighlightBlock } from './HighlightBlock';
 import { BlockIndent } from './blockIndent';
 import { scrollToBlockFromHash } from './blockLink';
+import { syncEditorSelectionToAnchoredBlock } from './blockAnchorSelection';
+import { FeishuBlockBackspace } from './feishuBlockBackspace';
+import { FeishuHeading, readHeadingId } from './feishuHeading';
+import { feishuTableExtensions } from './feishuTable';
+import {
+  getHeadingIdFromBlockEl,
+  headingBlockHasChildren,
+  syncAllHeadingCollapseStates,
+} from './headingCollapse';
 import './Editor.less';
 
 const Notebook = wrapIcon(BookOpenIcon);
@@ -59,6 +69,10 @@ const CommentAnchorAttributes = Extension.create({
 });
 
 const normalizeTitle = (value: string) => value === '未命名文档' ? '' : value;
+
+function getRelatedNode(target: EventTarget | null): Node | null {
+  return target instanceof Node ? target : null;
+}
 
 function normalizeLinkHref(raw: string): string {
   const t = raw.trim();
@@ -316,6 +330,60 @@ const FeishuCodeBlock = CodeBlockLowlight.extend({
   },
 });
 
+const editorExtensions = [
+  StarterKit.configure({
+    heading: false,
+    codeBlock: false,
+    horizontalRule: false,
+  }),
+  FeishuHeading.configure({ levels: [1, 2, 3, 4, 5, 6] }),
+  CommentAnchorAttributes,
+  FeishuHorizontalRule,
+  FeishuCodeBlock.configure({ lowlight }),
+  Underline,
+  FeishuLink.configure({
+    openOnClick: false,
+    HTMLAttributes: { class: 'editor-link' },
+  }),
+  TaskList,
+  TaskItem.configure({ nested: true }),
+  Image.configure({
+    inline: false,
+    allowBase64: true,
+    HTMLAttributes: { class: 'feishu-image' },
+  }),
+  LocalFileBlock,
+  LocalColumnsBlock,
+  LocalDivTableBlock,
+  ...feishuTableExtensions,
+  LocalSyncBlock,
+  LocalButtonBlock,
+  LocalFormulaBlock,
+  LocalEmbedBlock,
+  Placeholder.configure({
+    includeChildren: false,
+    showOnlyCurrent: false,
+    placeholder: ({ node }) => {
+      if (node.type.name === 'heading') {
+        const level = typeof node.attrs.level === 'number' ? node.attrs.level : 2;
+        return `H${level}`;
+      }
+      return '';
+    },
+  }),
+  TextAlign.configure({
+    types: ['heading', 'paragraph'],
+  }),
+  BlockIndent,
+  TextStyle,
+  Color,
+  Highlight.configure({
+    multicolor: true,
+  }),
+  HighlightBlock,
+  FeishuBlockBackspace,
+];
+
 /** 从当前选区解析光标所在的块级 DOM（仅悬停「+」时用于行背景） */
 function getBlockDomFromEditor(editorInstance: {
   view: { dom: HTMLElement; domAtPos: (pos: number) => { node: Node; offset: number }; nodeDOM?: (pos: number) => Node | null | undefined };
@@ -386,18 +454,18 @@ function resolveCatalogueActiveId(editorInstance: any): string | null {
     if (node.type.name !== 'heading') continue;
     const text = String(node.textContent ?? '').trim();
     if (!text) continue;
-    return `heading-${$from.before(d)}`;
+    return readHeadingId(node.attrs) ?? null;
   }
 
-  let lastPos: number | null = null;
+  let lastId: string | null = null;
   state.doc.descendants((node: any, pos: number) => {
     if (pos >= from) return false;
     if (node.type.name !== 'heading') return;
     const text = String(node.textContent ?? '').trim();
     if (!text) return;
-    lastPos = pos;
+    lastId = readHeadingId(node.attrs);
   });
-  return lastPos !== null ? `heading-${lastPos}` : null;
+  return lastId;
 }
 
 function getBlockToolsAnchorTop(
@@ -426,7 +494,9 @@ function getBlockToolsAnchorTop(
     const tr = toolbar?.getBoundingClientRect();
     if (tr) return tr.top + tr.height / 2 - areaRectTop;
   }
-  // For .feishu-divider, center vertically within the wrapper
+  if (blockEl.classList.contains('tableWrapper')) {
+    return rr.top + 20 - areaRectTop;
+  }
   return rr.top + rr.height / 2 - areaRectTop;
 }
 
@@ -461,13 +531,36 @@ function computeBlockPanelPosition(
   return { x, y: clampPanelY(anchor, menuH, pad) };
 }
 
-function computePlusMenuPosition(anchor: DOMRect, menuW = 230, menuH = 560, pad = 8, gap = 4): { top: number; left: number } {
+function computePlusMenuPosition(
+  anchor: DOMRect,
+  menuW = SLASH_MENU_WIDTH,
+  menuH = SLASH_MENU_MAX_HEIGHT,
+  pad = 8,
+  gap = 8,
+): { top: number; left: number } {
   const vw = window.innerWidth;
-  const leftX = anchor.left - gap - menuW;
+  const effectiveMenuW = Math.min(menuW, vw - 2 * pad);
+  const leftX = anchor.left - gap - effectiveMenuW;
   const rightX = anchor.right + gap;
-  const left = leftX >= pad ? leftX : Math.min(Math.max(rightX, pad), vw - menuW - pad);
+  const fitsLeft = leftX >= pad;
+  const fitsRight = rightX + effectiveMenuW <= vw - pad;
+
+  let left: number;
+  if (fitsLeft) {
+    left = leftX;
+  } else if (fitsRight) {
+    left = rightX;
+  } else {
+    left = Math.min(Math.max(leftX, pad), vw - effectiveMenuW - pad);
+  }
+
+  left = Math.max(pad, Math.min(left, vw - effectiveMenuW - pad));
+  if (left + effectiveMenuW + gap > anchor.left && left < anchor.right) {
+    left = Math.max(pad, anchor.left - gap - effectiveMenuW);
+  }
+
   return {
-    left: Math.max(pad, Math.min(left, vw - menuW - pad)),
+    left,
     top: clampPanelY(anchor, menuH, pad),
   };
 }
@@ -558,74 +651,29 @@ export default function Editor({
   /** 当前块工具对应的块 DOM */
   const activeBlockElRef = useRef<HTMLElement | null>(null);
   const [plusHovered, setPlusHovered] = useState(false);
+  const [blockGutterHovered, setBlockGutterHovered] = useState(false);
+  const [rowHighlightBand, setRowHighlightBand] = useState<{ top: number; height: number } | null>(null);
+
+  const setBlockGutterHoveredState = useCallback((value: boolean) => {
+    setBlockGutterHovered(value);
+  }, []);
+
+  const setPlusHoveredState = useCallback((value: boolean) => {
+    setPlusHovered(value);
+  }, []);
   const catalogueActiveCbRef = useRef<EditorProps['onCatalogueActiveIdChange']>(undefined);
   const editorRefForCatalogue = useRef<any>(null);
   catalogueActiveCbRef.current = onCatalogueActiveIdChange;
 
-  /** 检测当前块是否为有子内容的标题（在它与下一个同级/更高级别标题之间有其他块） */
-  const headingHasChildren = useCallback((blockEl: HTMLElement | null): boolean => {
-    if (!blockEl) return false;
-    const tag = blockEl.tagName.toLowerCase();
-    const m = /^h([1-6])$/.exec(tag);
-    if (!m) return false;
-    const level = Number(m[1]);
-    let sibling = blockEl.nextElementSibling as HTMLElement | null;
-    while (sibling) {
-      const sibTag = sibling.tagName.toLowerCase();
-      const sibMatch = /^h([1-6])$/.exec(sibTag);
-      if (sibMatch && Number(sibMatch[1]) <= level) return false; // same or higher level heading found first
-      // any non-empty content node counts as a child
-      if (sibling.textContent?.trim() || sibling.querySelector('img, hr, pre, table, [data-local-block]')) {
-        return true;
-      }
-      sibling = sibling.nextElementSibling as HTMLElement | null;
-    }
-    return false;
-  }, []);
-
   /** 切换标题折叠状态 */
   const toggleHeadingCollapse = useCallback(() => {
     const blockEl = activeBlockElRef.current;
-    if (!blockEl || !onToggleHeadingCollapse) return;
-    const tag = blockEl.tagName.toLowerCase();
-    const m = /^h([1-6])$/.exec(tag);
-    if (!m) return;
-    const level = Number(m[1]);
-    const headingId = blockEl.id || `heading-fold-${blockEl.textContent?.trim()}`;
-    if (!blockEl.id) blockEl.id = headingId;
-
-    const isCurrentlyCollapsed = collapsedHeadingIds?.has(headingId);
-    if (isCurrentlyCollapsed) {
-      // show siblings
-      let sib = blockEl.nextElementSibling as HTMLElement | null;
-      while (sib) {
-        const sibTag = sib.tagName.toLowerCase();
-        const sibMatch = /^h([1-6])$/.exec(sibTag);
-        if (sibMatch && Number(sibMatch[1]) <= level) break;
-        sib.style.display = '';
-        sib.classList.remove('heading-collapsed-child');
-        sib = sib.nextElementSibling as HTMLElement | null;
-      }
-      blockEl.classList.remove('heading-collapsed');
-    } else {
-      // hide siblings
-      let sib = blockEl.nextElementSibling as HTMLElement | null;
-      while (sib) {
-        const sibTag = sib.tagName.toLowerCase();
-        const sibMatch = /^h([1-6])$/.exec(sibTag);
-        if (sibMatch && Number(sibMatch[1]) <= level) break;
-        sib.style.display = 'none';
-        sib.classList.add('heading-collapsed-child');
-        sib = sib.nextElementSibling as HTMLElement | null;
-      }
-      blockEl.classList.add('heading-collapsed');
-    }
+    const ed = editorRefForCatalogue.current;
+    if (!blockEl || !onToggleHeadingCollapse || !ed) return;
+    const headingId = getHeadingIdFromBlockEl(ed, blockEl);
+    if (!headingId) return;
     onToggleHeadingCollapse(headingId);
-  }, [collapsedHeadingIds, onToggleHeadingCollapse]);
-
-  const isCurrentBlockHeading = /^h[1-6]$/.test(blockTools.type);
-  const currentBlockHasChildren = isCurrentBlockHeading && headingHasChildren(activeBlockElRef.current);
-  const isCurrentBlockCollapsed = isCurrentBlockHeading && activeBlockElRef.current ? (collapsedHeadingIds?.has(activeBlockElRef.current.id || '') ?? false) : false;
+  }, [onToggleHeadingCollapse]);
 
   const closeSlashMenu = useCallback(() => {
     if (plusMenuCloseTimerRef.current) {
@@ -647,7 +695,7 @@ export default function Editor({
     cancelPlusMenuClose();
     plusMenuCloseTimerRef.current = window.setTimeout(() => {
       plusMenuCloseTimerRef.current = null;
-      setPlusHovered(false);
+      setPlusHoveredState(false);
       closeSlashMenu();
     }, 250);
   }, [cancelPlusMenuClose, closeSlashMenu]);
@@ -695,6 +743,13 @@ export default function Editor({
     if (dividerWrapper && editorAreaRef.current.contains(dividerWrapper)) {
       return { element: dividerWrapper, type: 'hr', isEmpty: false };
     }
+    const tableWrapper = (target.closest('.tableWrapper') ?? target.closest('table.feishu-table')) as HTMLElement | null;
+    if (tableWrapper && editorAreaRef.current.contains(tableWrapper)) {
+      const cell = target.closest('td, th') as HTMLElement | null;
+      const anchor = (cell?.querySelector('p') ?? cell ?? tableWrapper) as HTMLElement;
+      const isEmpty = anchor.tagName.toLowerCase() === 'p' && anchor.textContent?.trim() === '';
+      return { element: anchor, type: 'table', isEmpty };
+    }
     const block = target.closest('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre') as HTMLElement | null;
     if (!block || !editorAreaRef.current.contains(block)) return null;
 
@@ -723,6 +778,7 @@ export default function Editor({
     if (editorInstance.isActive('codeBlock')) return 'codeBlock';
     if (editorInstance.isActive('highlightBlock')) return 'highlightBlock';
     if (editorInstance.isActive('horizontalRule')) return 'hr';
+    if (editorInstance.isActive('table')) return 'table';
     return 'paragraph';
   }, []);
 
@@ -757,18 +813,20 @@ export default function Editor({
   }, [getCurrentBlockType, readOnly]);
 
   const handleEditorMouseLeave = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const next = e.relatedTarget as Node | null;
+    const next = getRelatedNode(e.relatedTarget);
     if (next && e.currentTarget.contains(next)) return;
     if (next instanceof Element && next.closest('.block-inline-tools')) return;
     if (next instanceof Element && next.closest('.selection-bubble')) return;
     if (next instanceof Element && next.closest('.slash-menu')) return;
+    if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
+    if (next instanceof Element && next.closest('.feishu-table-overlay')) return;
     if (next instanceof Element && next.closest('.context-menu')) return;
     if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
     if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
 
     window.setTimeout(() => {
       if (!document.querySelector('.context-menu') && !document.querySelector('.slash-menu')) {
-        setPlusHovered(false);
+        setPlusHoveredState(false);
         setBlockTools(prev => ({ ...prev, visible: false }));
       }
     }, 250);
@@ -776,10 +834,12 @@ export default function Editor({
 
   /** 指针离开整个编辑器外壳（含 Slash、右键菜单、块工具浮层）时收起面板 */
   const handleEditorWrapMouseLeave = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const next = e.relatedTarget as Node | null;
+    const next = getRelatedNode(e.relatedTarget);
     if (next && e.currentTarget.contains(next)) return;
     if (next instanceof Element && next.closest('.selection-bubble')) return;
     if (next instanceof Element && next.closest('.slash-menu')) return;
+    if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
+    if (next instanceof Element && next.closest('.feishu-table-overlay')) return;
     // 子菜单 Portal 在 body 下，移入浮层不应当作离开编辑器外壳
     if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
     if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
@@ -791,61 +851,12 @@ export default function Editor({
     if (contextMenu) return;
     closeSlashMenu();
     setContextMenu(null);
-    setPlusHovered(false);
+    setPlusHoveredState(false);
     setBlockTools(prev => ({ ...prev, visible: false }));
   }, [closeSlashMenu, contextMenu, schedulePlusMenuClose, slashMenuFromPlus, slashMenuVisible]);
 
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3, 4, 5, 6] },
-        codeBlock: false,
-        horizontalRule: false,
-      }),
-      CommentAnchorAttributes,
-      FeishuHorizontalRule,
-      FeishuCodeBlock.configure({ lowlight }),
-      Underline,
-      FeishuLink.configure({
-        openOnClick: false,
-        HTMLAttributes: { class: 'editor-link' },
-      }),
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Image.configure({
-        inline: false,
-        allowBase64: true,
-        HTMLAttributes: { class: 'feishu-image' },
-      }),
-      LocalFileBlock,
-      LocalColumnsBlock,
-      LocalDivTableBlock,
-      LocalSyncBlock,
-      LocalButtonBlock,
-      LocalFormulaBlock,
-      LocalEmbedBlock,
-      Placeholder.configure({
-        includeChildren: false,
-        showOnlyCurrent: false,
-        placeholder: ({ node }) => {
-          if (node.type.name === 'heading') {
-            const level = typeof node.attrs.level === 'number' ? node.attrs.level : 2;
-            return `H${level}`;
-          }
-          return '';
-        },
-      }),
-      TextAlign.configure({
-        types: ['heading', 'paragraph'],
-      }),
-      BlockIndent,
-      TextStyle,
-      Color,
-      Highlight.configure({
-        multicolor: true,
-      }),
-      HighlightBlock,
-    ],
+    extensions: editorExtensions,
     content: content || '<p></p>',
     editable: !readOnly,
     onUpdate: ({ editor }) => {
@@ -910,7 +921,7 @@ export default function Editor({
           }
         }
         if (!document.querySelector('.context-menu') && !document.querySelector('.slash-menu')) {
-          setPlusHovered(false);
+          setPlusHoveredState(false);
           setBlockTools(prev => ({ ...prev, visible: false }));
         }
       }, 80);
@@ -918,6 +929,48 @@ export default function Editor({
   });
 
   editorRefForCatalogue.current = editor;
+
+  /** 浅蓝行背景：hover 块柄/菜单时用 overlay 高亮（ProseMirror 会清掉直接加在块节点上的 class） */
+  const shouldShowRowHighlight =
+    !readOnly &&
+    blockTools.visible &&
+    (blockGutterHovered || plusHovered || Boolean(contextMenu) || (slashMenuVisible && slashMenuFromPlus));
+
+  const syncRowHighlightBand = useCallback(() => {
+    const show =
+      !readOnly &&
+      blockTools.visible &&
+      (blockGutterHovered || plusHovered || Boolean(contextMenu) ||
+        (slashMenuVisible && slashMenuFromPlus));
+    if (!show) {
+      setRowHighlightBand(null);
+      return;
+    }
+    const row = activeBlockElRef.current;
+    const area = editorAreaRef.current;
+    if (!row?.isConnected || !area) {
+      setRowHighlightBand(null);
+      return;
+    }
+    const rowRect = row.getBoundingClientRect();
+    const areaRect = area.getBoundingClientRect();
+    const top = rowRect.top - areaRect.top;
+    const height = rowRect.height;
+    setRowHighlightBand(prev =>
+      prev && prev.top === top && prev.height === height ? prev : { top, height },
+    );
+  }, [
+    readOnly,
+    blockTools.visible,
+    blockGutterHovered,
+    plusHovered,
+    contextMenu,
+    slashMenuVisible,
+    slashMenuFromPlus,
+  ]);
+
+  const syncRowHighlightBandRef = useRef(syncRowHighlightBand);
+  syncRowHighlightBandRef.current = syncRowHighlightBand;
 
   const handleEditorMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -936,6 +989,7 @@ export default function Editor({
         type: info.type,
         isEmpty: info.isEmpty,
       });
+      requestAnimationFrame(() => syncRowHighlightBandRef.current());
     },
     [contextMenu, getElementBlockInfo, readOnly, editor, slashMenuFromPlus, slashMenuVisible],
   );
@@ -989,7 +1043,7 @@ export default function Editor({
       headings.push({
         level: node.attrs.level,
         text,
-        id: `heading-${pos}`,
+        id: readHeadingId(node.attrs) ?? `heading-pos-${pos}`,
       });
     });
     onHeadingsChange(headings);
@@ -998,6 +1052,28 @@ export default function Editor({
   useEffect(() => {
     if (editor) extractHeadings(editor);
   }, [editor, extractHeadings]);
+
+  useEffect(() => {
+    if (!editor) return;
+    syncAllHeadingCollapseStates(editor, collapsedHeadingIds);
+  }, [editor, collapsedHeadingIds]);
+
+  useEffect(() => {
+    if (!editor || !collapsedHeadingIds?.size) return;
+    let rafId = 0;
+    const resyncAfterDocChange = ({ transaction }: { transaction: { docChanged: boolean } }) => {
+      if (!transaction.docChanged) return;
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        syncAllHeadingCollapseStates(editor, collapsedHeadingIds);
+      });
+    };
+    editor.on('update', resyncAfterDocChange);
+    return () => {
+      cancelAnimationFrame(rafId);
+      editor.off('update', resyncAfterDocChange);
+    };
+  }, [editor, collapsedHeadingIds]);
 
   useEffect(() => {
     if (editor && content !== undefined) {
@@ -1135,43 +1211,53 @@ export default function Editor({
     if (editor) {
       editor.setEditable(!readOnly);
       if (readOnly) {
-        setPlusHovered(false);
+        setPlusHoveredState(false);
         setBlockTools(prev => ({ ...prev, visible: false }));
         closeSlashMenu();
       }
     }
   }, [readOnly, editor, closeSlashMenu]);
 
-  /** 浅蓝行背景：空段落悬停「+」；或非空 / 非段落时显示块柄与正文行对齐 */
-  useEffect(() => {
-    const root = editorAreaRef.current?.querySelector('.tiptap');
-    root?.querySelectorAll('.block-row-gutter-highlight').forEach(el => {
-      el.classList.remove('block-row-gutter-highlight');
-    });
-    let row: HTMLElement | null = null;
-    if (
-      plusHovered &&
-      blockTools.visible &&
-      blockTools.isEmpty &&
-      blockTools.type === 'paragraph'
-    ) {
-      row = activeBlockElRef.current;
-    } else if (
-      blockTools.visible &&
-      !readOnly &&
-      !(blockTools.isEmpty && blockTools.type === 'paragraph')
-    ) {
-      row = activeBlockElRef.current;
-    }
-    if (row?.isConnected) row.classList.add('block-row-gutter-highlight');
+  useLayoutEffect(() => {
+    syncRowHighlightBand();
   }, [
-    plusHovered,
-    blockTools.visible,
-    blockTools.isEmpty,
-    blockTools.type,
+    syncRowHighlightBand,
     blockTools.top,
-    readOnly,
+    blockTools.type,
+    blockTools.visible,
+    blockGutterHovered,
+    plusHovered,
+    contextMenu,
+    slashMenuVisible,
+    slashMenuFromPlus,
   ]);
+
+  useEffect(() => {
+    const show =
+      !readOnly &&
+      blockTools.visible &&
+      (blockGutterHovered || plusHovered || Boolean(contextMenu) || (slashMenuVisible && slashMenuFromPlus));
+    if (!show) return;
+    const handle = () => syncRowHighlightBandRef.current();
+    window.addEventListener('resize', handle);
+    document.addEventListener('scroll', handle, true);
+    return () => {
+      window.removeEventListener('resize', handle);
+      document.removeEventListener('scroll', handle, true);
+    };
+  }, [
+    readOnly,
+    blockTools.visible,
+    blockGutterHovered,
+    plusHovered,
+    contextMenu,
+    slashMenuVisible,
+    slashMenuFromPlus,
+  ]);
+
+  useEffect(() => {
+    if (!blockTools.visible) setBlockGutterHoveredState(false);
+  }, [blockTools.visible, setBlockGutterHoveredState]);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTitle = e.target.value;
@@ -1203,7 +1289,7 @@ export default function Editor({
     window.requestAnimationFrame(() => {
       const area = editorAreaRef.current;
       if (area?.matches(':hover')) return;
-      setPlusHovered(false);
+      setPlusHoveredState(false);
       setBlockTools(prev => ({ ...prev, visible: false }));
     });
   }, [cancelContextMenuClose]);
@@ -1229,6 +1315,8 @@ export default function Editor({
       } catch {
         editor.commands.focus();
       }
+    } else if (blockTools.type === 'table' && activeBlockElRef.current && editor) {
+      syncEditorSelectionToAnchoredBlock(editor, activeBlockElRef.current);
     } else {
       editor?.commands.focus();
     }
@@ -1254,7 +1342,7 @@ export default function Editor({
     if (btn?.isConnected) {
       setSlashMenuPos(computePlusMenuPosition(btn.getBoundingClientRect()));
     }
-    setPlusHovered(true);
+    setPlusHoveredState(true);
     setBlockTools(prev => ({ ...prev, type: 'paragraph', isEmpty: true }));
     setSlashMenuFromPlus(true);
     setSlashQuery('');
@@ -1317,6 +1405,15 @@ export default function Editor({
 
   if (!editor) return null;
 
+  const isCurrentBlockHeading = /^h[1-6]$/.test(blockTools.type);
+  const currentBlockHasChildren = isCurrentBlockHeading && headingBlockHasChildren(activeBlockElRef.current);
+  const currentHeadingCatalogueId = isCurrentBlockHeading && activeBlockElRef.current
+    ? getHeadingIdFromBlockEl(editor, activeBlockElRef.current)
+    : null;
+  const isCurrentBlockCollapsed = Boolean(
+    currentHeadingCatalogueId && collapsedHeadingIds?.has(currentHeadingCatalogueId),
+  );
+
   return (
     <div className="editor-wrap" onMouseLeave={handleEditorWrapMouseLeave}>
       <div className="editor-scroll">
@@ -1327,7 +1424,7 @@ export default function Editor({
             ref={emojiPickerAnchorRef}
             onMouseEnter={() => setTitleHovered(true)}
             onMouseLeave={(e) => {
-              const next = e.relatedTarget as Node | null;
+              const next = getRelatedNode(e.relatedTarget);
               if (next && e.currentTarget.contains(next)) return;
               if (!showEmojiPicker) setTitleHovered(false);
             }}
@@ -1422,88 +1519,158 @@ export default function Editor({
             onMouseLeave={handleEditorMouseLeave}
             onClick={handleEditorBlankClick}
           >
-            {blockTools.visible && !readOnly && (
-              <div className="block-inline-tools" style={{ top: blockTools.top }}>
-                {(slashMenuVisible && slashMenuFromPlus) || (blockTools.isEmpty && blockTools.type === 'paragraph') ? (
+            <EditorContent editor={editor} />
+            {blockTools.visible && !readOnly && (() => {
+              const hoveredTable = activeBlockElRef.current?.closest('table.feishu-table, .tableWrapper') as HTMLElement | null;
+              const hoveredCell = activeBlockElRef.current?.closest('td, th') as HTMLElement | null;
+              const areaRect = editorAreaRef.current?.getBoundingClientRect();
+              const cellRect = hoveredCell?.getBoundingClientRect();
+              return (
+                <div
+                  className="block-inline-tools"
+                  style={
+                    hoveredTable && cellRect && areaRect
+                      ? {
+                          top: cellRect.top - areaRect.top + Math.max(0, (cellRect.height - 28) / 2),
+                          left: cellRect.left - areaRect.left - 32,
+                        }
+                      : { top: blockTools.top }
+                  }
+                  onMouseEnter={() => setBlockGutterHoveredState(true)}
+                  onMouseLeave={(e) => {
+                    const next = getRelatedNode(e.relatedTarget);
+                    if (next && e.currentTarget.contains(next)) return;
+                    if (next instanceof Element && next.closest('.context-menu')) return;
+                    if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
+                    if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
+                    if (next instanceof Element && next.closest('.slash-menu')) return;
+                    if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
+                    if (next instanceof Element && next.closest('.feishu-table-overlay')) return;
+                    setBlockGutterHoveredState(false);
+                  }}
+                >
+                  {(slashMenuVisible && slashMenuFromPlus) || (blockTools.isEmpty && blockTools.type === 'paragraph') || hoveredTable ? (
+                    <div
+                      className="block-add-hover-wrap"
+                      onMouseEnter={openPlusMenu}
+                      onMouseLeave={(e) => {
+                        const next = getRelatedNode(e.relatedTarget);
+                        if (next && e.currentTarget.contains(next)) return;
+                        if (next instanceof Element && next.closest('.slash-menu')) return;
+                        schedulePlusMenuClose();
+                      }}
+                    >
+                      <button
+                        ref={blockAddButtonRef}
+                        type="button"
+                        className="block-add-btn"
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => {
+                          openPlusMenu();
+                        }}
+                        title="点击或悬浮添加内容"
+                        aria-label="插入内容"
+                      >
+                        <span className="block-add-btn-box">
+                          <IconAddOutlined size={14} color="currentColor" />
+                        </span>
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      ref={blockDragRowRef}
+                      type="button"
+                      className="block-drag-row"
+                      onMouseDown={e => e.preventDefault()}
+                      onMouseEnter={blockTools.type === 'table' ? undefined : openBlockConfigMenu}
+                      onMouseLeave={(e) => {
+                        const next = getRelatedNode(e.relatedTarget);
+                        if (next && e.currentTarget.contains(next)) return;
+                        if (next instanceof Element && next.closest('.context-menu')) return;
+                        if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
+                        if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
+                        scheduleContextMenuClose();
+                      }}
+                      onClick={openBlockConfigMenu}
+                      aria-label="块配置"
+                    >
+                      {!contextMenu && <span className="block-drag-row-tooltip">块配置</span>}
+                      <div className="hover-drag-icon-wrapper">
+                        <div className="hover-block-type-icon-container">
+                          <span className="menu_ud_icon color-b-500">
+                            <BlockGutterGlyph type={blockTools.type} />
+                          </span>
+                        </div>
+                        <span className="drag-handle" aria-hidden>
+                          <IconDragOutlined size={16} color="#8f959e" />
+                        </span>
+                      </div>
+                    </button>
+                  )}
+                  {currentBlockHasChildren && (
+                    <button
+                      type="button"
+                      className={`heading-collapse-toggle${isCurrentBlockCollapsed ? ' heading-collapse-toggle--collapsed' : ''}${isCurrentBlockHeading ? ' color-b-500' : ''}`}
+                      title={isCurrentBlockCollapsed ? '展开' : '收起'}
+                      aria-label={isCurrentBlockCollapsed ? '展开' : '收起'}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={e => {
+                        e.stopPropagation();
+                        toggleHeadingCollapse();
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                        <path d="M6 3.5L11 8L6 12.5" fill="currentColor" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+            {(() => {
+              const hoveredTable = activeBlockElRef.current?.closest('table.feishu-table, .tableWrapper') as HTMLElement | null;
+              if (blockTools.visible && hoveredTable && !readOnly && editorAreaRef.current) {
+                return (
                   <div
-                    className="block-add-hover-wrap"
-                    onMouseEnter={openPlusMenu}
-                    onMouseLeave={(e) => {
-                      const next = e.relatedTarget as Node | null;
-                      if (next && e.currentTarget.contains(next)) return;
-                      if (next instanceof Element && next.closest('.slash-menu')) return;
-                      schedulePlusMenuClose();
+                    className="block-inline-tools"
+                    style={{
+                      position: 'absolute',
+                      top: hoveredTable.getBoundingClientRect().top - editorAreaRef.current.getBoundingClientRect().top - 20,
+                      left: hoveredTable.getBoundingClientRect().left - editorAreaRef.current.getBoundingClientRect().left - 32,
+                      zIndex: 201,
                     }}
                   >
                     <button
-                      ref={blockAddButtonRef}
+                      ref={blockDragRowRef}
                       type="button"
-                      className="block-add-btn"
+                      className="block-drag-row"
                       onMouseDown={e => e.preventDefault()}
-                      onClick={() => {
-                        openPlusMenu();
-                      }}
-                      title="点击或悬浮添加内容"
-                      aria-label="插入内容"
+                      onClick={openBlockConfigMenu}
+                      aria-label="表格配置"
                     >
-                      <span className="block-add-btn-box">
-                        <IconAddOutlined size={14} color="currentColor" />
-                      </span>
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    ref={blockDragRowRef}
-                    type="button"
-                    className="block-drag-row"
-                    onMouseDown={e => e.preventDefault()}
-                    onMouseEnter={openBlockConfigMenu}
-                    onMouseLeave={(e) => {
-                      const next = e.relatedTarget as Node | null;
-                      if (next && e.currentTarget.contains(next)) return;
-                      if (next instanceof Element && next.closest('.context-menu')) return;
-                      if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
-                      if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
-                      scheduleContextMenuClose();
-                    }}
-                    onClick={openBlockConfigMenu}
-                    aria-label="块配置"
-                  >
-                    {!contextMenu && <span className="block-drag-row-tooltip">块配置</span>}
-                    <div className="hover-drag-icon-wrapper">
-                      <div className="hover-block-type-icon-container">
-                        <span className="menu_ud_icon color-b-500">
-                          <BlockGutterGlyph type={blockTools.type} />
+                      {!contextMenu && <span className="block-drag-row-tooltip">表格配置</span>}
+                      <div className="hover-drag-icon-wrapper">
+                        <div className="hover-block-type-icon-container">
+                          <span className="menu_ud_icon color-b-500">
+                            <BlockGutterGlyph type="table" />
+                          </span>
+                        </div>
+                        <span className="drag-handle" aria-hidden>
+                          <IconDragOutlined size={16} color="#8f959e" />
                         </span>
                       </div>
-                      <span className="drag-handle" aria-hidden>
-                        <IconDragOutlined size={16} color="#8f959e" />
-                      </span>
-                    </div>
-                  </button>
-                )}
-                {currentBlockHasChildren && (
-                  <button
-                    type="button"
-                    className={`heading-collapse-toggle${isCurrentBlockCollapsed ? ' heading-collapse-toggle--collapsed' : ''}`}
-                    title={isCurrentBlockCollapsed ? '展开' : '收起'}
-                    aria-label={isCurrentBlockCollapsed ? '展开' : '收起'}
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={e => {
-                      e.stopPropagation();
-                      toggleHeadingCollapse();
-                    }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                      <path d="M6 3.5L11 8L6 12.5" fill="currentColor" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            )}
-            <EditorContent editor={editor} />
-            {!readOnly && editor && (
-              <SelectionBubble editor={editor} documentId={documentId} />
+                    </button>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+            {rowHighlightBand && (
+              <div
+                className="block-row-gutter-highlight-band"
+                style={{ top: rowHighlightBand.top, height: rowHighlightBand.height }}
+                aria-hidden
+              />
             )}
             {pageLinkDialogVisible && !readOnly && (
               <div
@@ -1567,6 +1734,14 @@ export default function Editor({
         </button>
       </div>
 
+      {/* SelectionBubble 使用 tippy.js，会把 DOM portal 到 body。
+          放在 editor-content-area 内会让 React 在 hover 触发条件渲染时
+          以已被 tippy 搬走的 DOM 作为 insertBefore 参考节点而抛错。
+          这里挂在 editor-wrap 末尾，与条件渲染的块工具/行高亮解耦。 */}
+      {!readOnly && editor && (
+        <SelectionBubble editor={editor} documentId={documentId} />
+      )}
+
       {/* Context Menu */}
       {contextMenu && (
         <ContextMenu
@@ -1598,8 +1773,10 @@ export default function Editor({
           onBeforeSelect={focusPlusMenuTarget}
           onMouseEnter={cancelPlusMenuClose}
           onMouseLeave={schedulePlusMenuClose}
+          anchorRef={blockAddButtonRef}
         />
       )}
+
     </div>
   );
 }

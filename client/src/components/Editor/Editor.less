@@ -200,6 +200,16 @@
       min-height: 400px;
       padding-bottom: 120px;
 
+      .block-row-gutter-highlight-band {
+        position: absolute;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        pointer-events: none;
+        background-color: rgba(51, 112, 255, 0.08);
+        border-radius: 4px;
+      }
+
       .tiptap {
         outline: none;
         min-height: 300px;
@@ -220,12 +230,6 @@
           margin-top: 16px;
         }
 
-        > *.block-row-gutter-highlight {
-          background-color: rgba(51, 112, 255, 0.08);
-          border-radius: 4px;
-          transition: background-color 0.12s ease;
-        }
-
         .feishu-block-link-highlight {
           animation: feishu-block-link-highlight 1.8s ease;
           border-radius: 4px;
@@ -235,6 +239,10 @@
         h1 { font-size: 26px; font-weight: 700; line-height: 1.42; letter-spacing: -0.01em; }
         h2 { font-size: 22px; font-weight: 700; line-height: 1.42; letter-spacing: -0.005em; }
         h3 { font-size: 18px; font-weight: 600; line-height: 1.5; }
+
+        .heading-collapsed-child {
+          display: none !important;
+        }
         h4 { font-size: 16px; font-weight: 600; line-height: 1.5; }
         h5 { font-size: 14px; font-weight: 600; line-height: 1.55; }
         h6 { font-size: 13px; font-weight: 600; line-height: 1.55; color: @text-secondary; }
@@ -1155,7 +1163,61 @@
 
         .tableWrapper {
           max-width: 100%;
-          margin: 8px 0;
+          margin: 12px 0;
+          overflow-x: auto;
+        }
+
+        // 飞书风格表格：细灰色边框 + 白底单元格 + 浅灰表头，与飞书官方视觉完美一致
+        table.feishu-table,
+        .tableWrapper table.feishu-table {
+          width: 100% !important;
+          border-collapse: collapse !important;
+          border: 1px solid #dee0e3 !important;
+          background: #ffffff !important;
+          margin: 12px 0 !important;
+          display: table !important;
+
+          tr {
+            display: table-row !important;
+          }
+
+          th,
+          td {
+            min-width: 120px !important;
+            height: 40px !important;
+            padding: 8px 12px !important;
+            border: 1px solid #dee0e3 !important;
+            vertical-align: top !important;
+            box-sizing: border-box !important;
+            background: #ffffff !important;
+            display: table-cell !important;
+
+            > *:first-child {
+              margin-top: 0 !important;
+            }
+
+            > *:last-child {
+              margin-bottom: 0 !important;
+            }
+
+            p {
+              margin: 0 !important;
+              min-height: 20px !important;
+              line-height: 1.5 !important;
+              display: block !important;
+            }
+          }
+
+          th {
+            font-weight: 500 !important;
+            background: #f5f6f7 !important;
+            color: #1f2329 !important;
+            border: 1px solid #dee0e3 !important;
+          }
+
+          .selectedCell {
+            background: rgba(51, 112, 255, 0.08) !important;
+          }
         }
 
         .column-resize-handle {
@@ -1519,6 +1581,10 @@
     svg {
       transition: transform 0.15s ease;
       transform: rotate(90deg);
+    }
+
+    &.heading-collapse-toggle--collapsed svg {
+      transform: rotate(0deg);
     }
 
     &.color-b-500 {

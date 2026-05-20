@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/react';
 import type { SlashMenuItem } from './slashMenuConfig';
+import { insertFeishuTableAt } from './tableInsert';
 
 function pickFile(accept: string, onPick: (file: File) => void) {
   const input = document.createElement('input');
@@ -183,7 +184,7 @@ export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item:
       if (sectionTitle === '多维表格') {
         chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '多维表格', desc: '表格视图', kind: 'bitable' } }).run();
       } else {
-        chain.insertContentAt(pos, { type: 'localDivTableBlock', attrs: { rows: 3, cols: 3, header: false } }).run();
+        insertFeishuTableAt(editor, pos, 3, 3);
       }
       return;
     case '分栏':
