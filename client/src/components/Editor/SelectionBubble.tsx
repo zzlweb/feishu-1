@@ -329,7 +329,8 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
       tippyOptions={{
         placement: 'top',
         duration: [120, 80],
-        zIndex: 10020,
+        zIndex: 200,
+        offset: [0, 12],
         moveTransition: 'transform 0.15s ease-out',
         // tippy.js 默认为 maxWidth 350px，toolbar 会变窄导致图标挤压/不全
         maxWidth: 'none',
