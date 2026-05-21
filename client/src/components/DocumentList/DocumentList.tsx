@@ -36,11 +36,16 @@ export default function DocumentList() {
 
   const loadDocuments = async () => {
     setLoading(true);
-    const res = await getDocuments();
-    if (res.code === 0 && res.data) {
-      setDocuments(res.data);
+    try {
+      const res = await getDocuments();
+      if (res.code === 0 && res.data) {
+        setDocuments(res.data);
+      } else {
+        MessagePlugin.error(res.message || '加载文档列表失败');
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {

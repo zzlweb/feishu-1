@@ -1,6 +1,7 @@
 import type { Editor } from '@tiptap/react';
 import type { SlashMenuItem } from './slashMenuConfig';
 import { insertFeishuTableAt } from './tableInsert';
+import { insertFeishuColumnsAt } from './columnsInsert';
 
 function pickFile(accept: string, onPick: (file: File) => void) {
   const input = document.createElement('input');
@@ -188,7 +189,7 @@ export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item:
       }
       return;
     case '分栏':
-      chain.insertContentAt(pos, { type: 'localColumnsBlock' }).run();
+      insertFeishuColumnsAt(editor, pos, 2);
       return;
     case '按钮':
       chain.insertContentAt(pos, { type: 'localButtonBlock' }).run();

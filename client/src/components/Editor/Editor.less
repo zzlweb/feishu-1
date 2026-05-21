@@ -1420,20 +1420,236 @@
           cursor: col-resize;
         }
 
+        .feishu-columns-node {
+          position: relative;
+          margin: 6px 0 8px;
+        }
+
+        .feishu-columns-node__frame {
+          position: relative;
+        }
+
         .feishu-columns-block {
+          display: block;
+        }
+
+        // TipTap React NodeView 会在 contentDOM 内再包一层 wrapper，grid 必须加在这一层上。
+        .feishu-columns-block [data-node-view-content-react] {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-          gap: 16px;
-          margin: 8px 0;
+          grid-template-columns: var(
+            --feishu-columns-template,
+            repeat(var(--feishu-columns-count, 2), minmax(0, 1fr))
+          );
+          gap: 12px;
+          align-items: stretch;
+          width: 100%;
+        }
+
+        .feishu-columns-block__col-wrap {
+          position: relative;
+          display: flex;
+          align-items: flex-start;
+          gap: 4px;
+          min-width: 0;
+        }
+
+        .feishu-columns-block__add-hover-wrap {
+          position: absolute;
+          top: 10px;
+          left: -28px;
+          z-index: 2;
+          flex-shrink: 0;
+          display: flex;
+          align-items: flex-start;
+          pointer-events: none;
+        }
+
+        .feishu-columns-block__col-wrap:hover .feishu-columns-block__add-hover-wrap,
+        .feishu-columns-block__col-wrap.is-menu-open .feishu-columns-block__add-hover-wrap {
+          pointer-events: auto;
+        }
+
+        .feishu-columns-block__add-btn {
+          box-sizing: border-box;
+          flex-shrink: 0;
+          margin: 10px 0 0;
+          padding: 0;
+          border: none;
+          border-radius: 4px;
+          background: transparent;
+          color: #8f959e;
+          cursor: pointer;
+          opacity: 0;
+          pointer-events: none;
+          transition:
+            opacity 0.12s ease,
+            background 0.12s ease,
+            color 0.12s ease;
+
+          .feishu-columns-block__add-btn-box {
+            width: 24px;
+            height: 24px;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid @border-color;
+            border-radius: 4px;
+            background: #fff;
+            line-height: 0;
+
+            svg {
+              display: block;
+            }
+          }
+
+          &:hover {
+            color: @primary;
+            background: rgba(238, 242, 254, 0.65);
+
+            .feishu-columns-block__add-btn-box {
+              border-color: rgba(51, 112, 255, 0.28);
+            }
+          }
+        }
+
+        .feishu-columns-block__col-wrap:hover .feishu-columns-block__add-btn,
+        .feishu-columns-block__col-wrap.is-menu-open .feishu-columns-block__add-btn {
+          opacity: 1;
+          pointer-events: auto;
         }
 
         .feishu-columns-block__col {
-          min-height: 72px;
-          padding: 12px;
-          border: 1px dashed @border-color;
+          box-sizing: border-box;
+          flex: 1;
+          min-width: 0;
+          min-height: 48px;
+          padding: 10px 12px;
           border-radius: 8px;
-          color: #8f959e;
-          background: #fbfbfd;
+          background: #eff0f1;
+          transition: background 0.12s ease;
+
+          > :first-child {
+            margin-top: 0;
+          }
+
+          > :last-child {
+            margin-bottom: 0;
+          }
+
+          p {
+            margin: 0;
+            min-height: 26px;
+            line-height: 26px;
+          }
+
+          p.is-empty::before {
+            color: transparent;
+          }
+        }
+
+        .feishu-columns-block__col-wrap:focus-within .feishu-columns-block__col {
+          background: #e8f0ff;
+        }
+
+        .feishu-columns-node__splitter-layer {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 2;
+        }
+
+        .feishu-columns-node__splitter {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          width: 24px;
+          transform: translateX(-50%);
+          pointer-events: auto;
+        }
+
+        .feishu-columns-node__resize-handle {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 50%;
+          width: 2px;
+          transform: translateX(-50%);
+          background: transparent;
+          cursor: col-resize;
+          transition: background 0.12s ease;
+        }
+
+        .feishu-columns-node__splitter:hover .feishu-columns-node__resize-handle,
+        .feishu-columns-node__splitter.is-resizing .feishu-columns-node__resize-handle {
+          background: @primary;
+        }
+
+        .feishu-columns-node__insert-btn {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          margin: 0;
+          padding: 0;
+          border: 1px solid #dee0e3;
+          border-radius: 50%;
+          color: #646a73;
+          background: #fff;
+          font-size: 16px;
+          line-height: 1;
+          cursor: pointer;
+          opacity: 0;
+          transform: translate(-50%, -50%);
+          transition:
+            opacity 0.12s ease,
+            border-color 0.12s ease,
+            color 0.12s ease,
+            background 0.12s ease,
+            box-shadow 0.12s ease;
+          box-shadow: 0 1px 4px rgba(31, 35, 41, 0.08);
+        }
+
+        .feishu-columns-node__splitter:hover .feishu-columns-node__insert-btn {
+          opacity: 1;
+          border-color: @primary;
+          color: #fff;
+          background: @primary;
+        }
+
+        .feishu-columns-node__insert-tooltip {
+          position: absolute;
+          bottom: calc(100% + 8px);
+          left: 50%;
+          padding: 4px 8px;
+          border-radius: 4px;
+          color: #fff;
+          background: #1f2329;
+          font-size: 12px;
+          line-height: 18px;
+          white-space: nowrap;
+          pointer-events: none;
+          opacity: 0;
+          transform: translateX(-50%);
+          transition: opacity 0.12s ease;
+
+          &::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            border: 5px solid transparent;
+            border-top-color: #1f2329;
+            transform: translateX(-50%);
+          }
+        }
+
+        .feishu-columns-node__insert-btn:hover .feishu-columns-node__insert-tooltip {
+          opacity: 1;
         }
 
         .feishu-sync-block {

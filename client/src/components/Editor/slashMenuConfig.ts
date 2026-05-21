@@ -2,6 +2,7 @@ import type { ComponentType } from 'react';
 import type { Editor } from '@tiptap/react';
 import { TextSelection } from '@tiptap/pm/state';
 import { insertFeishuTable } from './tableInsert';
+import { insertFeishuColumns } from './columnsInsert';
 import {
   SlashGlyphHeading1,
   SlashGlyphHeading2,
@@ -50,7 +51,7 @@ export interface SlashMenuItem {
   desc?: string;
   hasArrow?: boolean;
   /** 悬停展开子面板（如表格尺寸选择） */
-  submenu?: 'tableGrid';
+  submenu?: 'tableGrid' | 'columnsCount';
   /** 悬停提示：第一行为"名称 (快捷键)"，第二行为 Markdown 语法 */
   tooltip?: { shortcut?: string; markdown?: string };
   action: (editor: Editor) => void;
@@ -432,12 +433,13 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
       },
       {
         Icon: SlashGlyphColumns,
-        iconColor: '#9254de',
+        iconColor: '#3370ff',
         label: '分栏',
         hasArrow: true,
+        submenu: 'columnsCount',
         tooltip: {},
         action: e => {
-          insertSlashContent(e, { type: 'localColumnsBlock' });
+          insertFeishuColumns(e, 2);
         },
       },
       {

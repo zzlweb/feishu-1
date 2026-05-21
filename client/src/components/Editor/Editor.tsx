@@ -37,6 +37,7 @@ import { FeishuBoxSelectionKeyboard } from './feishuBoxSelectionKeyboard';
 import BoxBlockSelectionLayer from './FeishuBoxBlockSelection';
 import { FeishuHeading, readHeadingId } from './feishuHeading';
 import { feishuTableExtensions } from './feishuTable';
+import { localColumnsExtensions } from './columnsExtensions';
 import FeishuTableOverlay from './FeishuTableOverlay';
 import {
   resolveTableHostFromEditor,
@@ -197,18 +198,6 @@ const LocalFileBlock = TiptapNode.create({
   },
 });
 
-const LocalColumnsBlock = TiptapNode.create({
-  name: 'localColumnsBlock',
-  group: 'block',
-  atom: true,
-  parseHTML() {
-    return [{ tag: 'div[data-local-block="columns"]' }];
-  },
-  renderHTML() {
-    return ['div', { 'data-local-block': 'columns', class: 'feishu-columns-block' }, ['div', { class: 'feishu-columns-block__col' }, '分栏内容'], ['div', { class: 'feishu-columns-block__col' }, '分栏内容']];
-  },
-});
-
 const LocalDivTableBlock = TiptapNode.create({
   name: 'localDivTableBlock',
   group: 'block',
@@ -363,7 +352,7 @@ const editorExtensions = [
     HTMLAttributes: { class: 'feishu-image' },
   }),
   LocalFileBlock,
-  LocalColumnsBlock,
+  ...localColumnsExtensions,
   LocalDivTableBlock,
   ...feishuTableExtensions,
   LocalSyncBlock,
@@ -751,6 +740,7 @@ export default function Editor({
 
   const getElementBlockInfo = useCallback((target: EventTarget | null) => {
     if (!editorAreaRef.current || !(target instanceof Element)) return null;
+    if (target.closest('.feishu-columns-node')) return null;
     const codeBlockWrapper = target.closest('.feishu-code-block') as HTMLElement | null;
     if (codeBlockWrapper && editorAreaRef.current.contains(codeBlockWrapper)) {
       return { element: codeBlockWrapper, type: 'codeBlock', isEmpty: false };
@@ -801,8 +791,22 @@ export default function Editor({
     return 'paragraph';
   }, []);
 
+  const isSelectionInsideColumnBlock = useCallback((editorInstance: { state: { selection: { $from: { depth: number; node: (depth: number) => { type: { name: string } } } } } }) => {
+    const { $from } = editorInstance.state.selection;
+    for (let depth = $from.depth; depth > 0; depth -= 1) {
+      if ($from.node(depth).type.name === 'localColumnBlock') return true;
+    }
+    return false;
+  }, []);
+
   const updateBlockTools = useCallback((editorInstance: any) => {
     if (readOnly || !editorAreaRef.current || !isEditorTypingFocused(editorInstance)) {
+      activeBlockElRef.current = null;
+      setBlockTools(prev => ({ ...prev, visible: false }));
+      return;
+    }
+
+    if (isSelectionInsideColumnBlock(editorInstance)) {
       activeBlockElRef.current = null;
       setBlockTools(prev => ({ ...prev, visible: false }));
       return;
@@ -833,7 +837,7 @@ export default function Editor({
       type: blockType,
       isEmpty,
     });
-  }, [getCurrentBlockType, readOnly]);
+  }, [getCurrentBlockType, isSelectionInsideColumnBlock, readOnly]);
 
   const handleEditorMouseLeave = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const next = getRelatedNode(e.relatedTarget);
@@ -842,6 +846,7 @@ export default function Editor({
     if (next instanceof Element && next.closest('.selection-bubble')) return;
     if (next instanceof Element && next.closest('.slash-menu')) return;
     if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
+    if (next instanceof Element && next.closest('.slash-columns-count-flyout')) return;
     if (next instanceof Element && next.closest('.feishu-table-chrome')) return;
     if (next instanceof Element && next.closest('.context-menu')) return;
     if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
@@ -864,6 +869,7 @@ export default function Editor({
     if (next instanceof Element && next.closest('.selection-bubble')) return;
     if (next instanceof Element && next.closest('.slash-menu')) return;
     if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
+    if (next instanceof Element && next.closest('.slash-columns-count-flyout')) return;
     if (next instanceof Element && next.closest('.feishu-table-chrome')) return;
     // 子菜单 Portal 在 body 下，移入浮层不应当作离开编辑器外壳
     if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
@@ -1598,7 +1604,7 @@ export default function Editor({
             {!readOnly && (
               <BoxBlockSelectionLayer editor={editor} editorAreaRef={editorAreaRef} readOnly={readOnly} />
             )}
-            {blockTools.visible && !readOnly && blockTools.type !== 'table' && (
+            {blockTools.visible && !readOnly && blockTools.type !== 'table' && !activeBlockElRef.current?.closest('.feishu-columns-node') && (
               <div
                 className="block-inline-tools"
                 style={{ top: blockTools.top }}
@@ -1611,6 +1617,7 @@ export default function Editor({
                   if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
                   if (next instanceof Element && next.closest('.slash-menu')) return;
                   if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
+                  if (next instanceof Element && next.closest('.slash-columns-count-flyout')) return;
                   if (next instanceof Element && next.closest('.feishu-table-chrome')) return;
                   setBlockGutterHoveredState(false);
                 }}
@@ -1623,6 +1630,8 @@ export default function Editor({
                       const next = getRelatedNode(e.relatedTarget);
                       if (next && e.currentTarget.contains(next)) return;
                       if (next instanceof Element && next.closest('.slash-menu')) return;
+                      if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
+                      if (next instanceof Element && next.closest('.slash-columns-count-flyout')) return;
                       schedulePlusMenuClose();
                     }}
                   >
@@ -1819,6 +1828,7 @@ export default function Editor({
           position={slashMenuPos}
           query={slashQuery}
           onClose={closeSlashMenu}
+          onBeforeSelect={() => editor.commands.focus()}
         />
       )}
       {slashMenuVisible && slashMenuFromPlus && (

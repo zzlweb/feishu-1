@@ -4,7 +4,8 @@
   "description": "飞书文档编辑器后端服务",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "node scripts/freePort.mjs 3000 && tsx watch src/index.ts",
+    "free-port": "node scripts/freePort.mjs 3000",
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "node --import tsx --test tests/api.test.ts"

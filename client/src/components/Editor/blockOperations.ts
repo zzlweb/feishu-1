@@ -241,8 +241,8 @@ export function moveBlockIntoColumns(editor: Editor, source: EditorBlockRef, tar
   const columnsNode = columnsType.create(
     null,
     Fragment.fromArray([
-      columnType.create({ widthRatio: 50 }, targetContent),
-      columnType.create({ widthRatio: 50 }, sourceContent),
+      columnType.create({ widthRatio: 1 }, targetContent),
+      columnType.create({ widthRatio: 1 }, sourceContent),
     ]),
   );
 

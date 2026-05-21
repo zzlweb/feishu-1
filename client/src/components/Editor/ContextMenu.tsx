@@ -40,13 +40,15 @@ import {
   SlashGlyphLink,
 } from '../../icons/slashMenuGlyphs';
 import { IconChevronMenuEnd } from '../../icons/feishuDoc';
-import { SLASH_SECTIONS } from './slashMenuConfig';
 import {
   ADD_BELOW_FLYOUT_MAX_HEIGHT,
   clampFlyoutHeight,
   computeSubmenuFlyoutPosition,
 } from './contextSubmenuFlyout';
-import { insertBelowSlashItem } from './insertBelowBlocks';
+import { getInsertBelowPosition, insertBelowSlashItem } from './insertBelowBlocks';
+import { insertFeishuTableAt } from './tableInsert';
+import { insertFeishuColumnsAt } from './columnsInsert';
+import AddBelowSlashSections from './AddBelowSlashSections';
 import FeishuColorPickerPanel from './FeishuColorPickerPanel';
 import { syncEditorSelectionToAnchoredBlock } from './blockAnchorSelection';
 import { copyCurrentBlockLink } from './blockLink';
@@ -230,6 +232,8 @@ export default function ContextMenu({ editor, x, y, onClose, anchorRef, blockAnc
     if (next.closest('.context-menu')) return true;
     if (next.closest('.context-submenu-flyout')) return true;
     if (next.closest('.context-add-below-flyout')) return true;
+    if (next.closest('.slash-table-grid-flyout')) return true;
+    if (next.closest('.slash-columns-count-flyout')) return true;
     return false;
   };
 
@@ -461,8 +465,6 @@ export default function ContextMenu({ editor, x, y, onClose, anchorRef, blockAnc
   };
 
   const submenuIconStroke = { strokeWidth: 2.75 };
-  const addBelowGridStroke = 1.65;
-  const addBelowListStroke = 1.55;
 
   const indentUi = getEditorIndentUiState(editor);
   const currentAlign = getCurrentTextAlign(editor);
@@ -596,70 +598,29 @@ export default function ContextMenu({ editor, x, y, onClose, anchorRef, blockAnc
         onMouseLeave={handleFlyoutMouseLeave}
         onMouseDown={e => e.preventDefault()}
       >
-        {SLASH_SECTIONS.map(section => (
-          <div
-            key={section.title}
-            className={`slash-section slash-section--${section.layout}${section.gridMuted ? ' slash-section--grid-muted' : ''}`}
-          >
-            <div className="slash-section-title">{section.title}</div>
-            {section.layout === 'grid' ? (
-              <div className="slash-basic-grid">
-                {section.items.map(item => {
-                  const Icon = item.Icon;
-                  const tint = item.iconColor ?? '#1f2329';
-                  return (
-                    <button
-                      key={`${section.title}-${item.label}`}
-                      type="button"
-                      className="slash-basic-cell"
-                      title={item.label}
-                      onMouseDown={e => {
-                        e.preventDefault();
-                        alignSelectionToBlockAnchor();
-                        insertBelowSlashItem(editor, section.title, item);
-                        onClose();
-                      }}
-                    >
-                      <span className="slash-basic-cell-icon" style={{ '--slash-icon-tint': tint } as CSSProperties}>
-                        <Icon size={18} strokeWidth={addBelowGridStroke} fill={tint} />
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              section.items.map(item => {
-                const Icon = item.Icon;
-                const tint = item.iconColor ?? '#1f2329';
-                return (
-                  <div
-                    key={`${section.title}-${item.label}`}
-                    className="slash-item"
-                    role="button"
-                    tabIndex={0}
-                    title={item.label}
-                    onMouseDown={e => {
-                      e.preventDefault();
-                      alignSelectionToBlockAnchor();
-                      insertBelowSlashItem(editor, section.title, item);
-                      onClose();
-                    }}
-                  >
-                    <span className="slash-icon-wrap" style={{ '--slash-icon-tint': tint } as CSSProperties}>
-                      <Icon size={18} strokeWidth={addBelowListStroke} fill={tint} />
-                    </span>
-                    <span className="slash-label">{item.label}</span>
-                    {item.hasArrow && (
-                      <span className="slash-arrow" aria-hidden>
-                        <IconChevronMenuEnd size={14} color="#8f959e" />
-                      </span>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        ))}
+        <AddBelowSlashSections
+          onPanelMouseEnter={() => {
+            clearSubMenuCloseTimer();
+            clearHoverDismissTimer();
+            onMouseEnterCancel?.();
+          }}
+          onPanelMouseLeave={handleFlyoutMouseLeave}
+          onPickItem={(sectionTitle, item) => {
+            alignSelectionToBlockAnchor();
+            insertBelowSlashItem(editor, sectionTitle, item);
+            onClose();
+          }}
+          onPickTable={(rows, cols) => {
+            alignSelectionToBlockAnchor();
+            insertFeishuTableAt(editor, getInsertBelowPosition(editor), rows, cols);
+            onClose();
+          }}
+          onPickColumns={columnCount => {
+            alignSelectionToBlockAnchor();
+            insertFeishuColumnsAt(editor, getInsertBelowPosition(editor), columnCount);
+            onClose();
+          }}
+        />
       </div>,
       document.body,
     );

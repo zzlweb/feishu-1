@@ -1,0 +1,70 @@
+@text-primary: #1f2329;
+@text-secondary: #8f959e;
+@border-light: #dee0e3;
+@bar-active: #95b5ff;
+@bar-inactive: #f2f2f2;
+
+.columns-count-picker {
+  box-sizing: border-box;
+  width: 184px;
+  padding: 12px 14px 14px;
+  background: #fff;
+  border: none;
+  border-radius: 8px;
+  box-shadow:
+    0 8px 24px rgba(31, 35, 41, 0.12),
+    0 2px 8px rgba(31, 35, 41, 0.06);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding: 0 2px;
+  }
+
+  &__title {
+    font-size: 12px;
+    line-height: 20px;
+    color: @text-secondary;
+    font-weight: 400;
+  }
+
+  &__size {
+    flex-shrink: 0;
+    min-width: 12px;
+    font-size: 12px;
+    line-height: 20px;
+    color: @text-primary;
+    font-weight: 500;
+    text-align: right;
+  }
+
+  &__bars {
+    display: flex;
+    align-items: stretch;
+    gap: 5px;
+    height: 36px;
+    padding: 8px 10px;
+    border: 1px solid @border-light;
+    border-radius: 6px;
+    background: #fff;
+  }
+
+  &__bar {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: @bar-inactive;
+    cursor: pointer;
+    transition: background 0.08s ease;
+
+    &.is-active {
+      background: @bar-active;
+    }
+  }
+}

@@ -5,7 +5,9 @@ import { IconChevronMenuEnd } from '../../icons/feishuDoc';
 import type { SlashMenuItem } from './slashMenuConfig';
 import { SLASH_SECTIONS, itemMatchesQuery } from './slashMenuConfig';
 import TableGridPicker from './TableGridPicker';
+import ColumnsCountPicker from './ColumnsCountPicker';
 import { insertFeishuTable } from './tableInsert';
+import { insertFeishuColumns } from './columnsInsert';
 import './SlashMenu.less';
 
 interface Props {
@@ -23,11 +25,14 @@ interface Props {
 export default function SlashMenu({ editor, position, query, onClose, onBeforeSelect, onMouseEnter, onMouseLeave, variant = 'fixed', anchorRef }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const tableFlyoutRef = useRef<HTMLDivElement>(null);
+  const columnsFlyoutRef = useRef<HTMLDivElement>(null);
   const tableSubMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const columnsSubMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const [renderPos, setRenderPos] = useState(position);
   const [tooltipItem, setTooltipItem] = useState<{ item: SlashMenuItem; rect: DOMRect } | null>(null);
   const [tableGridFlyoutPos, setTableGridFlyoutPos] = useState<{ top: number; left: number } | null>(null);
+  const [columnsCountFlyoutPos, setColumnsCountFlyoutPos] = useState<{ top: number; left: number } | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const filteredSections = SLASH_SECTIONS.map(s => ({
@@ -44,13 +49,26 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     }
   };
 
+  const clearColumnsSubMenuTimer = () => {
+    if (columnsSubMenuCloseTimerRef.current) {
+      clearTimeout(columnsSubMenuCloseTimerRef.current);
+      columnsSubMenuCloseTimerRef.current = null;
+    }
+  };
+
   const scheduleTableSubMenuClose = () => {
     clearTableSubMenuTimer();
     tableSubMenuCloseTimerRef.current = setTimeout(() => setTableGridFlyoutPos(null), 220);
   };
 
+  const scheduleColumnsSubMenuClose = () => {
+    clearColumnsSubMenuTimer();
+    columnsSubMenuCloseTimerRef.current = setTimeout(() => setColumnsCountFlyoutPos(null), 220);
+  };
+
   const openTableGridFlyout = (el: HTMLElement) => {
     clearTableSubMenuTimer();
+    setColumnsCountFlyoutPos(null);
     const r = el.getBoundingClientRect();
     const pad = 8;
     const panelW = 220;
@@ -67,6 +85,25 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     setTableGridFlyoutPos({ top, left });
   };
 
+  const openColumnsCountFlyout = (el: HTMLElement) => {
+    clearColumnsSubMenuTimer();
+    setTableGridFlyoutPos(null);
+    const r = el.getBoundingClientRect();
+    const pad = 8;
+    const panelW = 184;
+    const gap = 2;
+    let left = r.right + gap;
+    if (left + panelW > window.innerWidth - pad) {
+      left = Math.max(pad, r.left - panelW - gap);
+    }
+    let top = r.top - 2;
+    const panelH = 96;
+    if (top + panelH > window.innerHeight - pad) {
+      top = Math.max(pad, window.innerHeight - pad - panelH);
+    }
+    setColumnsCountFlyoutPos({ top, left });
+  };
+
   useEffect(() => {
     if (allItems.length === 0) onClose();
   }, [allItems.length, onClose]);
@@ -74,6 +111,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   useEffect(() => {
     setActiveIdx(0);
     setTableGridFlyoutPos(null);
+    setColumnsCountFlyoutPos(null);
   }, [query]);
 
   useLayoutEffect(() => {
@@ -136,6 +174,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     return () => {
       window.removeEventListener('keydown', handler, true);
       clearTableSubMenuTimer();
+      clearColumnsSubMenuTimer();
     };
   }, [allItems, activeIdx, editor, onBeforeSelect, onClose]);
 
@@ -146,7 +185,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const listStroke = 1.55;
 
   const showTooltip = (item: SlashMenuItem, el: HTMLElement) => {
-    if (item.submenu === 'tableGrid') return;
+    if (item.submenu === 'tableGrid' || item.submenu === 'columnsCount') return;
     clearTimeout(tooltipTimerRef.current);
     tooltipTimerRef.current = setTimeout(() => {
       setTooltipItem({ item, rect: el.getBoundingClientRect() });
@@ -170,6 +209,12 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const handleTablePick = (rows: number, cols: number) => {
     onBeforeSelect?.();
     insertFeishuTable(editor, rows, cols);
+    onClose();
+  };
+
+  const handleColumnsPick = (columnCount: number) => {
+    onBeforeSelect?.();
+    insertFeishuColumns(editor, columnCount);
     onClose();
   };
 
@@ -200,6 +245,33 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
       document.body,
     );
 
+  const columnsCountFlyout =
+    columnsCountFlyoutPos &&
+    createPortal(
+      <div
+        ref={columnsFlyoutRef}
+        className="slash-columns-count-flyout"
+        style={{
+          position: 'fixed',
+          top: columnsCountFlyoutPos.top,
+          left: columnsCountFlyoutPos.left,
+          zIndex: 10060,
+        }}
+        onMouseEnter={() => {
+          clearColumnsSubMenuTimer();
+          onMouseEnter?.();
+        }}
+        onMouseLeave={() => {
+          scheduleColumnsSubMenuClose();
+          onMouseLeave?.();
+        }}
+        onMouseDown={e => e.preventDefault()}
+      >
+        <ColumnsCountPicker onPick={handleColumnsPick} />
+      </div>,
+      document.body,
+    );
+
   return (
     <Fragment>
       <div
@@ -210,6 +282,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
         onMouseLeave={() => {
           hideTooltip();
           scheduleTableSubMenuClose();
+          scheduleColumnsSubMenuClose();
           onMouseLeave?.();
         }}
       >
@@ -255,10 +328,12 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                 const Icon = item.Icon;
                 const tint = item.iconColor ?? '#1f2329';
                 const isTableGrid = item.submenu === 'tableGrid';
+                const isColumnsCount = item.submenu === 'columnsCount';
+                const hasSubmenu = isTableGrid || isColumnsCount;
                 return (
                   <div
                     key={`${section.title}-${item.label}`}
-                    className={`slash-item ${idx === activeIdx ? 'active' : ''}${isTableGrid ? ' slash-item--has-submenu' : ''}`}
+                    className={`slash-item ${idx === activeIdx ? 'active' : ''}${hasSubmenu ? ' slash-item--has-submenu' : ''}`}
                     role="button"
                     tabIndex={0}
                     title={hasTooltipContent(item) ? undefined : item.label}
@@ -267,18 +342,22 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                       if (isTableGrid) {
                         hideTooltip();
                         openTableGridFlyout(e.currentTarget);
+                      } else if (isColumnsCount) {
+                        hideTooltip();
+                        openColumnsCountFlyout(e.currentTarget);
                       } else if (hasTooltipContent(item)) {
                         showTooltip(item, e.currentTarget);
                       }
                     }}
                     onMouseLeave={() => {
-                      if (!isTableGrid) hideTooltip();
+                      if (!hasSubmenu) hideTooltip();
                       if (isTableGrid) scheduleTableSubMenuClose();
+                      if (isColumnsCount) scheduleColumnsSubMenuClose();
                     }}
                     onMouseDown={e => {
                       e.preventDefault();
                       e.stopPropagation();
-                      if (!isTableGrid) runItemAction(item);
+                      if (!hasSubmenu) runItemAction(item);
                     }}
                   >
                     <span className="slash-icon-wrap" style={{ '--slash-icon-tint': tint } as CSSProperties}>
@@ -322,6 +401,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
         )}
       </div>
       {tableGridFlyout}
+      {columnsCountFlyout}
     </Fragment>
   );
 }

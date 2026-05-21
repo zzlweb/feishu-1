@@ -1,13 +1,38 @@
 import type { Document, ApiResponse, Comment, Template } from '../types';
 
 const BASE_URL = '/api';
+const REQUEST_TIMEOUT_MS = 10000;
 
 async function request<T>(url: string, options?: RequestInit): Promise<ApiResponse<T>> {
-  const res = await fetch(`${BASE_URL}${url}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-  return res.json();
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(`${BASE_URL}${url}`, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      ...options,
+    });
+
+    if (!res.ok) {
+      return {
+        code: res.status,
+        message: `请求失败 (${res.status})`,
+      };
+    }
+
+    return await res.json();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return { code: -1, message: '请求超时，请确认后端服务已启动' };
+    }
+    return {
+      code: -1,
+      message: error instanceof Error ? error.message : '网络请求失败',
+    };
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 // Documents

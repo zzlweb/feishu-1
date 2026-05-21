@@ -78,13 +78,16 @@ export default function DocumentPage() {
   const loadDocument = useCallback(async () => {
     if (!id) return;
     setLoading(true);
-    const res = await getDocument(id);
-    if (res.code === 0 && res.data) {
-      setDoc(res.data);
-    } else {
-      navigate('/');
+    try {
+      const res = await getDocument(id);
+      if (res.code === 0 && res.data) {
+        setDoc(res.data);
+      } else {
+        navigate('/');
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [id, navigate]);
 
   useEffect(() => {
