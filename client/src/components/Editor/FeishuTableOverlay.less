@@ -2,7 +2,7 @@
 @rail-bg: #f5f6f7;
 @dot: #bbbfc4;
 @dot-size: 4px;
-@hit-size: 16px;
+@hit-size: 18px;
 
 /**
  * 飞书表格操作层：鼠标进入表格显示全部边界灰点；悬停某一边界变为蓝 +。
@@ -19,10 +19,10 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    padding: 4px 7px;
+    padding: 3px 5px;
     margin: 0;
     border: 1px solid #dee0e3;
-    border-radius: 6px;
+    border-radius: 4px;
     background: #fff;
     box-shadow: 0 1px 4px rgba(31, 35, 41, 0.08);
     cursor: pointer;
@@ -36,6 +36,8 @@
 
     &:hover,
     &.is-hovered {
+      border-color: #b7eb8f;
+      background: #f6ffed;
       box-shadow: 0 2px 8px rgba(31, 35, 41, 0.12);
     }
   }
@@ -62,6 +64,14 @@
     visibility: hidden;
     z-index: 12;
     transition: opacity 0.12s ease, visibility 0.12s ease;
+    
+    /* 强制隐藏默认滚动条，以防 overflow 组合计算为 auto 时出现浏览器滚动条 */
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+    }
   }
 
   &__rail-top {
@@ -109,6 +119,11 @@
       &.is-edge-end {
         transform: translate(-50%, -100%);
       }
+
+      .feishu-table-chrome__rail-plus {
+        inset: 0;
+        transform-origin: center;
+      }
     }
 
     &:hover .feishu-table-chrome__rail-plus,
@@ -136,7 +151,7 @@
 
   &__rail-plus {
     position: absolute;
-    inset: 0;
+    inset: 1px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -149,21 +164,22 @@
     opacity: 0;
     transform: scale(0.6);
     pointer-events: none;
-    box-shadow: 0 2px 8px rgba(51, 112, 255, 0.35);
+    box-shadow: 0 2px 6px rgba(51, 112, 255, 0.4);
     transition:
       opacity 0.12s ease,
       transform 0.12s ease;
 
     &:hover {
-      background: #2860e1;
+      background: #2b5cce;
     }
   }
 
   &__rail-plus-icon {
     color: #fff;
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 16px;
+    font-weight: 400;
     line-height: 1;
+    margin-top: -1px;
   }
 
   &__insert-col,
@@ -237,4 +253,19 @@
 .feishu-table-chrome__hit.is-active .feishu-table-chrome__dot,
 .feishu-table-chrome__hit:hover .feishu-table-chrome__dot {
   opacity: 0;
+}
+
+.feishu-table-chrome__select-col,
+.feishu-table-chrome__select-row {
+  transition: background 0.12s ease;
+  z-index: 10;
+  box-sizing: border-box;
+
+  &:hover {
+    background: rgba(31, 35, 41, 0.06) !important;
+  }
+
+  &.is-selected {
+    background: #3370ff !important;
+  }
 }

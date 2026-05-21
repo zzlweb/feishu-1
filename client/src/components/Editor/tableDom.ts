@@ -56,7 +56,7 @@ function ensureTableEdgeFades(host: HTMLElement) {
   return { left: edgeFadeLeft, right: edgeFadeRight };
 }
 
-/** hover 时同步右侧/左侧内阴影，提示尚有被遮挡的列 */
+/** 同步左右渐隐阴影：只要表格横向溢出文档区域就持续显示 */
 export function syncTableScrollEdgeFade(host: HTMLElement, show: boolean) {
   const surface = getTableScrollFromHost(host);
   const edgeFades = ensureTableEdgeFades(host);
@@ -67,13 +67,13 @@ export function syncTableScrollEdgeFade(host: HTMLElement, show: boolean) {
     edgeFades?.right.classList.remove('is-visible');
   };
 
-  if (!show) {
+  const maxScroll = surface.scrollWidth - surface.clientWidth;
+  const hasOverflow = maxScroll > 2;
+  if (!hasOverflow) {
     clearFade();
     return;
   }
 
-  const maxScroll = surface.scrollWidth - surface.clientWidth;
-  const hasOverflow = maxScroll > 2;
   const atStart = surface.scrollLeft <= 1;
   const atEnd = surface.scrollLeft >= maxScroll - 1;
   const showRight = hasOverflow && !atEnd;

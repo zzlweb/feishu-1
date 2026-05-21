@@ -84,13 +84,16 @@ export default function TableContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const indentTriggerRef = useRef<HTMLDivElement>(null);
   const addBelowTriggerRef = useRef<HTMLDivElement>(null);
+  const colorTriggerRef = useRef<HTMLDivElement>(null);
   const indentFlyoutRef = useRef<HTMLDivElement>(null);
   const addBelowFlyoutRef = useRef<HTMLDivElement>(null);
+  const colorFlyoutRef = useRef<HTMLDivElement>(null);
   const subMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [subMenu, setSubMenu] = useState<string | null>(null);
   const [indentFlyoutPos, setIndentFlyoutPos] = useState<{ top: number; left: number } | null>(null);
   const [addBelowFlyoutPos, setAddBelowFlyoutPos] = useState<{ top: number; left: number } | null>(null);
+  const [colorFlyoutPos, setColorFlyoutPos] = useState<{ top: number; left: number } | null>(null);
   const [finalPos, setFinalPos] = useState({ x, y });
   const [posVisible, setPosVisible] = useState(false);
 
@@ -133,6 +136,7 @@ export default function TableContextMenu({
     if (menuRef.current?.contains(next)) return true;
     if (indentFlyoutRef.current?.contains(next)) return true;
     if (addBelowFlyoutRef.current?.contains(next)) return true;
+    if (colorFlyoutRef.current?.contains(next)) return true;
     if (anchorRef?.current?.contains(next)) return true;
     if (next.closest('.feishu-table-chrome')) return true;
     if (next.closest('.context-menu')) return true;
@@ -172,7 +176,8 @@ export default function TableContextMenu({
   useLayoutEffect(() => {
     setIndentFlyoutPos(null);
     setAddBelowFlyoutPos(null);
-    if (subMenu !== 'indent' && subMenu !== 'addBelow') return;
+    setColorFlyoutPos(null);
+    if (subMenu !== 'indent' && subMenu !== 'addBelow' && subMenu !== 'cellColor') return;
 
     const updateFlyouts = () => {
       if (subMenu === 'indent') {
@@ -201,6 +206,19 @@ export default function TableContextMenu({
             trigger: el.getBoundingClientRect(),
             panelWidth: 280,
             panelHeight: panelH,
+          }),
+        );
+        return;
+      }
+
+      if (subMenu === 'cellColor') {
+        const el = colorTriggerRef.current;
+        if (!el) return;
+        setColorFlyoutPos(
+          computeSubmenuFlyoutPosition({
+            trigger: el.getBoundingClientRect(),
+            panelWidth: 200,
+            panelHeight: 120,
           }),
         );
       }
@@ -279,6 +297,71 @@ export default function TableContextMenu({
     editor.commands.fixTables();
     onClose();
   };
+
+  const handleAddRowBefore = () => {
+    alignSelectionToBlockAnchor();
+    editor.chain().focus().addRowBefore().run();
+    onClose();
+  };
+
+  const handleAddRowAfter = () => {
+    alignSelectionToBlockAnchor();
+    editor.chain().focus().addRowAfter().run();
+    onClose();
+  };
+
+  const handleAddColBefore = () => {
+    alignSelectionToBlockAnchor();
+    editor.chain().focus().addColumnBefore().run();
+    onClose();
+  };
+
+  const handleAddColAfter = () => {
+    alignSelectionToBlockAnchor();
+    editor.chain().focus().addColumnAfter().run();
+    onClose();
+  };
+
+  const handleDeleteRow = () => {
+    alignSelectionToBlockAnchor();
+    editor.chain().focus().deleteRow().run();
+    onClose();
+  };
+
+  const handleDeleteCol = () => {
+    alignSelectionToBlockAnchor();
+    editor.chain().focus().deleteColumn().run();
+    onClose();
+  };
+
+  const handleMergeCells = () => {
+    alignSelectionToBlockAnchor();
+    editor.chain().focus().mergeCells().run();
+    onClose();
+  };
+
+  const handleSplitCell = () => {
+    alignSelectionToBlockAnchor();
+    editor.chain().focus().splitCell().run();
+    onClose();
+  };
+
+  const handleSetCellColor = (color: string | null) => {
+    alignSelectionToBlockAnchor();
+    editor.chain().focus().setCellAttribute('backgroundColor', color).run();
+    onClose();
+  };
+
+  const CELL_COLORS = [
+    { label: '清除', value: null, color: '#ffffff', border: '#dee0e3' },
+    { label: '红色', value: '#ffccc7', color: '#ffccc7', border: '#ffccc7' },
+    { label: '橙色', value: '#ffe7ba', color: '#ffe7ba', border: '#ffe7ba' },
+    { label: '黄色', value: '#fff1b8', color: '#fff1b8', border: '#fff1b8' },
+    { label: '绿色', value: '#d9f7be', color: '#d9f7be', border: '#d9f7be' },
+    { label: '蓝色', value: '#bae7ff', color: '#bae7ff', border: '#bae7ff' },
+    { label: '紫色', value: '#efdbff', color: '#efdbff', border: '#efdbff' },
+    { label: '灰色', value: '#f5f5f5', color: '#f5f5f5', border: '#f5f5f5' },
+  ];
 
   const submenuIconStroke = { strokeWidth: 2.75 };
 
@@ -427,6 +510,54 @@ export default function TableContextMenu({
       document.body,
     );
 
+  const cellColorFlyout =
+    subMenu === 'cellColor' &&
+    colorFlyoutPos &&
+    createPortal(
+      <div
+        ref={colorFlyoutRef}
+        className="context-submenu-flyout context-align-flyout"
+        style={{
+          position: 'fixed',
+          top: colorFlyoutPos.top,
+          left: colorFlyoutPos.left,
+          zIndex: 10060,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '6px',
+          padding: '8px',
+          width: '160px',
+        }}
+        onMouseEnter={() => {
+          clearSubMenuCloseTimer();
+          clearHoverDismissTimer();
+          onMouseEnterCancel?.();
+        }}
+        onMouseLeave={handleFlyoutMouseLeave}
+        onMouseDown={e => e.preventDefault()}
+      >
+        {CELL_COLORS.map(c => (
+          <button
+            key={c.label}
+            type="button"
+            className="context-color-cell"
+            style={{
+              width: '28px',
+              height: '28px',
+              borderRadius: '4px',
+              background: c.color || 'transparent',
+              border: `1px solid ${c.border}`,
+              cursor: 'pointer',
+              padding: 0,
+            }}
+            title={c.label}
+            onClick={() => handleSetCellColor(c.value)}
+          />
+        ))}
+      </div>,
+      document.body,
+    );
+
   return (
     <Fragment>
       <div
@@ -564,6 +695,7 @@ export default function TableContextMenu({
       </div>
       {indentFlyout}
       {addBelowFlyout}
+      {cellColorFlyout}
     </Fragment>
   );
 }

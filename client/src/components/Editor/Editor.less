@@ -13,7 +13,7 @@
 @font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
   "Microsoft YaHei", sans-serif;
 
-/** 版心宽度：视口变窄时不缩小该宽度，超出部分由外层横向裁切，正文不因容器变窄而重排换行 */
+/** 版心宽度：视口变窄时不缩小该宽度，超出部分由外层横向裁切，正文不因容器变窄而重排换�?*/
 @editor-page-width: 860px;
 
 .editor-wrap {
@@ -50,7 +50,7 @@
       position: relative;
       padding-top: 34px;
 
-      // Hover meta bar — absolutely positioned in the top padding, no layout push
+      // Hover meta bar �?absolutely positioned in the top padding, no layout push
       .page-block-header-top {
         position: absolute;
         top: 6px;
@@ -962,10 +962,10 @@
         }
 
         hr {
-          display: none; // 安全备用：NodeView 已全量接管渲染
+          display: none; // 安全备用：NodeView 已全量接管渲�?
         }
 
-        // 飞书风格分割线
+        // 飞书风格分割�?
         .feishu-divider {
           display: flex;
           align-items: center;
@@ -1171,7 +1171,7 @@
           width: 100%;
           max-width: 100%;
           isolation: isolate;
-          /* 为表格外侧操作点/块柄预留稳定空间，避免被滚动区裁剪 */
+          /* 为表格外侧操作点/块柄预留稳定空间，避免被滚动区裁�?*/
           margin: @feishu-table-chrome-gutter 0 8px @feishu-table-chrome-gutter;
           padding: 0;
           overflow: visible;
@@ -1185,59 +1185,26 @@
           overflow-x: auto;
           overflow-y: hidden;
           -webkit-overflow-scrolling: touch;
-          /* 始终预留横向滚动条高度，hover 只改滑块颜色 */
+          /* Ĭ�����ع�����������ʱ��ɫ */
           scrollbar-width: thin;
           scrollbar-color: transparent transparent;
 
           &::-webkit-scrollbar {
-            height: 10px;
+            height: 8px;
           }
 
           &::-webkit-scrollbar-thumb {
             background: transparent;
-            border-radius: 5px;
+            border-radius: 4px;
           }
 
           &::-webkit-scrollbar-track {
             background: transparent;
-          }
-
-          /* 右侧内阴影：提示右侧还有被遮挡的列（仅 hover 且未滚到底） */
-          &.feishu-table-scroll--fade-right::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 48px;
-            height: calc(100% - 10px);
-            pointer-events: none;
-            z-index: 4;
-            background: linear-gradient(
-              270deg,
-              rgba(31, 35, 41, 0.14) 0%,
-              rgba(31, 35, 41, 0.06) 42%,
-              rgba(31, 35, 41, 0) 100%
-            );
-          }
-
-          &.feishu-table-scroll--fade-left::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 32px;
-            height: calc(100% - 10px);
-            pointer-events: none;
-            z-index: 4;
-            background: linear-gradient(
-              90deg,
-              rgba(31, 35, 41, 0.1) 0%,
-              rgba(31, 35, 41, 0) 100%
-            );
+            margin: 0 4px;
           }
         }
 
-        /* 左右渐隐：独立层叠在 scroll 之上，避免 overflow 裁剪 */
+        /* 左右渐隐：独立层叠在 scroll 之上，避�?overflow 裁剪 */
         .feishu-table-edge-fades {
           position: absolute;
           top: 0;
@@ -1283,7 +1250,8 @@
           }
         }
 
-        .feishu-table-host--chrome-hot .feishu-table-scroll {
+        .feishu-table-host--chrome-hot .feishu-table-scroll,
+        .feishu-table-scroll:hover {
           scrollbar-color: #c9cdd4 transparent;
 
           &::-webkit-scrollbar-thumb {
@@ -1291,13 +1259,21 @@
           }
         }
 
-        /* 块柄悬停 / 表格菜单打开：整表蓝色选中态（对齐飞书） */
-        .feishu-table-host.is-table-block-active,
-        .feishu-table-host.ProseMirror-selectednode {
+        /* 块柄悬停 / 表格菜单打开：对齐飞书，保持单元格白色底色，无需高亮整表为蓝色 */
+        .tableWrapper.is-table-block-active,
+        .feishu-table-host.is-table-block-active {
           table.feishu-table {
-            th,
-            td {
+            border-color: #dee0e3 !important;
+
+            .selectedCell {
               background: rgba(51, 112, 255, 0.08) !important;
+            }
+
+            .selectedCell::after {
+              display: none !important;
+              content: none !important;
+              opacity: 0 !important;
+              background: transparent !important;
             }
           }
         }
@@ -1313,21 +1289,26 @@
           overflow: visible;
         }
 
-        /* 无内层 scroll 的旧 DOM（兼容） */
+        /* 无内�?scroll 的旧 DOM（兼容） */
         .tableWrapper:not(:has(.feishu-table-scroll)),
         .feishu-table-host:not(:has(.feishu-table-scroll)) {
           overflow-x: auto;
           overflow-y: hidden;
           scrollbar-width: thin;
-          scrollbar-color: transparent transparent;
+          scrollbar-color: #c9cdd4 transparent;
 
           &::-webkit-scrollbar {
-            height: 10px;
+            height: 8px;
           }
 
           &::-webkit-scrollbar-thumb {
+            background: #c9cdd4;
+            border-radius: 4px;
+          }
+
+          &::-webkit-scrollbar-track {
             background: transparent;
-            border-radius: 5px;
+            margin: 0 4px;
           }
         }
 
@@ -1339,7 +1320,7 @@
           }
         }
 
-        // 飞书风格表格：细灰边框、首行浅灰表头
+        // 飞书风格表格：细灰边框、首行浅灰表�?
         table.feishu-table,
         .tableWrapper table.feishu-table,
         .feishu-table-host table.feishu-table {
@@ -1367,6 +1348,7 @@
             box-sizing: border-box !important;
             background: #ffffff !important;
             display: table-cell !important;
+            position: relative !important;
 
             > *:first-child {
               margin-top: 0 !important;
@@ -1384,7 +1366,7 @@
             }
           }
 
-          /* 仅开启「标题行/列」时（th）：浅灰底 + 正文加粗 */
+          /* 仅开启「标题行/列」时（th）：浅灰�?+ 正文加粗 */
           th,
           .feishu-table__header-cell {
             font-weight: 600 !important;
@@ -1520,7 +1502,7 @@
     gap: 0;
     margin: 0;
     padding: 0;
-    /* 右缘对齐正文左缘，整体落在容器左侧 padding 空档内，避免盖住首字 */
+    /* 右缘对齐正文左缘，整体落在容器左�?padding 空档内，避免盖住首字 */
     transform: translate(calc(-100% - 4px), -50%);
     pointer-events: auto;
 
@@ -1929,6 +1911,7 @@
       }
     }
   }
+
 }
 
 @keyframes feishu-block-link-highlight {
