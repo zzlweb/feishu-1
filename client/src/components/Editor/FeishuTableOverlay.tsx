@@ -3,7 +3,12 @@ import { useCallback, useLayoutEffect, useRef, useState, type Ref } from 'react'
 import { createPortal } from 'react-dom';
 import { IconDragOutlined } from '../../icons/feishuDoc';
 import { SlashGlyphTable } from '../../icons/slashMenuGlyphs';
-import { getTableChromeMountFromHost, getTableElementFromHost } from './tableDom';
+import {
+  getTableChromeMountFromHost,
+  getTableElementFromHost,
+  getTableScrollFromHost,
+  syncTableScrollEdgeFade,
+} from './tableDom';
 import {
   getTablePosFromHost,
   insertTableColumnAtBoundary,
@@ -28,9 +33,10 @@ interface TableLayout {
   tableOffsetLeft: number;
   tableOffsetTop: number;
   viewportWidth: number;
-  viewportHeight: number;
+  viewStart: number;
   scrollLeft: number;
   tableWidth: number;
+  tableHeight: number;
   rowBounds: number[];
   colBounds: number[];
 }
@@ -46,55 +52,62 @@ interface Props {
   onTableHandleActiveChange?: (active: boolean) => void;
 }
 
-function isBoundVisible(pos: number, viewport: number): boolean {
-  return pos >= -HIT_MARGIN && pos <= viewport + HIT_MARGIN;
+function isBoundVisible(pos: number, viewStart: number, viewWidth: number): boolean {
+  return pos >= viewStart - HIT_MARGIN && pos <= viewStart + viewWidth + HIT_MARGIN;
 }
 
-/** 坐标相对 tableHost 可视区域（getBoundingClientRect，含横向滚动后的屏幕位置） */
+/** 坐标相对 chrome-mount（表格外侧 gutter，不被 scroll 裁剪） */
 function measureTableLayout(host: HTMLElement): TableLayout | null {
   const table = getTableElementFromHost(host);
   if (!table) return null;
 
-  const hostRect = host.getBoundingClientRect();
-  const scrollLeft = host.scrollLeft;
+  const mount = getTableChromeMountFromHost(host);
+  const surface = getTableScrollFromHost(host);
+  const originRect = mount.getBoundingClientRect();
+  const surfaceRect = surface.getBoundingClientRect();
+  const scrollLeft = surface.scrollLeft;
+  const viewStart = surfaceRect.left - originRect.left;
   const tableRect = table.getBoundingClientRect();
-  const tableOffsetLeft = tableRect.left - hostRect.left;
-  const tableOffsetTop = tableRect.top - hostRect.top;
+  const tableOffsetLeft = tableRect.left - originRect.left;
+  const tableOffsetTop = tableRect.top - originRect.top;
 
   const trs = Array.from(table.querySelectorAll('tr'));
   const rowBounds: number[] = [];
   for (const tr of trs) {
     const r = tr.getBoundingClientRect();
-    rowBounds.push(r.top - hostRect.top);
+    rowBounds.push(r.top - originRect.top);
   }
   if (trs.length > 0) {
     const lastTr = trs[trs.length - 1] as HTMLElement;
     const r = lastTr.getBoundingClientRect();
-    rowBounds.push(r.bottom - hostRect.top);
+    rowBounds.push(r.bottom - originRect.top);
   }
 
   const cells = trs[0] ? Array.from(trs[0].querySelectorAll('th, td')) : [];
   const colBounds: number[] = [];
   for (const cell of cells) {
     const r = (cell as HTMLElement).getBoundingClientRect();
-    colBounds.push(r.left - hostRect.left);
+    colBounds.push(r.left - originRect.left);
   }
   if (cells.length > 0) {
     const last = cells[cells.length - 1] as HTMLElement;
     const r = last.getBoundingClientRect();
-    colBounds.push(r.right - hostRect.left);
+    colBounds.push(r.right - originRect.left);
   }
 
-  const viewportWidth = host.clientWidth;
-  const viewportHeight = Math.max(host.clientHeight, hostRect.height);
+  const tableHeight = rowBounds.length > 0
+    ? rowBounds[rowBounds.length - 1] - tableOffsetTop
+    : table.offsetHeight;
+  const viewportWidth = surface.clientWidth;
 
   return {
     tableOffsetLeft,
     tableOffsetTop,
     viewportWidth,
-    viewportHeight,
+    viewStart,
     scrollLeft,
     tableWidth: table.offsetWidth,
+    tableHeight,
     rowBounds,
     colBounds,
   };
@@ -121,9 +134,11 @@ function FeishuTableOverlay({
   const tableHoverRef = useRef(false);
   const handleHoverRef = useRef(false);
   const pinChromeRef = useRef(pinChrome);
+  const chromeVisibleRef = useRef(chromeVisible);
   const hideChromeTimerRef = useRef<number | null>(null);
 
   pinChromeRef.current = pinChrome;
+  chromeVisibleRef.current = chromeVisible;
 
   const clearHover = useCallback(() => {
     setHoverCol(null);
@@ -145,21 +160,31 @@ function FeishuTableOverlay({
       tableHoverRef.current = false;
       syncHostChromeHot(tableHost, false);
       setChromeVisible(false);
+      syncTableScrollEdgeFade(tableHost, false);
       clearHover();
     }, 280);
   }, [cancelHideChrome, clearHover, tableHost]);
 
   const showChrome = chromeVisible || handleHovered || pinChrome;
-  const railOpacity = showChrome ? 1 : 0;
-  const handleOpacity = showChrome || handleHovered ? 1 : 0;
+
+  const syncScrollFade = useCallback(() => {
+    const hot =
+      tableHoverRef.current
+      || handleHoverRef.current
+      || pinChromeRef.current
+      || chromeVisibleRef.current;
+    syncTableScrollEdgeFade(tableHost, hot);
+  }, [tableHost]);
 
   const remeasure = useCallback(() => {
     if (!tableHost.isConnected) {
       setLayout(null);
+      syncTableScrollEdgeFade(tableHost, false);
       return;
     }
     setLayout(measureTableLayout(tableHost));
-  }, [tableHost]);
+    syncScrollFade();
+  }, [syncScrollFade, tableHost]);
 
   const remeasureSoon = useCallback(() => {
     remeasure();
@@ -172,8 +197,10 @@ function FeishuTableOverlay({
   useLayoutEffect(() => {
     setLayout(measureTableLayout(tableHost));
     remeasureSoon();
+    const surface = getTableScrollFromHost(tableHost);
     const ro = new ResizeObserver(remeasureSoon);
     ro.observe(tableHost);
+    ro.observe(surface);
     const table = getTableElementFromHost(tableHost);
     let mo: MutationObserver | null = null;
     if (table) ro.observe(table);
@@ -181,13 +208,13 @@ function FeishuTableOverlay({
     if (table) mo.observe(table, { childList: true, subtree: true, attributes: true });
     window.addEventListener('resize', remeasureSoon);
     document.addEventListener('scroll', remeasureSoon, true);
-    tableHost.addEventListener('scroll', remeasureSoon);
+    surface.addEventListener('scroll', remeasureSoon, { passive: true });
     return () => {
       ro.disconnect();
       mo?.disconnect();
       window.removeEventListener('resize', remeasureSoon);
       document.removeEventListener('scroll', remeasureSoon, true);
-      tableHost.removeEventListener('scroll', remeasureSoon);
+      surface.removeEventListener('scroll', remeasureSoon);
     };
   }, [remeasureSoon, tableHost]);
 
@@ -221,7 +248,9 @@ function FeishuTableOverlay({
     cancelHideChrome();
     tableHoverRef.current = true;
     syncHostChromeHot(tableHost, true);
+    chromeVisibleRef.current = true;
     setChromeVisible(true);
+    syncTableScrollEdgeFade(tableHost, true);
   }, [cancelHideChrome, tableHost]);
 
   useLayoutEffect(() => {
@@ -238,7 +267,7 @@ function FeishuTableOverlay({
       if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
       if (handleHoverRef.current) return;
       tableHoverRef.current = false;
-      syncHostChromeHot(tableHost, false);
+      if (!pinChromeRef.current) syncHostChromeHot(tableHost, false);
       scheduleHideChrome();
     };
     tableHost.addEventListener('pointerenter', onHostPointerEnter);
@@ -260,14 +289,33 @@ function FeishuTableOverlay({
 
   useLayoutEffect(() => () => cancelHideChrome(), [cancelHideChrome]);
 
+  useLayoutEffect(() => {
+    if (pinChrome) {
+      activateTableChrome();
+      return;
+    }
+    if (
+      tableHoverRef.current
+      || handleHoverRef.current
+      || isPointerOverHost(tableHost)
+    ) {
+      return;
+    }
+    syncHostChromeHot(tableHost, false);
+    chromeVisibleRef.current = false;
+    setChromeVisible(false);
+    syncTableScrollEdgeFade(tableHost, false);
+  }, [activateTableChrome, pinChrome, tableHost]);
+
   if (!layout || !tableHost.isConnected) return null;
 
   const {
     tableOffsetLeft,
     tableOffsetTop,
     viewportWidth,
-    viewportHeight,
+    viewStart,
     tableWidth,
+    tableHeight,
     colBounds,
     rowBounds,
   } = layout;
@@ -275,7 +323,7 @@ function FeishuTableOverlay({
   const handleLeft = tableOffsetLeft;
   const visibleColHits = colBounds
     .map((x, i) => ({ x, i }))
-    .filter(({ x }) => isBoundVisible(x, viewportWidth));
+    .filter(({ x }) => isBoundVisible(x, viewStart, viewportWidth));
   const colHitsToRender =
     visibleColHits.length > 0 ? visibleColHits : colBounds.map((x, i) => ({ x, i }));
 
@@ -301,7 +349,6 @@ function FeishuTableOverlay({
           left: handleLeft,
           top: tableOffsetTop,
           transform: 'translate(-100%, -100%)',
-          opacity: handleOpacity,
         }}
         onMouseDown={e => e.preventDefault()}
         onMouseEnter={() => {
@@ -336,11 +383,10 @@ function FeishuTableOverlay({
       <div
         className="feishu-table-chrome__rail-top"
         style={{
-          left: 0,
-          top: Math.max(0, tableOffsetTop - RAIL),
-          width: viewportWidth,
+          left: tableOffsetLeft,
+          top: tableOffsetTop - RAIL,
+          width: tableWidth,
           height: RAIL,
-          opacity: railOpacity,
         }}
         onMouseEnter={activateTableChrome}
         onMouseLeave={e => {
@@ -352,19 +398,20 @@ function FeishuTableOverlay({
         {colHitsToRender.map(({ x, i }) => (
           <div
             key={`c-${i}`}
-            className={`feishu-table-chrome__hit feishu-table-chrome__hit--col${hoverCol === i ? ' is-active' : ''}`}
-            style={{ left: x }}
+            className={[
+              'feishu-table-chrome__hit feishu-table-chrome__hit--col',
+              hoverCol === i ? 'is-active' : '',
+              i === 0 ? 'is-edge-start' : '',
+              i === colBounds.length - 1 ? 'is-edge-end' : '',
+            ].filter(Boolean).join(' ')}
+            style={{ left: x - tableOffsetLeft }}
             onMouseEnter={() => {
               activateTableChrome();
               setHoverRow(null);
               setHoverCol(i);
             }}
           >
-            <span
-              className="feishu-table-chrome__dot"
-              style={{ opacity: showChrome && hoverCol !== i ? 1 : 0 }}
-              aria-hidden
-            />
+            <span className="feishu-table-chrome__dot" aria-hidden />
             <button
               type="button"
               className="feishu-table-chrome__rail-plus feishu-table-chrome__rail-plus--col"
@@ -381,11 +428,10 @@ function FeishuTableOverlay({
       <div
         className="feishu-table-chrome__rail-left"
         style={{
-          left: Math.max(0, tableOffsetLeft - RAIL),
+          left: tableOffsetLeft - RAIL,
           top: tableOffsetTop,
           width: RAIL,
-          height: viewportHeight - tableOffsetTop,
-          opacity: railOpacity,
+          height: tableHeight,
         }}
         onMouseEnter={activateTableChrome}
         onMouseLeave={e => {
@@ -397,7 +443,12 @@ function FeishuTableOverlay({
         {rowBounds.map((y, i) => (
           <div
             key={`r-${i}`}
-            className={`feishu-table-chrome__hit feishu-table-chrome__hit--row${hoverRow === i ? ' is-active' : ''}`}
+            className={[
+              'feishu-table-chrome__hit feishu-table-chrome__hit--row',
+              hoverRow === i ? 'is-active' : '',
+              i === 0 ? 'is-edge-start' : '',
+              i === rowBounds.length - 1 ? 'is-edge-end' : '',
+            ].filter(Boolean).join(' ')}
             style={{ top: y - tableOffsetTop }}
             onMouseEnter={() => {
               activateTableChrome();
@@ -405,11 +456,7 @@ function FeishuTableOverlay({
               setHoverRow(i);
             }}
           >
-            <span
-              className="feishu-table-chrome__dot"
-              style={{ opacity: showChrome && hoverRow !== i ? 1 : 0 }}
-              aria-hidden
-            />
+            <span className="feishu-table-chrome__dot" aria-hidden />
             <button
               type="button"
               className="feishu-table-chrome__rail-plus feishu-table-chrome__rail-plus--row"
@@ -423,13 +470,13 @@ function FeishuTableOverlay({
         ))}
       </div>
 
-      {hoverCol != null && isBoundVisible(colBounds[hoverCol], viewportWidth) && (
+      {hoverCol != null && isBoundVisible(colBounds[hoverCol], viewStart, viewportWidth) && (
         <div
           className="feishu-table-chrome__insert-col"
           style={{
             left: colBounds[hoverCol],
             top: tableOffsetTop,
-            height: viewportHeight,
+            height: tableHeight,
           }}
           onMouseEnter={activateTableChrome}
           onMouseLeave={e => {
@@ -448,7 +495,7 @@ function FeishuTableOverlay({
           style={{
             left: tableOffsetLeft,
             top: rowBounds[hoverRow],
-            width: Math.min(viewportWidth, Math.max(0, tableOffsetLeft + tableWidth)),
+            width: tableWidth,
           }}
           onMouseEnter={activateTableChrome}
           onMouseLeave={e => {

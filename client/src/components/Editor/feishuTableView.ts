@@ -54,6 +54,7 @@ export class FeishuTableView {
   cellMinWidth: number;
   dom: HTMLDivElement;
   chromeMount: HTMLDivElement;
+  scroll: HTMLDivElement;
   table: HTMLTableElement;
   colgroup: HTMLElement;
   contentDOM: HTMLTableSectionElement;
@@ -64,14 +65,31 @@ export class FeishuTableView {
     this.dom = document.createElement('div');
     this.dom.className = 'tableWrapper feishu-table-host';
 
+    this.scroll = document.createElement('div');
+    this.scroll.className = 'feishu-table-scroll';
+    this.dom.appendChild(this.scroll);
+
+    this.table = document.createElement('table');
+    this.table.className = tableClass;
+    this.scroll.appendChild(this.table);
+
+    /* 左右渐隐提示层：置于 scroll 外，避免 overflow 裁剪伪元素 */
+    const edgeFades = document.createElement('div');
+    edgeFades.className = 'feishu-table-edge-fades';
+    edgeFades.setAttribute('aria-hidden', 'true');
+    const edgeFadeLeft = document.createElement('div');
+    edgeFadeLeft.className = 'feishu-table-edge-fade feishu-table-edge-fade--left';
+    const edgeFadeRight = document.createElement('div');
+    edgeFadeRight.className = 'feishu-table-edge-fade feishu-table-edge-fade--right';
+    edgeFades.appendChild(edgeFadeLeft);
+    edgeFades.appendChild(edgeFadeRight);
+    this.dom.appendChild(edgeFades);
+
+    /* 操作层置于 scroll 之后，避免表格滚动层盖住灰点/轨道 */
     this.chromeMount = document.createElement('div');
     this.chromeMount.className = 'feishu-table-chrome-mount';
     this.chromeMount.setAttribute('contenteditable', 'false');
     this.dom.appendChild(this.chromeMount);
-
-    this.table = document.createElement('table');
-    this.table.className = tableClass;
-    this.dom.appendChild(this.table);
     this.colgroup = this.table.appendChild(document.createElement('colgroup'));
     updateColumns(node, this.colgroup, this.table, cellMinWidth);
     this.contentDOM = this.table.appendChild(document.createElement('tbody'));
@@ -86,7 +104,13 @@ export class FeishuTableView {
 
   ignoreMutation(record: { type: string; target: Node }) {
     const target = record.target;
-    if (target === this.dom || target === this.chromeMount || this.chromeMount.contains(target)) {
+    if (
+      target === this.dom
+      || target === this.scroll
+      || target instanceof Element && target.closest('.feishu-table-edge-fades')
+      || target === this.chromeMount
+      || this.chromeMount.contains(target)
+    ) {
       return true;
     }
     if (target instanceof Element && target.closest('.feishu-table-chrome')) {

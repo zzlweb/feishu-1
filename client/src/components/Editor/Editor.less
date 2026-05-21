@@ -1161,6 +1161,8 @@
           min-height: 20px;
         }
 
+        @feishu-table-chrome-gutter: 28px;
+
         .tableWrapper,
         .feishu-table-host {
           position: relative;
@@ -1169,28 +1171,123 @@
           width: 100%;
           max-width: 100%;
           isolation: isolate;
-          /* 为顶/左轨道与块柄留出内边距（操作层在宿主内定位） */
-          padding: 12px 0 0 12px;
-          /* 为块柄留出版心外边距 */
-          margin: 28px 0 12px 8px;
-          /* 列多时横向滚动，不撑出文档版心 */
+          /* 为表格外侧操作点/块柄预留稳定空间，避免被滚动区裁剪 */
+          margin: @feishu-table-chrome-gutter 0 8px @feishu-table-chrome-gutter;
+          padding: 0;
+          overflow: visible;
+        }
+
+        .feishu-table-scroll {
+          position: relative;
+          z-index: 0;
+          box-sizing: border-box;
+          width: 100%;
           overflow-x: auto;
-          overflow-y: visible;
+          overflow-y: hidden;
           -webkit-overflow-scrolling: touch;
+          /* 始终预留横向滚动条高度，hover 只改滑块颜色 */
           scrollbar-width: thin;
-          scrollbar-color: rgba(31, 35, 41, 0.28) transparent;
+          scrollbar-color: transparent transparent;
 
           &::-webkit-scrollbar {
-            height: 8px;
+            height: 10px;
           }
 
           &::-webkit-scrollbar-thumb {
-            background: rgba(31, 35, 41, 0.28);
-            border-radius: 4px;
+            background: transparent;
+            border-radius: 5px;
           }
 
           &::-webkit-scrollbar-track {
             background: transparent;
+          }
+
+          /* 右侧内阴影：提示右侧还有被遮挡的列（仅 hover 且未滚到底） */
+          &.feishu-table-scroll--fade-right::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 48px;
+            height: calc(100% - 10px);
+            pointer-events: none;
+            z-index: 4;
+            background: linear-gradient(
+              270deg,
+              rgba(31, 35, 41, 0.14) 0%,
+              rgba(31, 35, 41, 0.06) 42%,
+              rgba(31, 35, 41, 0) 100%
+            );
+          }
+
+          &.feishu-table-scroll--fade-left::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 32px;
+            height: calc(100% - 10px);
+            pointer-events: none;
+            z-index: 4;
+            background: linear-gradient(
+              90deg,
+              rgba(31, 35, 41, 0.1) 0%,
+              rgba(31, 35, 41, 0) 100%
+            );
+          }
+        }
+
+        /* 左右渐隐：独立层叠在 scroll 之上，避免 overflow 裁剪 */
+        .feishu-table-edge-fades {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 8;
+          pointer-events: none;
+          overflow: hidden;
+        }
+
+        .feishu-table-edge-fade {
+          position: absolute;
+          top: 0;
+          height: calc(100% - 10px);
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.12s ease;
+
+          &.is-visible {
+            opacity: 1;
+          }
+
+          &--right {
+            right: 0;
+            width: 48px;
+            background: linear-gradient(
+              270deg,
+              rgba(31, 35, 41, 0.14) 0%,
+              rgba(31, 35, 41, 0.06) 42%,
+              rgba(31, 35, 41, 0) 100%
+            );
+          }
+
+          &--left {
+            left: 0;
+            width: 32px;
+            background: linear-gradient(
+              90deg,
+              rgba(31, 35, 41, 0.1) 0%,
+              rgba(31, 35, 41, 0) 100%
+            );
+          }
+        }
+
+        .feishu-table-host--chrome-hot .feishu-table-scroll {
+          scrollbar-color: #c9cdd4 transparent;
+
+          &::-webkit-scrollbar-thumb {
+            background: #c9cdd4;
           }
         }
 
@@ -1207,10 +1304,39 @@
 
         .feishu-table-chrome-mount {
           position: absolute;
-          inset: 0;
+          top: -@feishu-table-chrome-gutter;
+          left: -@feishu-table-chrome-gutter;
+          right: 0;
+          bottom: 0;
           z-index: 210;
           pointer-events: none;
           overflow: visible;
+        }
+
+        /* 无内层 scroll 的旧 DOM（兼容） */
+        .tableWrapper:not(:has(.feishu-table-scroll)),
+        .feishu-table-host:not(:has(.feishu-table-scroll)) {
+          overflow-x: auto;
+          overflow-y: hidden;
+          scrollbar-width: thin;
+          scrollbar-color: transparent transparent;
+
+          &::-webkit-scrollbar {
+            height: 10px;
+          }
+
+          &::-webkit-scrollbar-thumb {
+            background: transparent;
+            border-radius: 5px;
+          }
+        }
+
+        .feishu-table-host--chrome-hot:not(:has(.feishu-table-scroll)) {
+          scrollbar-color: #c9cdd4 transparent;
+
+          &::-webkit-scrollbar-thumb {
+            background: #c9cdd4;
+          }
         }
 
         // 飞书风格表格：细灰边框、首行浅灰表头

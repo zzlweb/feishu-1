@@ -1,7 +1,8 @@
 @blue: #3370ff;
 @rail-bg: #f5f6f7;
-@dot: #c9cdd4;
-@hit-size: 20px;
+@dot: #bbbfc4;
+@dot-size: 4px;
+@hit-size: 16px;
 
 /**
  * 飞书表格操作层：鼠标进入表格显示全部边界灰点；悬停某一边界变为蓝 +。
@@ -58,16 +59,20 @@
     pointer-events: auto;
     border-radius: 2px;
     opacity: 0;
-    transition: opacity 0.12s ease;
+    visibility: hidden;
+    z-index: 12;
+    transition: opacity 0.12s ease, visibility 0.12s ease;
   }
 
   &__rail-top {
-    z-index: 2;
-    overflow: visible;
+    /* 仅裁切左右越界灰点，保留 + 按钮向上下溢出 */
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 
   &__rail-left {
-    z-index: 2;
+    overflow-y: hidden;
+    overflow-x: visible;
   }
 
   &__hit {
@@ -78,16 +83,32 @@
     width: @hit-size;
     height: @hit-size;
     pointer-events: auto;
-    z-index: 1;
+    z-index: 13;
 
     &--col {
       top: 50%;
       transform: translate(-50%, -50%);
+
+      &.is-edge-start {
+        transform: translate(0, -50%);
+      }
+
+      &.is-edge-end {
+        transform: translate(-100%, -50%);
+      }
     }
 
     &--row {
       left: 50%;
       transform: translate(-50%, -50%);
+
+      &.is-edge-start {
+        transform: translate(-50%, 0);
+      }
+
+      &.is-edge-end {
+        transform: translate(-50%, -100%);
+      }
     }
 
     &:hover .feishu-table-chrome__rail-plus,
@@ -102,10 +123,11 @@
 
   &__dot {
     display: block;
-    width: 6px;
-    height: 6px;
+    width: @dot-size;
+    height: @dot-size;
     border-radius: 50%;
     background: @dot;
+    flex-shrink: 0;
     opacity: 0;
     transition:
       opacity 0.1s ease,
@@ -190,6 +212,7 @@
 .feishu-table-chrome--visible .feishu-table-chrome__rail-top,
 .feishu-table-chrome--visible .feishu-table-chrome__rail-left {
   opacity: 1;
+  visibility: visible;
 }
 
 .feishu-table-host--chrome-hot .feishu-table-chrome__handle,
