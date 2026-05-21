@@ -199,6 +199,48 @@ export const SelGlyphShare: ComponentType<SelToolbarIconProps> = ({
   </ToolbarSvg>
 );
 
+/** MergeCellsOutlined · 合并单元格 */
+export const SelGlyphTableMerge: ComponentType<SelToolbarIconProps> = ({
+  size,
+  fill = 'currentColor',
+  className,
+}) => (
+  <ToolbarSvg size={size} fill={fill} className={className}>
+    <path
+      d="M4 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4Zm0 2h7v6H4V4Zm9 0h7v6h-7V4ZM4 12h16v4H4v-4Zm0 6h7v2H4v-2Zm9 0h7v2h-7v-2Z"
+      fill={fill}
+    />
+  </ToolbarSvg>
+);
+
+/** PaintOutlined · 单元格背景色 */
+export const SelGlyphTableCellBg: ComponentType<SelToolbarIconProps> = ({
+  size,
+  fill = 'currentColor',
+  className,
+}) => (
+  <ToolbarSvg size={size} fill={fill} className={className}>
+    <path
+      d="M16.293 2.293a1 1 0 0 1 1.414 0l4 4a1 1 0 0 1 0 1.414l-9 9A1 1 0 0 1 12 17H8a1 1 0 0 1-1-1v-4a1 1 0 0 1 .293-.707l9-9ZM9 12.414V15h2.586l8-8L17 4.414l-8 8ZM3 19a1 1 0 0 1 1-1h16a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Z"
+      fill={fill}
+    />
+  </ToolbarSvg>
+);
+
+/** DeleteOutlined · 删除 */
+export const SelGlyphDelete: ComponentType<SelToolbarIconProps> = ({
+  size,
+  fill = 'currentColor',
+  className,
+}) => (
+  <ToolbarSvg size={size} fill={fill} className={className}>
+    <path
+      d="M9 3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1h5a1 1 0 1 1 0 2h-1v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6H4a1 1 0 1 1 0-2h5V3Zm2 0v1h2V3h-2ZM6 6v14h12V6H6Zm3 3a1 1 0 0 1 1 1v6a1 1 0 0 1-2 0v-6a1 1 0 0 1 1-1Zm3 0a1 1 0 0 1 1 1v6a1 1 0 0 1-2 0v-6a1 1 0 0 1 1-1Zm3 0a1 1 0 0 1 1 1v6a1 1 0 0 1-2 0v-6a1 1 0 0 1 1-1Z"
+      fill={fill}
+    />
+  </ToolbarSvg>
+);
+
 /** AddCommentOutlined */
 export const SelGlyphComment: ComponentType<SelToolbarIconProps> = ({
   size,

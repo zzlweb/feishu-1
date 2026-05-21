@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { BubbleMenu } from '@tiptap/react';
 import type { Editor } from '@tiptap/react';
 import { isTextSelection } from '@tiptap/core';
+import { CellSelection } from '@tiptap/pm/tables';
 import type { EditorView } from '@tiptap/pm/view';
 import type { EditorState } from '@tiptap/pm/state';
 import FeishuColorPickerPanel from './FeishuColorPickerPanel';
@@ -35,6 +36,9 @@ import {
   SelGlyphToolbarMore,
   SelGlyphShare,
   SelGlyphComment,
+  SelGlyphTableMerge,
+  SelGlyphTableCellBg,
+  SelGlyphDelete,
 } from '../../icons/selectionToolbarGlyphs';
 import { IndentRightIcon, IndentLeftIcon } from 'tdesign-icons-react';
 import { wrapIcon } from '../../icons/wrap';
@@ -59,6 +63,17 @@ const TINT_LIST = FEISHU_TOOLBOX.i500;
 const TINT_CODE = FEISHU_TOOLBOX.g500;
 const TINT_HI = FEISHU_TOOLBOX.o500;
 const TINT_SYNC = FEISHU_TOOLBOX.n1;
+
+const TABLE_CELL_COLORS = [
+  { label: '默认', value: null, color: '#ffffff', border: '#dee0e3' },
+  { label: '浅红', value: '#ffccc7', color: '#ffccc7', border: '#ffccc7' },
+  { label: '浅橙', value: '#ffe7ba', color: '#ffe7ba', border: '#ffe7ba' },
+  { label: '浅黄', value: '#fff1b8', color: '#fff1b8', border: '#fff1b8' },
+  { label: '浅绿', value: '#d9f7be', color: '#d9f7be', border: '#d9f7be' },
+  { label: '浅蓝', value: '#bae7ff', color: '#bae7ff', border: '#bae7ff' },
+  { label: '浅紫', value: '#efdbff', color: '#efdbff', border: '#efdbff' },
+  { label: '浅灰', value: '#f5f5f5', color: '#f5f5f5', border: '#f5f5f5' },
+];
 
 function StyleMenuRow({
   icon,
@@ -184,6 +199,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   const [showAlignMenu, setShowAlignMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
+  const [showTableCellColorMenu, setShowTableCellColorMenu] = useState(false);
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkText, setLinkText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
@@ -191,6 +207,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   const alignRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const colorRef = useRef<HTMLDivElement>(null);
+  const tableCellColorRef = useRef<HTMLDivElement>(null);
   const linkInputRef = useRef<HTMLInputElement>(null);
   const moreHeadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showHeadingMoreFlyout, setShowHeadingMoreFlyout] = useState(false);
@@ -228,6 +245,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
       if (alignRef.current && !alignRef.current.contains(t)) setShowAlignMenu(false);
       if (moreRef.current && !moreRef.current.contains(t)) setShowMoreMenu(false);
       if (colorRef.current && !colorRef.current.contains(t)) setShowColorMenu(false);
+      if (tableCellColorRef.current && !tableCellColorRef.current.contains(t)) setShowTableCellColorMenu(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -297,6 +315,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
     ?? 'left';
 
   const indentUi = getEditorIndentUiState(editor);
+  const isTableSelection = editor.isActive('table') || editor.state.selection instanceof CellSelection;
+  const canMergeCells = editor.can().mergeCells();
+  const canSplitCell = editor.can().splitCell();
 
   return (
     <BubbleMenu
@@ -315,6 +336,67 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
       }}
     >
       <div className="selection-bubble-inner" role="toolbar" aria-label="选区格式">
+        {isTableSelection && (
+          <div className="selection-bubble-group selection-bubble-group--table">
+            <button
+              type="button"
+              className="selection-bubble-btn"
+              disabled={!canMergeCells && !canSplitCell}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => {
+                if (canMergeCells) editor.chain().focus().mergeCells().run();
+                else if (canSplitCell) editor.chain().focus().splitCell().run();
+              }}
+              title={canSplitCell ? '拆分单元格' : '合并单元格'}
+            >
+              <SelGlyphTableMerge size={GLYPH} />
+            </button>
+            <div className="selection-bubble-dropdown" ref={tableCellColorRef}>
+              <button
+                type="button"
+                className="selection-bubble-btn"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => setShowTableCellColorMenu(!showTableCellColorMenu)}
+                title="单元格背景色"
+              >
+                <SelGlyphTableCellBg size={GLYPH} />
+              </button>
+              {showTableCellColorMenu && (
+                <div className="selection-bubble-menu selection-bubble-menu--table-color">
+                  <div className="selection-bubble-table-color-title">单元格背景颜色</div>
+                  <div className="selection-bubble-table-color-grid">
+                    {TABLE_CELL_COLORS.map(c => (
+                      <button
+                        key={c.label}
+                        type="button"
+                        className="selection-bubble-table-color-cell"
+                        style={{ background: c.color, borderColor: c.border }}
+                        title={c.label}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => {
+                          editor.chain().focus().setCellAttribute('backgroundColor', c.value).run();
+                          setShowTableCellColorMenu(false);
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="selection-bubble-table-color-reset"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      editor.chain().focus().setCellAttribute('backgroundColor', null).run();
+                      setShowTableCellColorMenu(false);
+                    }}
+                  >
+                    恢复默认
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {isTableSelection && <span className="selection-bubble-divider selection-bubble-divider--thin" aria-hidden />}
         <div className="selection-bubble-group selection-bubble-group--main">
           <div className="selection-bubble-dropdown" ref={headingRef}>
             <button
@@ -659,7 +741,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
             <SelGlyphUnderline size={GLYPH} />
           </button>
 
-          <div className="selection-bubble-dropdown selection-bubble-dropdown--link">
+          {!isTableSelection && <div className="selection-bubble-dropdown selection-bubble-dropdown--link">
             <button
               type="button"
               className={`selection-bubble-btn ${editor.isActive('link') ? 'selection-bubble-btn--brand active' : ''}`}
@@ -719,7 +801,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                 </button>
               </div>
             )}
-          </div>
+          </div>}
 
           <button
             type="button"
@@ -792,17 +874,58 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
             <SelGlyphShare size={GLYPH} />
           </button>
 
-          <button
-            type="button"
-            className="selection-bubble-btn selection-bubble-btn--icon-quiet"
-            onMouseDown={e => {
-              e.preventDefault();
-              openCommentSidebarForEditorSelection(editor, documentId);
-            }}
-            title="评论"
-          >
-            <SelGlyphComment size={GLYPH} />
-          </button>
+          {isTableSelection ? (
+            <button
+              type="button"
+              className="selection-bubble-btn selection-bubble-btn--delete"
+              onMouseDown={e => e.preventDefault()}
+              onMouseEnter={() => {
+                const host = document.querySelector('.feishu-table-host.is-table-block-active');
+                if (host) host.classList.add('is-deleting-selection');
+              }}
+              onMouseLeave={() => {
+                const host = document.querySelector('.feishu-table-host.is-table-block-active');
+                if (host) host.classList.remove('is-deleting-selection');
+              }}
+              onClick={() => {
+                const host = document.querySelector('.feishu-table-host.is-table-block-active');
+                if (host) host.classList.remove('is-deleting-selection');
+
+                const { selection } = editor.state;
+                if (selection instanceof CellSelection) {
+                  if (selection.isColSelection()) {
+                    editor.chain().focus().deleteColumn().run();
+                  } else if (selection.isRowSelection()) {
+                    editor.chain().focus().deleteRow().run();
+                  } else {
+                    // Default fallback for multiple selected cells
+                    editor.chain().focus().deleteRow().run();
+                  }
+                } else {
+                  editor.chain().focus().deleteRow().run();
+                }
+              }}
+              title={
+                editor.state.selection instanceof CellSelection && (editor.state.selection as any).isColSelection()
+                  ? '删除列'
+                  : '删除行'
+              }
+            >
+              <SelGlyphDelete size={GLYPH} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="selection-bubble-btn selection-bubble-btn--icon-quiet"
+              onMouseDown={e => {
+                e.preventDefault();
+                openCommentSidebarForEditorSelection(editor, documentId);
+              }}
+              title="评论"
+            >
+              <SelGlyphComment size={GLYPH} />
+            </button>
+          )}
         </div>
       </div>
     </BubbleMenu>
