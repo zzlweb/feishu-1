@@ -3,6 +3,7 @@ import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { useCallback, useLayoutEffect, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { SlashGlyphTable } from '../../icons/slashMenuGlyphs';
+import { IconDragOutlined } from '../../icons/feishuDoc';
 import {
   getTableChromeMountFromHost,
   getTableElementFromHost,
@@ -118,6 +119,8 @@ function measureTableLayout(host: HTMLElement): TableLayout | null {
   };
 }
 
+type SelectedRail = 'col' | 'row' | null;
+
 function FeishuTableOverlay({
   editor,
   tableHost,
@@ -135,13 +138,14 @@ function FeishuTableOverlay({
   const [hoverRow, setHoverRow] = useState<number | null>(null);
   const [chromeVisible, setChromeVisible] = useState(false);
   const [handleHovered, setHandleHovered] = useState(false);
+  const [selectedRail, setSelectedRail] = useState<SelectedRail>(null);
 
   const tableHoverRef = useRef(false);
   const handleHoverRef = useRef(false);
   const pinChromeRef = useRef(pinChrome);
   const chromeVisibleRef = useRef(chromeVisible);
   const hideChromeTimerRef = useRef<number | null>(null);
-  const selectedRailRef = useRef(selectedRail);
+  const selectedRailRef = useRef<SelectedRail>(null);
 
   pinChromeRef.current = pinChrome;
   chromeVisibleRef.current = chromeVisible;

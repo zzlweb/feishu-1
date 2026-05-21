@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MAX_COLUMNS, MIN_COLUMNS } from './columnsHelpers';
+import { MAX_COLUMNS_PICKER, MIN_COLUMNS } from './columnsHelpers';
 import './ColumnsCountPicker.less';
 
 interface Props {
@@ -7,7 +7,7 @@ interface Props {
 }
 
 /** 飞书分栏选择器固定展示 5 根栏条，对应 1～5 栏 */
-const PICKER_BAR_COUNT = MAX_COLUMNS;
+const PICKER_BAR_COUNT = MAX_COLUMNS_PICKER;
 const DEFAULT_COUNT = 3;
 
 export default function ColumnsCountPicker({ onPick }: Props) {
@@ -16,7 +16,7 @@ export default function ColumnsCountPicker({ onPick }: Props) {
 
   const handlePick = (count: number) => {
     const picked = hoverCount || count;
-    onPick(Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, picked)));
+    onPick(Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS_PICKER, picked)));
   };
 
   return (

@@ -66,6 +66,29 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     columnsSubMenuCloseTimerRef.current = setTimeout(() => setColumnsCountFlyoutPos(null), 220);
   };
 
+  function isInsideColumnsFlyout(target: EventTarget | null): boolean {
+    return target instanceof Element && Boolean(target.closest('.slash-columns-count-flyout'));
+  }
+
+  function isInsideTableFlyout(target: EventTarget | null): boolean {
+    return target instanceof Element && Boolean(target.closest('.slash-table-grid-flyout'));
+  }
+
+  function closeColumnsFlyout() {
+    clearColumnsSubMenuTimer();
+    setColumnsCountFlyoutPos(null);
+  }
+
+  function closeTableFlyout() {
+    clearTableSubMenuTimer();
+    setTableGridFlyoutPos(null);
+  }
+
+  function closeSubmenuFlyouts() {
+    closeTableFlyout();
+    closeColumnsFlyout();
+  }
+
   const openTableGridFlyout = (el: HTMLElement) => {
     clearTableSubMenuTimer();
     setColumnsCountFlyoutPos(null);
@@ -90,14 +113,14 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     setTableGridFlyoutPos(null);
     const r = el.getBoundingClientRect();
     const pad = 8;
-    const panelW = 184;
+    const panelW = 292;
     const gap = 2;
     let left = r.right + gap;
     if (left + panelW > window.innerWidth - pad) {
       left = Math.max(pad, r.left - panelW - gap);
     }
     let top = r.top - 2;
-    const panelH = 96;
+    const panelH = 214;
     if (top + panelH > window.innerHeight - pad) {
       top = Math.max(pad, window.innerHeight - pad - panelH);
     }
@@ -134,16 +157,11 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     const anchorEl = anchorRef?.current;
     if (anchorEl?.isConnected) {
       const anchor = anchorEl.getBoundingClientRect();
-      if (left + menuRect.width + gap > anchor.left) {
-        left = anchor.left - gap - menuRect.width;
-      }
-      if (left + menuRect.width + gap > anchor.left && left < anchor.right) {
-        const rightX = anchor.right + gap;
-        if (rightX + menuRect.width <= vw - pad) left = rightX;
-      }
+      left = anchor.left - gap;
+    } else {
+      left = Math.max(pad, Math.min(left, vw - menuRect.width - pad));
     }
 
-    left = Math.max(pad, Math.min(left, vw - menuRect.width - pad));
     top = Math.max(pad, Math.min(top, vh - menuRect.height - pad));
     setRenderPos(prev => (prev.left === left && prev.top === top ? prev : { left, top }));
   }, [position, variant, anchorRef, query]);
@@ -200,6 +218,22 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const hasTooltipContent = (item: SlashMenuItem) =>
     item.tooltip && (item.tooltip.shortcut || item.tooltip.markdown);
 
+  const getTooltipPosition = (rect: DOMRect) => {
+    const pad = 8;
+    const approxW = 220;
+    const approxH = 48;
+    let top = rect.top - 8;
+    let transform = 'translate(-50%, -100%)';
+    if (top - approxH < pad) {
+      top = rect.bottom + 8;
+      transform = 'translate(-50%, 0)';
+    }
+    const minLeft = pad + approxW / 2;
+    const maxLeft = window.innerWidth - pad - approxW / 2;
+    const left = Math.max(minLeft, Math.min(rect.left + rect.width / 2, maxLeft));
+    return { top, left, transform };
+  };
+
   const runItemAction = (item: SlashMenuItem) => {
     onBeforeSelect?.();
     item.action(editor);
@@ -218,6 +252,28 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     onClose();
   };
 
+  const tooltipPortal = tooltipItem && hasTooltipContent(tooltipItem.item)
+    ? createPortal(
+        <div
+          className="slash-tooltip"
+          style={getTooltipPosition(tooltipItem.rect)}
+        >
+          <div className="slash-tooltip__line1">
+            {tooltipItem.item.label}
+            {tooltipItem.item.tooltip!.shortcut && (
+              <span className="slash-tooltip__shortcut"> ({tooltipItem.item.tooltip!.shortcut})</span>
+            )}
+          </div>
+          {tooltipItem.item.tooltip!.markdown && (
+            <div className="slash-tooltip__line2">
+              Markdown: {tooltipItem.item.tooltip!.markdown}
+            </div>
+          )}
+        </div>,
+        document.body,
+      )
+    : null;
+
   const tableGridFlyout =
     tableGridFlyoutPos &&
     createPortal(
@@ -234,8 +290,14 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
           clearTableSubMenuTimer();
           onMouseEnter?.();
         }}
-        onMouseLeave={() => {
-          scheduleTableSubMenuClose();
+        onMouseLeave={(e) => {
+          const next = e.relatedTarget;
+          if (isInsideTableFlyout(next)) return;
+          if (next instanceof Element && next.closest('.slash-menu')) {
+            scheduleTableSubMenuClose();
+            return;
+          }
+          closeTableFlyout();
           onMouseLeave?.();
         }}
         onMouseDown={e => e.preventDefault()}
@@ -261,8 +323,14 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
           clearColumnsSubMenuTimer();
           onMouseEnter?.();
         }}
-        onMouseLeave={() => {
-          scheduleColumnsSubMenuClose();
+        onMouseLeave={(e) => {
+          const next = e.relatedTarget;
+          if (isInsideColumnsFlyout(next)) return;
+          if (next instanceof Element && next.closest('.slash-menu')) {
+            scheduleColumnsSubMenuClose();
+            return;
+          }
+          closeColumnsFlyout();
           onMouseLeave?.();
         }}
         onMouseDown={e => e.preventDefault()}
@@ -275,10 +343,11 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   return (
     <Fragment>
       <div
-        className={`slash-menu slash-menu-feishu ${variant === 'anchored' ? 'slash-menu--anchored' : ''}`}
+        className={`slash-menu slash-menu-feishu${variant === 'anchored' ? ' slash-menu--anchored' : ''}${anchorRef ? ' slash-menu--plus-anchor' : ''}`}
         ref={menuRef}
         style={variant === 'anchored' ? undefined : { top: renderPos.top, left: renderPos.left }}
         onMouseEnter={onMouseEnter}
+        onScroll={hideTooltip}
         onMouseLeave={() => {
           hideTooltip();
           scheduleTableSubMenuClose();
@@ -303,9 +372,10 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                       key={`${section.title}-${item.label}`}
                       type="button"
                       className={`slash-basic-cell ${idx === activeIdx ? 'active' : ''}`}
-                      title={hasTooltipContent(item) ? undefined : item.label}
+                      aria-label={item.label}
                       onMouseEnter={e => {
                         setActiveIdx(idx);
+                        closeSubmenuFlyouts();
                         if (hasTooltipContent(item)) showTooltip(item, e.currentTarget);
                       }}
                       onMouseLeave={hideTooltip}
@@ -336,23 +406,42 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                     className={`slash-item ${idx === activeIdx ? 'active' : ''}${hasSubmenu ? ' slash-item--has-submenu' : ''}`}
                     role="button"
                     tabIndex={0}
-                    title={hasTooltipContent(item) ? undefined : item.label}
+                    aria-label={item.label}
                     onMouseEnter={e => {
                       setActiveIdx(idx);
                       if (isTableGrid) {
                         hideTooltip();
+                        closeColumnsFlyout();
                         openTableGridFlyout(e.currentTarget);
                       } else if (isColumnsCount) {
                         hideTooltip();
+                        closeTableFlyout();
                         openColumnsCountFlyout(e.currentTarget);
-                      } else if (hasTooltipContent(item)) {
-                        showTooltip(item, e.currentTarget);
+                      } else {
+                        closeSubmenuFlyouts();
+                        if (hasTooltipContent(item)) {
+                          showTooltip(item, e.currentTarget);
+                        }
                       }
                     }}
-                    onMouseLeave={() => {
+                    onMouseLeave={(e) => {
                       if (!hasSubmenu) hideTooltip();
-                      if (isTableGrid) scheduleTableSubMenuClose();
-                      if (isColumnsCount) scheduleColumnsSubMenuClose();
+                      if (isTableGrid) {
+                        if (isInsideTableFlyout(e.relatedTarget)) return;
+                        if (e.relatedTarget instanceof Element && e.relatedTarget.closest('.slash-menu')) {
+                          closeTableFlyout();
+                          return;
+                        }
+                        scheduleTableSubMenuClose();
+                      }
+                      if (isColumnsCount) {
+                        if (isInsideColumnsFlyout(e.relatedTarget)) return;
+                        if (e.relatedTarget instanceof Element && e.relatedTarget.closest('.slash-menu')) {
+                          closeColumnsFlyout();
+                          return;
+                        }
+                        scheduleColumnsSubMenuClose();
+                      }
                     }}
                     onMouseDown={e => {
                       e.preventDefault();
@@ -376,32 +465,10 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
           </div>
         ))}
 
-        {tooltipItem && hasTooltipContent(tooltipItem.item) && (
-          <div
-            className="slash-tooltip"
-            style={{
-              position: 'fixed',
-              top: tooltipItem.rect.top - 8,
-              left: tooltipItem.rect.left + tooltipItem.rect.width / 2,
-              transform: 'translate(-50%, -100%)',
-            }}
-          >
-            <div className="slash-tooltip__line1">
-              {tooltipItem.item.label}
-              {tooltipItem.item.tooltip!.shortcut && (
-                <span className="slash-tooltip__shortcut"> ({tooltipItem.item.tooltip!.shortcut})</span>
-              )}
-            </div>
-            {tooltipItem.item.tooltip!.markdown && (
-              <div className="slash-tooltip__line2">
-                Markdown: {tooltipItem.item.tooltip!.markdown}
-              </div>
-            )}
-          </div>
-        )}
       </div>
       {tableGridFlyout}
       {columnsCountFlyout}
+      {tooltipPortal}
     </Fragment>
   );
 }

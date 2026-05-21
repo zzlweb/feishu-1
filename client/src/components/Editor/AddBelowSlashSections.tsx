@@ -78,14 +78,14 @@ export default function AddBelowSlashSections({
     setTableFlyoutPos(null);
     const r = el.getBoundingClientRect();
     const pad = 8;
-    const panelW = 184;
+    const panelW = 292;
     const gap = 2;
     let left = r.right + gap;
     if (left + panelW > window.innerWidth - pad) {
       left = Math.max(pad, r.left - panelW - gap);
     }
     let top = r.top - 2;
-    const panelH = 96;
+    const panelH = 214;
     if (top + panelH > window.innerHeight - pad) {
       top = Math.max(pad, window.innerHeight - pad - panelH);
     }

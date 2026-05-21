@@ -265,19 +265,21 @@ export default function DocumentPage() {
           )}
           <div className="doc-page-workspace-inner">
             <main className="doc-page-main">
-              {showOutlineSidebar && (
-                <Sidebar
-                  ref={sidebarRef}
-                  documentTitle={catalogueTitleDisplay}
-                  headings={headings}
-                  activeId={catalogueActiveId}
-                  onTocItemActivate={setCatalogueActiveId}
-                  collapsed={sidebarCollapsed}
-                  onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-                  collapsedHeadingIds={collapsedHeadingIds}
-                  onToggleHeadingCollapse={handleToggleHeadingCollapse}
-                />
-              )}
+              <div className="doc-page-catalogue-rail" aria-hidden={!showOutlineSidebar}>
+                {showOutlineSidebar && (
+                  <Sidebar
+                    ref={sidebarRef}
+                    documentTitle={catalogueTitleDisplay}
+                    headings={headings}
+                    activeId={catalogueActiveId}
+                    onTocItemActivate={setCatalogueActiveId}
+                    collapsed={sidebarCollapsed}
+                    onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+                    collapsedHeadingIds={collapsedHeadingIds}
+                    onToggleHeadingCollapse={handleToggleHeadingCollapse}
+                  />
+                )}
+              </div>
 
               <Editor
                 documentId={doc.id}

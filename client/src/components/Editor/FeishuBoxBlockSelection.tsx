@@ -8,9 +8,7 @@ import {
   type RefObject,
 } from 'react';
 import {
-  canArmBoxSelect,
   canStartBoxSelect,
-  deleteSelectableUnits,
   findUnitsInClientRect,
   measureUnitBand,
   normalizeClientRect,
@@ -20,7 +18,6 @@ import {
 } from './boxSelectionModel';
 import './FeishuBoxBlockSelection.less';
 
-const ARM_TIMEOUT_MS = 5000;
 const MIN_DRAG_PX = 3;
 
 interface DragState {
@@ -35,24 +32,24 @@ interface Props {
 }
 
 function isUiChrome(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return Boolean(target.closest(
+  const element = target instanceof Element
+    ? target
+    : target instanceof Text ? target.parentElement : null;
+  return Boolean(element?.closest(
     '.block-inline-tools, .feishu-table-chrome, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .slash-menu, .selection-bubble, .editor-page-link-pop, .feishu-box-selection-layer',
   ));
 }
 
 export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly }: Props) {
-  const [armed, setArmed] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [dragRect, setDragRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const [selectedUnits, setSelectedUnits] = useState<SelectableUnit[]>([]);
   const [selectionBands, setSelectionBands] = useState<Array<{ id: string; top: number; left: number; width: number; height: number }>>([]);
 
-  const armedRef = useRef(false);
   const draggingRef = useRef(false);
+  const pendingDragRef = useRef<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const selectedRef = useRef<SelectableUnit[]>([]);
-  const armTimerRef = useRef<number | null>(null);
 
   const editorRef = useRef(editor);
   editorRef.current = editor;
@@ -62,6 +59,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     setSelectedUnits([]);
     setSelectionBands([]);
     setDragRect(null);
+    pendingDragRef.current = null;
     dragRef.current = null;
     draggingRef.current = false;
     setDragging(false);
@@ -69,13 +67,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
   }, []);
 
   const disarm = useCallback(() => {
-    armedRef.current = false;
-    setArmed(false);
     editorAreaRef.current?.classList.remove('feishu-box-select-armed');
-    if (armTimerRef.current != null) {
-      window.clearTimeout(armTimerRef.current);
-      armTimerRef.current = null;
-    }
   }, [editorAreaRef]);
 
   const syncSelectionBands = useCallback((units: SelectableUnit[]) => {
@@ -125,6 +117,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     draggingRef.current = true;
     setDragging(true);
     dragRef.current = { startX: clientX, startY: clientY };
+    window.getSelection()?.removeAllRanges();
     document.body.classList.add('feishu-box-select-dragging');
     updateDragOverlay({
       left: clientX,
@@ -133,17 +126,6 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
       bottom: clientY,
     });
   }, [disarm, updateDragOverlay]);
-
-  const armBoxSelect = useCallback(() => {
-    armedRef.current = true;
-    setArmed(true);
-    editorAreaRef.current?.classList.add('feishu-box-select-armed');
-    if (armTimerRef.current != null) window.clearTimeout(armTimerRef.current);
-    armTimerRef.current = window.setTimeout(() => {
-      armTimerRef.current = null;
-      disarm();
-    }, ARM_TIMEOUT_MS);
-  }, [disarm, editorAreaRef]);
 
   useLayoutEffect(() => {
     setBoxSelectionStore({
@@ -161,6 +143,13 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     if (readOnly) return;
 
     const onDocMouseMove = (e: MouseEvent) => {
+      if (!draggingRef.current && pendingDragRef.current) {
+        const dx = Math.abs(e.clientX - pendingDragRef.current.startX);
+        const dy = Math.abs(e.clientY - pendingDragRef.current.startY);
+        if (dx < MIN_DRAG_PX && dy < MIN_DRAG_PX) return;
+        beginDrag(pendingDragRef.current.startX, pendingDragRef.current.startY);
+        pendingDragRef.current = null;
+      }
       if (!draggingRef.current || !dragRef.current) return;
       e.preventDefault();
       const rect = normalizeClientRect(
@@ -171,6 +160,10 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     };
 
     const onDocMouseUp = (e: MouseEvent) => {
+      if (!draggingRef.current && pendingDragRef.current) {
+        pendingDragRef.current = null;
+        return;
+      }
       if (!draggingRef.current || !dragRef.current) return;
 
       const rect = normalizeClientRect(
@@ -200,26 +193,17 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
       document.removeEventListener('mouseup', onDocMouseUp, true);
       document.body.classList.remove('feishu-box-select-dragging');
     };
-  }, [finalizeSelection, readOnly, syncSelectionBands, updateDragOverlay]);
+  }, [beginDrag, finalizeSelection, readOnly, syncSelectionBands, updateDragOverlay]);
 
   useEffect(() => {
     if (readOnly || !editor) return;
     const area = editorAreaRef.current;
     if (!area) return;
 
-    const onDoubleClick = (e: MouseEvent) => {
-      if (isUiChrome(e.target)) return;
-      if (!canArmBoxSelect(e.target, area)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      clearSelection();
-      armBoxSelect();
-    };
-
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0 || isUiChrome(e.target)) return;
 
-      const canStart = armedRef.current || canStartBoxSelect(e.target, area, e.clientY);
+      const canStart = canStartBoxSelect(e.target, area, e.clientY);
 
       if (!canStart) {
         if (selectedRef.current.length > 0) {
@@ -233,18 +217,14 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
         clearSelection();
       }
 
-      e.preventDefault();
-      e.stopPropagation();
-      beginDrag(e.clientX, e.clientY);
+      pendingDragRef.current = { startX: e.clientX, startY: e.clientY };
     };
 
-    area.addEventListener('dblclick', onDoubleClick, true);
     area.addEventListener('mousedown', onMouseDown, true);
     return () => {
-      area.removeEventListener('dblclick', onDoubleClick, true);
       area.removeEventListener('mousedown', onMouseDown, true);
     };
-  }, [armBoxSelect, beginDrag, clearSelection, disarm, editor, editorAreaRef, readOnly]);
+  }, [beginDrag, clearSelection, disarm, editor, editorAreaRef, readOnly]);
 
   useEffect(() => {
     if (!editor) return;
@@ -272,7 +252,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
 
   return (
     <div
-      className={`feishu-box-selection-layer${armed ? ' feishu-box-selection-layer--armed' : ''}${dragging ? ' feishu-box-selection-layer--dragging' : ''}${selectedUnits.length > 0 ? ' feishu-box-selection-layer--has-selection' : ''}`}
+      className={`feishu-box-selection-layer${dragging ? ' feishu-box-selection-layer--dragging' : ''}${selectedUnits.length > 0 ? ' feishu-box-selection-layer--has-selection' : ''}`}
       aria-hidden
     >
       {dragRect && (

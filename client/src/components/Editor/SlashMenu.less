@@ -33,6 +33,11 @@
     padding-top: 12px;
   }
 
+  /* 加号菜单：右缘对齐加号左缘，向左展开占用目录轨 */
+  &.slash-menu--plus-anchor {
+    transform: translateX(-100%);
+  }
+
   &::-webkit-scrollbar {
     width: 10px;
   }
@@ -170,38 +175,40 @@
     }
   }
 
-  // ---- Custom tooltip ----
-  .slash-tooltip {
-    position: fixed;
-    z-index: 10001;
-    max-width: 220px;
-    padding: 6px 10px;
-    border-radius: 6px;
-    background: #1f2329;
-    color: #fff;
-    font-size: 12px;
-    line-height: 18px;
-    white-space: nowrap;
-    pointer-events: none;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-
-    .slash-tooltip__line1 {
-      font-weight: 500;
-    }
-
-    .slash-tooltip__shortcut {
-      font-weight: 400;
-      opacity: 0.85;
-    }
-
-    .slash-tooltip__line2 {
-      margin-top: 2px;
-      font-weight: 400;
-      opacity: 0.7;
-    }
-  }
 }
 
 .slash-columns-count-flyout {
   pointer-events: auto;
+}
+
+// ---- Custom tooltip ----
+// Tooltip is portaled to body so it is never clipped by the scrollable menu.
+.slash-tooltip {
+  position: fixed;
+  z-index: 10080;
+  max-width: 220px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #1f2329;
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+
+  .slash-tooltip__line1 {
+    font-weight: 500;
+  }
+
+  .slash-tooltip__shortcut {
+    font-weight: 400;
+    opacity: 0.85;
+  }
+
+  .slash-tooltip__line2 {
+    margin-top: 2px;
+    font-weight: 400;
+    opacity: 0.7;
+  }
 }

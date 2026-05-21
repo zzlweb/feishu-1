@@ -15,10 +15,14 @@
 
 /** 版心宽度：视口变窄时不缩小该宽度，超出部分由外层横向裁切，正文不因容器变窄而重排换�?*/
 @editor-page-width: 860px;
+/** 目录轨与正文之间的固定间距（轨宽由 Layout 中 .doc-page-catalogue-rail 占位） */
+@editor-content-rail-gap: 24px;
 
 .editor-wrap {
   display: flex;
+  flex: 1;
   flex-direction: column;
+  min-width: 0;
   min-height: 100%;
   font-family: @font;
   position: relative;
@@ -41,7 +45,7 @@
     min-width: @editor-page-width;
     max-width: @editor-page-width;
     flex-shrink: 0;
-    margin-left: max(calc((100% - @editor-page-width) / 2), calc(var(--catalogue-rail-width, 0px) + 24px));
+    margin-left: max(calc((100% - @editor-page-width) / 2), @editor-content-rail-gap);
     margin-right: auto;
     padding: 0 56px 0 92px;
 
@@ -1422,26 +1426,83 @@
 
         .feishu-columns-node {
           position: relative;
-          margin: 6px 0 8px;
+          box-sizing: border-box;
+          width: 100%;
+          max-width: 100%;
+          margin: 14px 0 16px;
+          /*
+           * Content is constrained by the grid below. The insert/splitter chrome
+           * must be allowed to paint outside the block so the blue + is never clipped.
+           */
+          overflow: visible;
+          --feishu-columns-gap: 14px;
+          --feishu-column-padding-x: 14px;
         }
 
         .feishu-columns-node__frame {
           position: relative;
+          box-sizing: border-box;
+          width: 100%;
+          max-width: 100%;
+          border-radius: 8px;
+          overflow: visible;
+        }
+
+        .feishu-columns-node__ratio-badges {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 3;
+          display: grid;
+          grid-template-columns: var(
+            --feishu-columns-template,
+            repeat(var(--feishu-columns-count, 2), minmax(0, 1fr))
+          );
+          gap: var(--feishu-columns-gap, 14px);
+        }
+
+        .feishu-columns-node__ratio-badge {
+          position: relative;
+          box-sizing: border-box;
+          height: 100%;
+          min-height: 46px;
+          pointer-events: none;
+        }
+
+        .feishu-columns-node__ratio-badge-text {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          padding: 1px 4px;
+          border-radius: 4px;
+          background: rgba(31, 35, 41, 0.45);
+          color: #fff;
+          font-size: 10px;
+          font-weight: 500;
+          line-height: 14px;
+          user-select: none;
         }
 
         .feishu-columns-block {
           display: block;
         }
 
-        // TipTap React NodeView 会在 contentDOM 内再包一层 wrapper，grid 必须加在这一层上。
-        .feishu-columns-block [data-node-view-content-react] {
+        // 仅分栏块最外层 content wrapper 使用 grid；勿用后代选择器，否则会误作用于每栏内部的 contentDOM。
+        .feishu-columns-block[data-node-view-content-react],
+        .feishu-columns-block > [data-node-view-content-react] {
           display: grid;
           grid-template-columns: var(
             --feishu-columns-template,
             repeat(var(--feishu-columns-count, 2), minmax(0, 1fr))
           );
-          gap: 12px;
+          gap: var(--feishu-columns-gap, 14px);
           align-items: stretch;
+          width: 100%;
+        }
+
+        .feishu-columns-block__col[data-node-view-content-react],
+        .feishu-columns-block__col > [data-node-view-content-react] {
+          display: block;
           width: 100%;
         }
 
@@ -1449,30 +1510,57 @@
           position: relative;
           display: flex;
           align-items: flex-start;
+          align-self: stretch;
           gap: 4px;
           min-width: 0;
+          height: 100%;
+          box-sizing: border-box;
+          /** 向栏间 gap 各延伸一半，hover 时灰色背景与「新增分栏」按钮无缝衔接 */
+          margin-left: calc(var(--feishu-columns-gap, 14px) / -2);
+          margin-right: calc(var(--feishu-columns-gap, 14px) / -2);
+          padding-left: calc(var(--feishu-columns-gap, 14px) / 2);
+          padding-right: calc(var(--feishu-columns-gap, 14px) / 2);
+          /** 空栏加号对齐首行段落中线（padding-top 10px + line-height 26px / 2） */
+          --feishu-column-add-anchor: 23px;
+
+          &:first-child {
+            margin-left: 0;
+            padding-left: 0;
+          }
+
+          &:last-child {
+            margin-right: 0;
+            padding-right: 0;
+          }
         }
 
         .feishu-columns-block__add-hover-wrap {
           position: absolute;
-          top: 10px;
+          top: var(--feishu-column-add-anchor);
           left: -28px;
-          z-index: 2;
+          z-index: 5;
           flex-shrink: 0;
           display: flex;
-          align-items: flex-start;
+          align-items: center;
+          box-sizing: content-box;
+          width: 24px;
+          padding-right: 8px;
+          margin-right: -8px;
+          transform: translateY(-50%);
           pointer-events: none;
         }
 
-        .feishu-columns-block__col-wrap:hover .feishu-columns-block__add-hover-wrap,
-        .feishu-columns-block__col-wrap.is-menu-open .feishu-columns-block__add-hover-wrap {
+        .feishu-columns-block__col-wrap.is-column-empty:hover .feishu-columns-block__add-hover-wrap,
+        .feishu-columns-block__col-wrap.is-column-empty:focus-within .feishu-columns-block__add-hover-wrap,
+        .feishu-columns-block__col-wrap.is-column-empty.is-menu-open .feishu-columns-block__add-hover-wrap,
+        .feishu-columns-block__col-wrap.is-column-empty.is-hovered .feishu-columns-block__add-hover-wrap {
           pointer-events: auto;
         }
 
         .feishu-columns-block__add-btn {
           box-sizing: border-box;
           flex-shrink: 0;
-          margin: 10px 0 0;
+          margin: 0;
           padding: 0;
           border: none;
           border-radius: 4px;
@@ -1513,8 +1601,10 @@
           }
         }
 
-        .feishu-columns-block__col-wrap:hover .feishu-columns-block__add-btn,
-        .feishu-columns-block__col-wrap.is-menu-open .feishu-columns-block__add-btn {
+        .feishu-columns-block__col-wrap.is-column-empty:hover .feishu-columns-block__add-btn,
+        .feishu-columns-block__col-wrap.is-column-empty:focus-within .feishu-columns-block__add-btn,
+        .feishu-columns-block__col-wrap.is-column-empty.is-menu-open .feishu-columns-block__add-btn,
+        .feishu-columns-block__col-wrap.is-column-empty.is-hovered .feishu-columns-block__add-btn {
           opacity: 1;
           pointer-events: auto;
         }
@@ -1522,11 +1612,15 @@
         .feishu-columns-block__col {
           box-sizing: border-box;
           flex: 1;
+          align-self: stretch;
           min-width: 0;
-          min-height: 48px;
-          padding: 10px 12px;
+          min-height: 46px;
+          height: 100%;
+          padding: 10px var(--feishu-column-padding-x, 14px);
           border-radius: 8px;
-          background: #eff0f1;
+          background: transparent;
+          overflow-wrap: anywhere;
+          word-break: break-word;
           transition: background 0.12s ease;
 
           > :first-child {
@@ -1548,77 +1642,168 @@
           }
         }
 
-        .feishu-columns-block__col-wrap:focus-within .feishu-columns-block__col {
-          background: #e8f0ff;
+        .feishu-columns-node:hover .feishu-columns-block__col,
+        .feishu-columns-node.is-resizing .feishu-columns-block__col,
+        .feishu-columns-block__col-wrap.is-hovered .feishu-columns-block__col,
+        .feishu-columns-block__col-wrap:hover .feishu-columns-block__col,
+        .feishu-columns-block__col-wrap:focus-within .feishu-columns-block__col,
+        .feishu-columns-block__col-wrap.is-menu-open .feishu-columns-block__col {
+          background: #f5f6f7;
         }
 
         .feishu-columns-node__splitter-layer {
           position: absolute;
           inset: 0;
           pointer-events: none;
-          z-index: 2;
+          z-index: 12;
+          overflow: visible;
         }
 
         .feishu-columns-node__splitter {
           position: absolute;
           top: 0;
           bottom: 0;
-          width: 24px;
+          width: 0;
           transform: translateX(-50%);
-          pointer-events: auto;
+          pointer-events: none;
+          overflow: visible;
+
+          /** 栏间 gutter 命中区：与 gap 同宽，顶部留给加号，底部留给拖拽 */
+          &::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            width: var(--feishu-columns-gap, 14px);
+            transform: translateX(-50%);
+            pointer-events: auto;
+          }
         }
 
-        .feishu-columns-node__resize-handle {
+        .feishu-columns-node__insert-line {
           position: absolute;
           top: 0;
           bottom: 0;
           left: 50%;
+          z-index: 1;
           width: 2px;
           transform: translateX(-50%);
           background: transparent;
-          cursor: col-resize;
+          pointer-events: none;
           transition: background 0.12s ease;
         }
 
-        .feishu-columns-node__splitter:hover .feishu-columns-node__resize-handle,
-        .feishu-columns-node__splitter.is-resizing .feishu-columns-node__resize-handle {
+        .feishu-columns-node__splitter:hover .feishu-columns-node__insert-line,
+        .feishu-columns-node__splitter.is-resizing .feishu-columns-node__insert-line {
           background: @primary;
+        }
+
+        .feishu-columns-node__resize-handle {
+          position: absolute;
+          top: 24px;
+          bottom: 0;
+          left: 50%;
+          width: var(--feishu-columns-gap, 14px);
+          transform: translateX(-50%);
+          background: transparent;
+          cursor: col-resize;
+          pointer-events: auto;
+        }
+
+        .feishu-columns-node__splitter:has(.feishu-columns-node__insert-btn:hover) {
+          cursor: default;
+        }
+
+        .feishu-columns-node__splitter:has(.feishu-columns-node__insert-btn:hover) .feishu-columns-node__resize-handle {
+          pointer-events: none;
+          cursor: default;
         }
 
         .feishu-columns-node__insert-btn {
           position: absolute;
-          top: 50%;
+          top: 0;
           left: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 22px;
+          z-index: 11;
+          width: var(--feishu-columns-gap, 14px);
+          min-width: 22px;
           height: 22px;
           margin: 0;
           padding: 0;
-          border: 1px solid #dee0e3;
-          border-radius: 50%;
-          color: #646a73;
-          background: #fff;
-          font-size: 16px;
-          line-height: 1;
+          border: none;
+          background: transparent;
           cursor: pointer;
           opacity: 0;
           transform: translate(-50%, -50%);
-          transition:
-            opacity 0.12s ease,
-            border-color 0.12s ease,
-            color 0.12s ease,
-            background 0.12s ease,
-            box-shadow 0.12s ease;
-          box-shadow: 0 1px 4px rgba(31, 35, 41, 0.08);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: opacity 0.12s ease;
+          outline: none;
+          pointer-events: auto;
+          overflow: visible;
         }
 
-        .feishu-columns-node__splitter:hover .feishu-columns-node__insert-btn {
+        .feishu-columns-node__splitter:hover .feishu-columns-node__insert-btn,
+        .feishu-columns-node__insert-btn:hover {
           opacity: 1;
-          border-color: @primary;
-          color: #fff;
+        }
+
+        .feishu-columns-node__insert-dot {
+          width: 4px;
+          height: 4px;
+          border-radius: 50%;
+          background: #bbbfc4;
+          opacity: 1;
+          transform: scale(1);
+          transition:
+            opacity 0.12s ease,
+            transform 0.12s ease;
+        }
+
+        .feishu-columns-node__insert-plus {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
           background: @primary;
+          opacity: 0;
+          transform: scale(0.6);
+          pointer-events: none;
+          box-shadow: 0 2px 6px rgba(51, 112, 255, 0.4);
+          transition:
+            opacity 0.12s ease,
+            transform 0.12s ease,
+            background 0.12s ease;
+
+          .feishu-columns-node__insert-plus-icon {
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+            line-height: 1;
+            margin-top: -1px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+        }
+
+        .feishu-columns-node__insert-btn:hover {
+          .feishu-columns-node__insert-dot {
+            opacity: 0;
+            transform: scale(0.6);
+          }
+          .feishu-columns-node__insert-plus {
+            opacity: 1;
+            transform: scale(1);
+            pointer-events: auto;
+          }
+        }
+
+        .feishu-columns-node__insert-plus:hover {
+          background: #2b5cce;
         }
 
         .feishu-columns-node__insert-tooltip {
@@ -1634,8 +1819,11 @@
           white-space: nowrap;
           pointer-events: none;
           opacity: 0;
-          transform: translateX(-50%);
-          transition: opacity 0.12s ease;
+          transform: translateX(-50%) scale(0.85);
+          transform-origin: bottom center;
+          transition:
+            opacity 0.12s ease,
+            transform 0.12s ease;
 
           &::after {
             content: '';
@@ -1650,6 +1838,7 @@
 
         .feishu-columns-node__insert-btn:hover .feishu-columns-node__insert-tooltip {
           opacity: 1;
+          transform: translateX(-50%) scale(1);
         }
 
         .feishu-sync-block {
@@ -1718,16 +1907,21 @@
     gap: 0;
     margin: 0;
     padding: 0;
-    /* 右缘对齐正文左缘，整体落在容器左�?padding 空档内，避免盖住首字 */
-    transform: translate(calc(-100% - 4px), -50%);
+    /* 右缘对齐正文左缘，整体落在容器左侧 padding 空档内，避免盖住首字 */
+    transform: translate(-100%, -50%);
     pointer-events: auto;
+
+    &.is-in-columns {
+      z-index: 250;
+    }
 
     .block-add-hover-wrap {
       position: relative;
       display: flex;
       align-items: center;
       margin: 0;
-      padding: 0;
+      padding: 0 10px 0 0;
+      margin-right: -10px;
     }
 
     .block-add-btn {
@@ -1759,7 +1953,7 @@
         justify-content: center;
         border: 1px solid @border-color;
         border-radius: 4px;
-        background: transparent;
+        background: #fff;
         line-height: 0;
 
         svg {
@@ -1884,29 +2078,23 @@
       box-sizing: border-box;
       height: 26px;
       min-height: 26px;
-      border: 1px solid transparent;
-      background: transparent;
+      border: 1px solid @border-color;
+      background: #fff;
       color: @text-secondary;
       border-radius: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 0 5px;
+      box-shadow: 0 1px 2px rgba(31, 35, 41, 0.06);
       transition:
         background 0.12s ease,
         border-color 0.12s ease,
         box-shadow 0.12s ease;
     }
 
-    &:hover .hover-drag-icon-wrapper,
-    &:focus-visible .hover-drag-icon-wrapper {
-      border-color: #dee0e3;
-      background: #fff;
-      box-shadow: 0 1px 2px rgba(31, 35, 41, 0.06);
-    }
-
-    &:hover .block-drag-caret svg path,
-    &:focus-visible .block-drag-caret svg path {
+    .block-drag-row:hover .block-drag-caret svg path,
+    .block-drag-row:focus-visible .block-drag-caret svg path {
       fill: #646a73;
     }
 

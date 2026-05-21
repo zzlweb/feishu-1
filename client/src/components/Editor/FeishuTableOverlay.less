@@ -65,6 +65,12 @@
     z-index: 12;
     transition: opacity 0.12s ease, visibility 0.12s ease;
     
+    /*
+     * Rails are only interaction chrome. Do not clip them: the blue insert
+     * button and the preview line must be able to paint outside the rail box.
+     */
+    overflow: visible;
+    
     /* 强制隐藏默认滚动条，以防 overflow 组合计算为 auto 时出现浏览器滚动条 */
     scrollbar-width: none;
     &::-webkit-scrollbar {
@@ -75,14 +81,11 @@
   }
 
   &__rail-top {
-    /* 仅裁切左右越界灰点，保留 + 按钮向上下溢出 */
-    overflow-x: hidden;
-    overflow-y: visible;
+    overflow: visible;
   }
 
   &__rail-left {
-    overflow-y: hidden;
-    overflow-x: visible;
+    overflow: visible;
   }
 
   &__hit {
@@ -172,6 +175,7 @@
     transform: scale(0.6);
     pointer-events: none;
     box-shadow: 0 2px 6px rgba(51, 112, 255, 0.4);
+    z-index: 2;
     transition:
       opacity 0.12s ease,
       transform 0.12s ease;

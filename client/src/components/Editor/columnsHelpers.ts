@@ -2,17 +2,44 @@ import type { Editor } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { Fragment, type Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
-import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH } from './slashMenuConfig';
+import { SLASH_MENU_MAX_HEIGHT } from './slashMenuConfig';
 
-export const MIN_COLUMNS = 2;
-export const MAX_COLUMNS = 5;
+export const MIN_COLUMNS = 1;
+/** Slash / 插入菜单分栏选择器最多预选栏数 */
+export const MAX_COLUMNS_PICKER = 5;
+export const FEISHU_COLUMNS_GAP = 14;
+
+/** 分栏间隙中心线位置（与 CSS grid gap 对齐） */
+export function computeSplitterLeft(index: number, ratios: number[], gap = FEISHU_COLUMNS_GAP): string {
+  const total = ratios.reduce((sum, value) => sum + value, 0) || ratios.length;
+  const contentFraction = ratios.slice(0, index + 1).reduce((sum, value) => sum + value, 0) / total;
+  const gapCount = Math.max(0, ratios.length - 1);
+  const offsetPx = index * gap + gap / 2;
+  return `calc((100% - ${gapCount * gap}px) * ${contentFraction} + ${offsetPx}px)`;
+}
 
 interface LocalColumnsInsertOptions {
   columnCount?: number;
 }
 
-function normalizeColumnsCount(columnCount: number): number {
-  return Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, Math.round(columnCount)));
+function normalizePickerColumnsCount(columnCount: number): number {
+  return Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS_PICKER, Math.round(columnCount)));
+}
+
+/** 栏数增多时缩小列间距，保证分栏块总宽不超出版心 */
+export function resolveColumnsGap(columnCount: number): number {
+  if (columnCount >= 8) return 6;
+  if (columnCount >= 6) return 8;
+  if (columnCount >= 4) return 10;
+  return FEISHU_COLUMNS_GAP;
+}
+
+/** 栏数增多时缩小栏内水平 padding */
+export function resolveColumnPaddingX(columnCount: number): number {
+  if (columnCount >= 8) return 6;
+  if (columnCount >= 6) return 8;
+  if (columnCount >= 4) return 10;
+  return 14;
 }
 
 function createEmptyColumnNode(schema: Editor['schema'], widthRatio = 1) {
@@ -22,6 +49,15 @@ function createEmptyColumnNode(schema: Editor['schema'], widthRatio = 1) {
     { widthRatio },
     paragraph ? Fragment.from(paragraph) : undefined,
   );
+}
+
+function createColumnNodeFromContent(schema: Editor['schema'], content: Fragment | null, widthRatio = 1) {
+  const columnType = schema.nodes.localColumnBlock;
+  if (!columnType) return null;
+  if (content && content.childCount > 0) {
+    return columnType.create({ widthRatio }, content);
+  }
+  return createEmptyColumnNode(schema, widthRatio);
 }
 
 function ensureColumnHasParagraph(schema: Editor['schema'], columnNode: ProseMirrorNode): ProseMirrorNode {
@@ -44,6 +80,17 @@ export function buildGridTemplate(columnsNode: ProseMirrorNode): string {
   return readColumnRatios(columnsNode)
     .map(ratio => `minmax(0, ${ratio.toFixed(4)}fr)`)
     .join(' ');
+}
+
+/** 分栏是否仍为空（仅含空段落），有正文或非段落块时视为已确定内容 */
+export function isColumnBlockEmpty(columnNode: ProseMirrorNode): boolean {
+  if (columnNode.childCount === 0) return true;
+  for (let index = 0; index < columnNode.childCount; index += 1) {
+    const child = columnNode.child(index);
+    if (child.type.name !== 'paragraph') return false;
+    if (child.textContent.trim().length > 0) return false;
+  }
+  return true;
 }
 
 function findColumnPos(columnsPos: number, columnsNode: ProseMirrorNode, columnIndex: number): number {
@@ -87,16 +134,19 @@ export function insertColumnAfterAt(editor: Editor, getPos: NodeViewProps['getPo
   const columnsPos = getPos();
   const columnsNode = editor.state.doc.nodeAt(columnsPos);
   if (!columnsNode || columnsNode.type.name !== 'localColumnsBlock') return;
-  if (columnsNode.childCount >= MAX_COLUMNS) return;
-
   const safeAfterIndex = Math.max(0, Math.min(afterIndex, columnsNode.childCount - 1));
   const insertIndex = safeAfterIndex + 1;
   const nextChildren: ProseMirrorNode[] = [];
+  const nextCount = columnsNode.childCount + 1;
+  const insertedRatio = 100 / nextCount;
+  const existingScale = (100 - insertedRatio) / 100;
+  const existingRatios = readColumnRatios(columnsNode).map(ratio => ratio * existingScale);
 
   for (let index = 0; index < columnsNode.childCount; index += 1) {
-    nextChildren.push(ensureColumnHasParagraph(editor.schema, columnsNode.child(index)));
+    const child = ensureColumnHasParagraph(editor.schema, columnsNode.child(index));
+    nextChildren.push(child.type.create({ ...child.attrs, widthRatio: existingRatios[index] }, child.content));
     if (index === safeAfterIndex) {
-      nextChildren.push(createEmptyColumnNode(editor.schema));
+      nextChildren.push(createEmptyColumnNode(editor.schema, insertedRatio));
     }
   }
 
@@ -117,10 +167,13 @@ export function resizeColumnsAt(
   if (leftIndex < 0 || leftIndex >= columnsNode.childCount - 1) return;
 
   const ratios = readColumnRatios(columnsNode);
-  const minRatio = 8;
-  const nextLeft = Math.max(minRatio, ratios[leftIndex] + deltaRatio);
-  const nextRight = Math.max(minRatio, ratios[leftIndex + 1] - deltaRatio);
-  if (nextLeft < minRatio || nextRight < minRatio) return;
+  const minRatio = Math.max(4, Math.min(8, 72 / columnsNode.childCount));
+  const minDelta = minRatio - ratios[leftIndex];
+  const maxDelta = ratios[leftIndex + 1] - minRatio;
+  const appliedDelta = Math.max(minDelta, Math.min(maxDelta, deltaRatio));
+  if (Math.abs(appliedDelta) < 0.01) return;
+  const nextLeft = ratios[leftIndex] + appliedDelta;
+  const nextRight = ratios[leftIndex + 1] - appliedDelta;
 
   const nextChildren = Array.from({ length: columnsNode.childCount }, (_, index) => {
     const child = ensureColumnHasParagraph(editor.schema, columnsNode.child(index));
@@ -135,15 +188,9 @@ export function resizeColumnsAt(
 export function computeColumnPlusMenuPosition(anchor: DOMRect) {
   const pad = 8;
   const gap = 8;
-  const menuW = Math.min(SLASH_MENU_WIDTH, window.innerWidth - pad * 2);
   const menuH = SLASH_MENU_MAX_HEIGHT;
-  const leftX = anchor.left - gap - menuW;
-  const rightX = anchor.right + gap;
-  const fitsLeft = leftX >= pad;
-  const fitsRight = rightX + menuW <= window.innerWidth - pad;
 
-  let left = fitsLeft ? leftX : fitsRight ? rightX : Math.max(pad, leftX);
-  left = Math.max(pad, Math.min(left, window.innerWidth - menuW - pad));
+  const left = anchor.left - gap;
 
   let top = anchor.bottom + gap;
   if (top + menuH > window.innerHeight - pad) {
@@ -215,7 +262,7 @@ export function focusColumnEditor(editor: Editor, getPos: NodeViewProps['getPos'
 }
 
 export function buildLocalColumnsInsertContent(options: LocalColumnsInsertOptions = {}) {
-  const columnCount = normalizeColumnsCount(options.columnCount ?? MIN_COLUMNS);
+  const columnCount = normalizePickerColumnsCount(options.columnCount ?? MIN_COLUMNS);
   return {
     type: 'localColumnsBlock',
     content: Array.from({ length: columnCount }, () => ({
@@ -226,23 +273,23 @@ export function buildLocalColumnsInsertContent(options: LocalColumnsInsertOption
   };
 }
 
-export function createLocalColumnsNode(schema: Editor['schema'], columnCount: number): ProseMirrorNode | null {
+export function createLocalColumnsNode(
+  schema: Editor['schema'],
+  columnCount: number,
+  firstColumnContent: Fragment | null = null,
+): ProseMirrorNode | null {
   const columnsType = schema.nodes.localColumnsBlock;
-  const columnType = schema.nodes.localColumnBlock;
-  const paragraphType = schema.nodes.paragraph;
-  if (!columnsType || !columnType || !paragraphType) return null;
+  if (!columnsType || !schema.nodes.localColumnBlock || !schema.nodes.paragraph) return null;
 
-  const count = normalizeColumnsCount(columnCount);
+  const count = normalizePickerColumnsCount(columnCount);
   const columns: ProseMirrorNode[] = [];
 
   for (let index = 0; index < count; index += 1) {
-    const paragraph = paragraphType.createAndFill();
-    columns.push(
-      columnType.create(
-        { widthRatio: 1 },
-        paragraph ? Fragment.from(paragraph) : undefined,
-      ),
-    );
+    const column = index === 0
+      ? createColumnNodeFromContent(schema, firstColumnContent, 1)
+      : createEmptyColumnNode(schema);
+    if (!column) return null;
+    columns.push(column);
   }
 
   return columnsType.create(null, Fragment.fromArray(columns));

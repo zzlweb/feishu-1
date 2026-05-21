@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/react';
+import type { Fragment } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import { createLocalColumnsNode, resolveBlockReplaceRange } from './columnsHelpers';
 
@@ -7,14 +8,21 @@ function focusFirstColumn(tr: any, columnsPos: number) {
   tr.setSelection(TextSelection.near(tr.doc.resolve(textPos), 1));
 }
 
+function getFirstColumnContent(editor: Editor, from: number, to: number): Fragment | null {
+  const text = editor.state.doc.textBetween(from, to, '\n', '\0').trim();
+  if (!text || /^\/\S*$/.test(text)) return null;
+  return editor.state.doc.slice(from, to).content;
+}
+
 export function insertFeishuColumns(editor: Editor, columnCount: number): boolean {
   editor.commands.focus();
 
   return editor.chain().command(({ tr, state, dispatch }) => {
-    const columnsNode = createLocalColumnsNode(state.schema, columnCount);
+    const { from, to } = resolveBlockReplaceRange(editor);
+    const firstColumnContent = getFirstColumnContent(editor, from, to);
+    const columnsNode = createLocalColumnsNode(state.schema, columnCount, firstColumnContent);
     if (!columnsNode) return false;
 
-    const { from, to } = resolveBlockReplaceRange(editor);
     tr.replaceWith(from, to, columnsNode);
     focusFirstColumn(tr, tr.mapping.map(from));
     dispatch?.(tr.scrollIntoView());

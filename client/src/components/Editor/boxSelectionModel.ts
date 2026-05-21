@@ -34,12 +34,24 @@ const UI_CHROME =
   '.block-inline-tools, .feishu-table-chrome, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .slash-menu, .selection-bubble, .editor-page-link-pop, .feishu-box-selection-layer';
 
 function isUiChrome(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return Boolean(target.closest(UI_CHROME));
+  const element = target instanceof Element
+    ? target
+    : target instanceof Text ? target.parentElement : null;
+  return Boolean(element?.closest(UI_CHROME));
 }
 
 function getTiptapRoot(editorArea: HTMLElement): HTMLElement | null {
   return editorArea.querySelector('.tiptap, .ProseMirror');
+}
+
+function getTargetElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) return target;
+  if (target instanceof Text) return target.parentElement;
+  return null;
+}
+
+function isNativeInteractiveElement(element: Element): boolean {
+  return Boolean(element.closest('button, input, textarea, select, option, [contenteditable="false"]'));
 }
 
 function resolveRowRange(editor: Editor, tr: HTMLElement): { from: number; to: number } | null {
@@ -213,23 +225,24 @@ export function deleteSelectableUnits(editor: Editor, units: SelectableUnit[]): 
   return true;
 }
 
-/** 空白/页边区域：可直接按下拖拽开始框选 */
+/** 文档编辑区域：按下左键拖动即可框选块内容 */
 export function canStartBoxSelect(
   target: EventTarget | null,
   editorArea: HTMLElement,
   clientY?: number,
 ): boolean {
-  if (!(target instanceof Element)) return false;
-  if (!editorArea.contains(target)) return false;
-  if (isUiChrome(target)) return false;
+  const element = getTargetElement(target);
+  if (!element) return false;
+  if (!editorArea.contains(element)) return false;
+  if (isUiChrome(element) || isNativeInteractiveElement(element)) return false;
 
-  if (target === editorArea) return true;
+  if (element === editorArea) return true;
 
   const tiptap = getTiptapRoot(editorArea);
   if (!tiptap) return false;
 
-  // 仅点击编辑器根容器本身（块间空白）
-  if (target === tiptap) return true;
+  // 飞书式框选：在文档编辑区域内按住左键拖动即可开始，光标保持默认箭头。
+  if (element === tiptap || tiptap.contains(element)) return true;
 
   // 最后一个块下方的空白区
   if (clientY != null) {
@@ -243,12 +256,13 @@ export function canStartBoxSelect(
   return false;
 }
 
-/** 双击正文任意处进入框选模式（随后可在任意位置拖拽） */
+/** 兼容旧入口：判断正文区域是否可用于框选 */
 export function canArmBoxSelect(target: EventTarget | null, editorArea: HTMLElement): boolean {
-  if (!(target instanceof Element)) return false;
-  if (!editorArea.contains(target)) return false;
-  if (isUiChrome(target)) return false;
-  return Boolean(target.closest('.tiptap, .ProseMirror') || target === editorArea);
+  const element = getTargetElement(target);
+  if (!element) return false;
+  if (!editorArea.contains(element)) return false;
+  if (isUiChrome(element) || isNativeInteractiveElement(element)) return false;
+  return Boolean(element.closest('.tiptap, .ProseMirror') || element === editorArea);
 }
 
 export function measureUnitBand(

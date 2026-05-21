@@ -35,7 +35,7 @@ const LocalColumnBlock = TiptapNode.create({
 const LocalColumnsBlock = TiptapNode.create({
   name: 'localColumnsBlock',
   group: 'block',
-  content: 'localColumnBlock{2,5}',
+  content: 'localColumnBlock+',
   isolating: true,
   parseHTML() {
     return [{ tag: 'div[data-local-block="columns"]' }];

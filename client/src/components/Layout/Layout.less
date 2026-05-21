@@ -15,6 +15,8 @@
 @radius-md: 8px;
 /** 与 Editor.less 版心一致（正文列宽）；顶图横贯工作区时不再受此宽度约束 */
 @editor-page-width: 860px;
+/** 左侧目录轨宽（固定占位，展开/收起目录不改变正文列位置） */
+@catalogue-rail-width: 200px;
 @font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
   "Microsoft YaHei", sans-serif;
 
@@ -349,18 +351,8 @@
     overflow: hidden;
     min-height: 0;
     position: relative;
-    /** 目录展开 / 收起轨宽（无目录时为 0），正文可用 calc(env(...) var(...)) 避让 */
-    --catalogue-rail-width: 0px;
     /** 评论侧栏展开时轨宽（供版心计算，与 .comment-sidebar-positioned 宽度一致） */
     --comment-rail-width: 0px;
-
-    &:has(.catalogue-aside:not(.catalogue-aside--collapsed)) {
-      --catalogue-rail-width: 200px;
-    }
-
-    &:has(.catalogue-aside.catalogue-aside--collapsed) {
-      --catalogue-rail-width: 40px;
-    }
 
     &.doc-page-body--comment-open {
       --comment-rail-width: 280px;
@@ -391,9 +383,20 @@
   }
 
   .doc-page-main {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
     flex: 1;
     min-width: 0;
     background: @bg-white;
+    position: relative;
+  }
+
+  .doc-page-catalogue-rail {
+    box-sizing: border-box;
+    width: @catalogue-rail-width;
+    min-width: @catalogue-rail-width;
+    flex-shrink: 0;
     position: relative;
   }
 
@@ -1092,10 +1095,13 @@
 
 .catalogue-aside {
   position: sticky;
-  width: fit-content;
+  top: 0;
+  align-self: flex-start;
+  width: 100%;
+  max-width: 100%;
+  flex-shrink: 0;
   background-color: initial;
   z-index: 2;
-  min-width: 40px;
 
 
   &.docx-width-mode {
@@ -1105,20 +1111,18 @@
   .catalogue-inner {
     box-sizing: border-box;
     width: 100%;
+    max-width: 100%;
     flex: 1;
     padding: 12px 10px 16px 16px;
     inset: 0;
     padding-top: 54px;
-    width: fit-content;
     height: fit-content;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: visible;
     position: absolute;
   }
 
   &.catalogue-aside--collapsed {
-    width: 40px;
-    max-width: 40px;
-
     .catalogue-inner {
       width: 100%;
       padding: 12px 6px 16px 10px;
@@ -1169,7 +1173,8 @@
     overflow-y: auto;
     overflow-x: hidden;
     outline: none;
-    width: fit-content;
+    width: 100%;
+    max-width: 100%;
 
     &::-webkit-scrollbar {
       width: 5px;
@@ -1186,11 +1191,15 @@
     margin: 0;
     padding: 0 0 40px;
     cursor: default;
+    width: 100%;
+    max-width: 100%;
   }
 
   .catalogue__list-item {
     margin: 0;
     padding: 0 0 10px;
+    max-width: 100%;
+    overflow: hidden;
   }
 
   /** 文档标题（目录首行，与正文 H1 同级视觉权重） */
