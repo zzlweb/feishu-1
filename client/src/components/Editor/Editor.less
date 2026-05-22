@@ -1229,9 +1229,9 @@
           width: 100%;
           max-width: 100%;
           isolation: isolate;
-          /* 顶部为列操作轨预留空间；左右操作轨由 chrome-mount 负偏移绘制，不挤压表格与正文对齐 */
-          margin: @feishu-table-chrome-gutter 0 8px 0;
-          padding: 0;
+          /* 顶部 gutter 用 padding 纳入宿主命中区，避免移向块柄时 pointer 落空 */
+          margin: 0 0 8px 0;
+          padding: @feishu-table-chrome-gutter 0 0 0;
           overflow: visible;
         }
 
@@ -1265,7 +1265,7 @@
         /* 左右渐隐：独立层叠在 scroll 之上，避�?overflow 裁剪 */
         .feishu-table-edge-fades {
           position: absolute;
-          top: 0;
+          top:  @feishu-table-chrome-gutter;
           left: 0;
           right: 0;
           bottom: 0;
@@ -1528,14 +1528,22 @@
             }
           }
 
+          /* 单元格 hover：轻量灰底，接近飞书 */
+          td:hover:not(.selectedCell):not(.feishu-table__cell--rail-selected),
+          th:hover:not(.selectedCell):not(.feishu-table__cell--rail-selected) {
+            background: #fafbfc !important;
+          }
+
           .selectedCell {
             background: #e6eeff !important;
+            box-shadow: inset 0 0 0 2px #3370ff !important;
           }
 
           th.selectedCell,
           .feishu-table__header-cell.selectedCell {
             background: #e6eeff !important;
             color: #1f2329 !important;
+            box-shadow: inset 0 0 0 2px #3370ff !important;
           }
 
           .selectedCell::after {
