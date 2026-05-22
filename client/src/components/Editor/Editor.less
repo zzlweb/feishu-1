@@ -1175,8 +1175,8 @@
           width: 100%;
           max-width: 100%;
           isolation: isolate;
-          /* 为表格外侧操作点/块柄预留稳定空间，避免被滚动区裁�?*/
-          margin: @feishu-table-chrome-gutter 0 8px @feishu-table-chrome-gutter;
+          /* 顶部为列操作轨预留空间；左右操作轨由 chrome-mount 负偏移绘制，不挤压表格与正文对齐 */
+          margin: @feishu-table-chrome-gutter 0 8px 0;
           padding: 0;
           overflow: visible;
         }
@@ -1263,11 +1263,26 @@
           }
         }
 
-        /* 块柄悬停 / 表格菜单打开：对齐飞书，保持单元格白色底色，无需高亮整表为蓝色 */
+        /* 块柄悬停 / 表格菜单打开：对齐飞书，高亮整表为淡蓝色背景与蓝色外边框 */
         .tableWrapper.is-table-block-active,
         .feishu-table-host.is-table-block-active {
           table.feishu-table {
+            outline: 2px solid #3370ff !important;
+            outline-offset: -1px;
             border-color: #dee0e3 !important;
+
+            th,
+            td {
+              background: rgba(51, 112, 255, 0.08) !important;
+              border-color: #dee0e3 !important;
+
+              &::after,
+              &::before {
+                display: none !important;
+                content: none !important;
+                opacity: 0 !important;
+              }
+            }
 
             .selectedCell {
               background: rgba(51, 112, 255, 0.08) !important;
@@ -1280,6 +1295,64 @@
               background: transparent !important;
             }
           }
+        }
+
+        /* 兼容原生节点选中（NodeSelection）时的全选高亮样式 */
+        table.feishu-table.ProseMirror-selectednode {
+          outline: 2px solid #3370ff !important;
+          outline-offset: -1px;
+          border-color: #dee0e3 !important;
+
+          th,
+          td {
+            background: rgba(51, 112, 255, 0.08) !important;
+            border-color: #dee0e3 !important;
+
+            &::after,
+            &::before {
+              display: none !important;
+              content: none !important;
+              opacity: 0 !important;
+            }
+          }
+
+          .selectedCell::after {
+            display: none !important;
+            content: none !important;
+            opacity: 0 !important;
+            background: transparent !important;
+          }
+        }
+
+        /* 解决 NodeSelection 或单元格多选状态下，浏览器默认文本选区 ::selection 在单元格内产生多余蓝色高亮块的问题 */
+        .tableWrapper.is-table-block-active table.feishu-table::selection,
+        .feishu-table-host.is-table-block-active table.feishu-table::selection,
+        table.feishu-table.ProseMirror-selectednode::selection,
+        table.feishu-table .selectedCell::selection,
+        .tableWrapper.is-table-block-active table.feishu-table *::selection,
+        .feishu-table-host.is-table-block-active table.feishu-table *::selection,
+        table.feishu-table.ProseMirror-selectednode *::selection,
+        table.feishu-table .selectedCell *::selection,
+        table.feishu-table br::selection,
+        table.feishu-table p:empty::selection,
+        table.feishu-table p.is-empty::selection,
+        table.feishu-table p.is-empty *::selection {
+          background: transparent !important;
+        }
+
+        .tableWrapper.is-table-block-active table.feishu-table::-moz-selection,
+        .feishu-table-host.is-table-block-active table.feishu-table::-moz-selection,
+        table.feishu-table.ProseMirror-selectednode::-moz-selection,
+        table.feishu-table .selectedCell::-moz-selection,
+        .tableWrapper.is-table-block-active table.feishu-table *::-moz-selection,
+        .feishu-table-host.is-table-block-active table.feishu-table *::-moz-selection,
+        table.feishu-table.ProseMirror-selectednode *::-moz-selection,
+        table.feishu-table .selectedCell *::-moz-selection,
+        table.feishu-table br::-moz-selection,
+        table.feishu-table p:empty::-moz-selection,
+        table.feishu-table p.is-empty::-moz-selection,
+        table.feishu-table p.is-empty *::-moz-selection {
+          background: transparent !important;
         }
 
         .feishu-table-chrome-mount {
@@ -1402,11 +1475,18 @@
           }
 
           .selectedCell {
-            background: rgba(51, 112, 255, 0.08) !important;
+            background: #e6eeff !important;
+          }
+
+          th.selectedCell,
+          .feishu-table__header-cell.selectedCell {
+            background: #e6eeff !important;
+            color: #1f2329 !important;
           }
 
           .selectedCell::after {
-            background: rgba(51, 112, 255, 0.12) !important;
+            display: none !important;
+            content: none !important;
           }
         }
 
@@ -1544,7 +1624,7 @@
           align-items: center;
           box-sizing: content-box;
           width: 24px;
-          padding-right: 8px;
+          padding: 4px 8px 4px 4px;
           margin-right: -8px;
           transform: translateY(-50%);
           pointer-events: none;
@@ -1740,6 +1820,7 @@
           justify-content: center;
           transition: opacity 0.12s ease;
           outline: none;
+          /* 热区始终可接收鼠标，避免从 splitter 移向 + 时经过 dead zone 导致按钮消失 */
           pointer-events: auto;
           overflow: visible;
         }

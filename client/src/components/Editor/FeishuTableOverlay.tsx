@@ -20,7 +20,7 @@ import './FeishuTableOverlay.less';
 
 // Keep the rail at least as large as the hover hit target, otherwise the edge
 // insert button can be visually clipped on the first row/column.
-const RAIL = 18;
+const RAIL = 12;
 const HIT_MARGIN = 12;
 const HOST_CHROME_HOT_CLASS = 'feishu-table-host--chrome-hot';
 
@@ -139,6 +139,8 @@ function FeishuTableOverlay({
   const [chromeVisible, setChromeVisible] = useState(false);
   const [handleHovered, setHandleHovered] = useState(false);
   const [selectedRail, setSelectedRail] = useState<SelectedRail>(null);
+  const [railSelectionKind, setRailSelectionKind] = useState<'col' | 'row' | 'cell' | null>(null);
+  const [selectionRange, setSelectionRange] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
 
   const tableHoverRef = useRef(false);
   const handleHoverRef = useRef(false);
@@ -147,7 +149,21 @@ function FeishuTableOverlay({
   const hideChromeTimerRef = useRef<number | null>(null);
   const selectedRailRef = useRef<SelectedRail>(null);
 
-  pinChromeRef.current = pinChrome;
+  const isSelectionInsideTable = (() => {
+    const tablePos = getTablePosFromHost(editor, tableHost);
+    if (tablePos == null) return false;
+    const { $from } = editor.state.selection;
+    for (let d = $from.depth; d > 0; d--) {
+      if ($from.node(d).type.name === 'table') {
+        return $from.before(d) === tablePos;
+      }
+    }
+    return false;
+  })();
+
+  const pinChromeAlways = pinChrome || isSelectionInsideTable;
+
+  pinChromeRef.current = pinChromeAlways;
   chromeVisibleRef.current = chromeVisible;
   selectedRailRef.current = selectedRail;
 
@@ -177,7 +193,7 @@ function FeishuTableOverlay({
     }, 280);
   }, [cancelHideChrome, clearHover, tableHost]);
 
-  const showChrome = chromeVisible || handleHovered || pinChrome || selectedRail != null;
+  const showChrome = chromeVisible || handleHovered || pinChromeAlways || selectedRail != null;
 
   const syncScrollFade = useCallback(() => {
     const hot =
@@ -256,6 +272,54 @@ function FeishuTableOverlay({
     [clearHover, editor, layout, remeasureSoon, tableHost],
   );
 
+  const selectColumn = useCallback(
+    (colIndex: number) => {
+      const tablePos = getTablePosFromHost(editor, tableHost);
+      if (tablePos == null) return;
+      const { state } = editor;
+      const tableNode = state.doc.nodeAt(tablePos);
+      if (!tableNode) return;
+      try {
+        const map = TableMap.get(tableNode);
+        const tableStart = tablePos + 1;
+        const anchorCellPos = tableStart + map.map[colIndex];
+        const headCellPos = tableStart + map.map[(map.height - 1) * map.width + colIndex];
+        const selection = CellSelection.create(state.doc, anchorCellPos, headCellPos);
+        editor.view.dispatch(state.tr.setSelection(selection));
+        editor.view.focus();
+        clearHover();
+        setSelectedRail('col');
+      } catch (e) {
+        console.error(e);
+      }
+    },
+    [clearHover, editor, tableHost],
+  );
+
+  const selectRow = useCallback(
+    (rowIndex: number) => {
+      const tablePos = getTablePosFromHost(editor, tableHost);
+      if (tablePos == null) return;
+      const { state } = editor;
+      const tableNode = state.doc.nodeAt(tablePos);
+      if (!tableNode) return;
+      try {
+        const map = TableMap.get(tableNode);
+        const tableStart = tablePos + 1;
+        const anchorCellPos = tableStart + map.map[rowIndex * map.width];
+        const headCellPos = tableStart + map.map[rowIndex * map.width + (map.width - 1)];
+        const selection = CellSelection.create(state.doc, anchorCellPos, headCellPos);
+        editor.view.dispatch(state.tr.setSelection(selection));
+        editor.view.focus();
+        clearHover();
+        setSelectedRail('row');
+      } catch (e) {
+        console.error(e);
+      }
+    },
+    [clearHover, editor, tableHost],
+  );
+
   const activateTableChrome = useCallback(() => {
     cancelHideChrome();
     tableHoverRef.current = true;
@@ -302,7 +366,7 @@ function FeishuTableOverlay({
   useLayoutEffect(() => () => cancelHideChrome(), [cancelHideChrome]);
 
   useLayoutEffect(() => {
-    if (pinChrome) {
+    if (pinChromeAlways) {
       activateTableChrome();
       return;
     }
@@ -318,36 +382,87 @@ function FeishuTableOverlay({
     chromeVisibleRef.current = false;
     setChromeVisible(false);
     syncTableScrollEdgeFade(tableHost, false);
-  }, [activateTableChrome, pinChrome, tableHost]);
+  }, [activateTableChrome, pinChromeAlways, tableHost]);
 
-  // Clear selectedRail when editor selection changes away from a CellSelection on this table
+  // Synchronize selection changes to local state
   useLayoutEffect(() => {
     const onSelectionUpdate = () => {
-      if (!selectedRailRef.current) return;
       const { state } = editor;
-      if (!(state.selection instanceof CellSelection)) {
-        setSelectedRail(null);
-        return;
-      }
-      // Check if the cell selection is still inside this table
       const tablePos = getTablePosFromHost(editor, tableHost);
-      if (tablePos == null) {
-        setSelectedRail(null);
-        return;
+
+      // 1. Check if cell selection is on this table
+      if (state.selection instanceof CellSelection && tablePos != null) {
+        try {
+          let anchorTablePos: number | null = null;
+          const $anchor = state.selection.$anchorCell;
+          for (let d = $anchor.depth; d > 0; d--) {
+            if ($anchor.node(d).type.name === 'table') {
+              anchorTablePos = $anchor.before(d);
+              break;
+            }
+          }
+          if (anchorTablePos === tablePos) {
+            const tableNode = state.doc.nodeAt(tablePos);
+            if (tableNode) {
+              const map = TableMap.get(tableNode);
+              const tableStart = tablePos + 1;
+              const anchorRect = map.findCell(state.selection.$anchorCell.pos - tableStart);
+              const headRect = map.findCell(state.selection.$headCell.pos - tableStart);
+              const rect = {
+                left: Math.min(anchorRect.left, headRect.left),
+                right: Math.max(anchorRect.right, headRect.right),
+                top: Math.min(anchorRect.top, headRect.top),
+                bottom: Math.max(anchorRect.bottom, headRect.bottom),
+              };
+              setSelectionRange({
+                left: rect.left,
+                right: rect.right,
+                top: rect.top,
+                bottom: rect.bottom,
+              });
+              if (state.selection.isColSelection()) {
+                setRailSelectionKind('col');
+                setHoverCol(null);
+                setHoverRow(null);
+              } else if (state.selection.isRowSelection()) {
+                setRailSelectionKind('row');
+                setHoverCol(null);
+                setHoverRow(null);
+              } else {
+                setRailSelectionKind('cell');
+              }
+              return;
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
       }
-      const selFrom = state.selection.from;
-      const tableNode = state.doc.nodeAt(tablePos);
-      if (!tableNode) {
-        setSelectedRail(null);
-        return;
-      }
-      const tableEnd = tablePos + tableNode.nodeSize;
-      if (selFrom < tablePos || selFrom > tableEnd) {
-        setSelectedRail(null);
+
+      // If not, clear selection range
+      setSelectionRange(null);
+      setRailSelectionKind(null);
+
+      // 2. Clear selectedRail if selection leaves the table
+      if (selectedRailRef.current && tablePos != null) {
+        const selFrom = state.selection.from;
+        const tableNode = state.doc.nodeAt(tablePos);
+        if (!tableNode) {
+          setSelectedRail(null);
+        } else {
+          const tableEnd = tablePos + tableNode.nodeSize;
+          if (selFrom < tablePos || selFrom > tableEnd) {
+            setSelectedRail(null);
+          }
+        }
       }
     };
+
+    onSelectionUpdate();
     editor.on('selectionUpdate', onSelectionUpdate);
-    return () => { editor.off('selectionUpdate', onSelectionUpdate); };
+    return () => {
+      editor.off('selectionUpdate', onSelectionUpdate);
+    };
   }, [editor, tableHost]);
 
   if (!layout || !tableHost.isConnected) return null;
@@ -362,15 +477,15 @@ function FeishuTableOverlay({
     rowBounds,
   } = layout;
 
+  const suppressInsertChrome = railSelectionKind === 'col' || railSelectionKind === 'row';
+
   const visibleLeft = surfaceOffsetLeft;
   const visibleWidth = viewportWidth;
   const handleLeft = visibleLeft - 4;
   const handleTop = tableOffsetTop - 4;
-  const visibleColHits = colBounds
+  const colHitsToRender = colBounds
     .map((x, i) => ({ x, i }))
-    .filter(({ x }) => isBoundVisible(x, viewStart, viewportWidth));
-  const colHitsToRender =
-    visibleColHits.length > 0 ? visibleColHits : colBounds.map((x, i) => ({ x, i }));
+    .filter(({ x }) => x > colBounds[0] + 2 && x < colBounds[colBounds.length - 1] - 2 && x >= viewStart && x <= viewStart + viewportWidth);
 
   const chrome = (
     <div
@@ -429,7 +544,7 @@ function FeishuTableOverlay({
         className="feishu-table-chrome__rail-top"
         style={{
           left: visibleLeft,
-          top: tableOffsetTop - RAIL / 2,
+          top: tableOffsetTop - RAIL,
           width: visibleWidth,
           height: RAIL,
         }}
@@ -440,29 +555,76 @@ function FeishuTableOverlay({
           setHoverCol(null);
         }}
       >
-        {colHitsToRender.map(({ x, i }) => (
+        {colBounds.slice(0, -1).map((x, i) => {
+          const nextX = colBounds[i + 1];
+          const clampedLeft = Math.max(x, viewStart);
+          const clampedRight = Math.min(nextX, viewStart + viewportWidth);
+          if (clampedLeft >= clampedRight) return null;
+
+          const isColSelected =
+            railSelectionKind === 'col' &&
+            selectionRange != null &&
+            i >= selectionRange.left &&
+            i < selectionRange.right;
+
+          return (
+            <div
+              key={`block-c-${i}`}
+              className={`feishu-table-chrome__rail-block feishu-table-chrome__rail-block--col${
+                isColSelected ? ' is-selected' : ''
+              }`}
+              style={{
+                left: clampedLeft - visibleLeft,
+                width: clampedRight - clampedLeft,
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onMouseEnter={() => {
+                if (suppressInsertChrome) return;
+                setHoverCol(null);
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                selectColumn(i);
+              }}
+            />
+          );
+        })}
+
+        {!suppressInsertChrome && colHitsToRender.map(({ x, i }) => (
           <div
             key={`c-${i}`}
             className={[
               'feishu-table-chrome__hit feishu-table-chrome__hit--col',
               hoverCol === i ? 'is-active' : '',
-              i === 0 ? 'is-edge-start' : '',
-              i === colBounds.length - 1 ? 'is-edge-end' : '',
             ].filter(Boolean).join(' ')}
             style={{ left: x - visibleLeft }}
-            onMouseEnter={() => {
-              activateTableChrome();
-              setHoverRow(null);
-              setHoverCol(i);
-            }}
           >
-            <span className="feishu-table-chrome__dot" aria-hidden />
+            <span
+              className="feishu-table-chrome__dot"
+              aria-hidden
+              onMouseEnter={() => {
+                activateTableChrome();
+                setHoverRow(null);
+                setHoverCol(i);
+              }}
+            />
             <button
               type="button"
               className="feishu-table-chrome__rail-plus feishu-table-chrome__rail-plus--col"
               aria-label="插入列"
               onMouseDown={e => e.preventDefault()}
-              onClick={() => runInsertColumn(i)}
+              onMouseEnter={() => {
+                activateTableChrome();
+                setHoverRow(null);
+                setHoverCol(i);
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                runInsertColumn(i);
+              }}
             >
               <span className="feishu-table-chrome__rail-plus-icon">+</span>
             </button>
@@ -473,7 +635,7 @@ function FeishuTableOverlay({
       <div
         className="feishu-table-chrome__rail-left"
         style={{
-          left: visibleLeft - RAIL / 2,
+          left: visibleLeft - RAIL,
           top: tableOffsetTop,
           width: RAIL,
           height: tableHeight,
@@ -485,37 +647,82 @@ function FeishuTableOverlay({
           setHoverRow(null);
         }}
       >
-        {rowBounds.map((y, i) => (
-          <div
-            key={`r-${i}`}
-            className={[
-              'feishu-table-chrome__hit feishu-table-chrome__hit--row',
-              hoverRow === i ? 'is-active' : '',
-              i === 0 ? 'is-edge-start' : '',
-              i === rowBounds.length - 1 ? 'is-edge-end' : '',
-            ].filter(Boolean).join(' ')}
-            style={{ top: y - tableOffsetTop }}
-            onMouseEnter={() => {
-              activateTableChrome();
-              setHoverCol(null);
-              setHoverRow(i);
-            }}
-          >
-            <span className="feishu-table-chrome__dot" aria-hidden />
-            <button
-              type="button"
-              className="feishu-table-chrome__rail-plus feishu-table-chrome__rail-plus--row"
-              aria-label="插入行"
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => runInsertRow(i)}
+        {rowBounds.slice(0, -1).map((y, i) => {
+          const isRowSelected =
+            railSelectionKind === 'row' &&
+            selectionRange != null &&
+            i >= selectionRange.top &&
+            i < selectionRange.bottom;
+
+          return (
+            <div
+              key={`block-r-${i}`}
+              className={`feishu-table-chrome__rail-block feishu-table-chrome__rail-block--row${
+                isRowSelected ? ' is-selected' : ''
+              }`}
+              style={{
+                top: y - tableOffsetTop,
+                height: rowBounds[i + 1] - y,
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onMouseEnter={() => {
+                if (suppressInsertChrome) return;
+                setHoverRow(null);
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                selectRow(i);
+              }}
+            />
+          );
+        })}
+
+        {!suppressInsertChrome && rowBounds
+          .map((y, i) => ({ y, i }))
+          .filter(({ y }) => y > rowBounds[0] + 2 && y < rowBounds[rowBounds.length - 1] - 2)
+          .map(({ y, i }) => (
+            <div
+              key={`r-${i}`}
+              className={[
+                'feishu-table-chrome__hit feishu-table-chrome__hit--row',
+                hoverRow === i ? 'is-active' : '',
+              ].filter(Boolean).join(' ')}
+              style={{ top: y - tableOffsetTop }}
             >
-              <span className="feishu-table-chrome__rail-plus-icon">+</span>
-            </button>
-          </div>
-        ))}
+              <span
+                className="feishu-table-chrome__dot"
+                aria-hidden
+                onMouseEnter={() => {
+                  activateTableChrome();
+                  setHoverCol(null);
+                  setHoverRow(i);
+                }}
+              />
+              <button
+                type="button"
+                className="feishu-table-chrome__rail-plus feishu-table-chrome__rail-plus--row"
+                aria-label="插入行"
+                onMouseDown={e => e.preventDefault()}
+                onMouseEnter={() => {
+                  activateTableChrome();
+                  setHoverCol(null);
+                  setHoverRow(i);
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  runInsertRow(i);
+                }}
+              >
+                <span className="feishu-table-chrome__rail-plus-icon">+</span>
+              </button>
+            </div>
+          ))}
       </div>
 
-      {hoverCol != null && isBoundVisible(colBounds[hoverCol], viewStart, viewportWidth) && (
+      {!suppressInsertChrome && hoverCol != null && isBoundVisible(colBounds[hoverCol], viewStart, viewportWidth) && (
         <div
           className="feishu-table-chrome__insert-col"
           style={{
@@ -534,7 +741,7 @@ function FeishuTableOverlay({
         </div>
       )}
 
-      {hoverRow != null && (
+      {!suppressInsertChrome && hoverRow != null && (
         <div
           className="feishu-table-chrome__insert-row"
           style={{
@@ -552,6 +759,7 @@ function FeishuTableOverlay({
           <div className="feishu-table-chrome__line feishu-table-chrome__line--row" />
         </div>
       )}
+
     </div>
   );
 

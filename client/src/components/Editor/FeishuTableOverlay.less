@@ -1,5 +1,6 @@
 @blue: #3370ff;
 @rail-bg: #f5f6f7;
+@rail-selected-bg: #e6eeff;
 @dot: #bbbfc4;
 @dot-size: 4px;
 @hit-size: 18px;
@@ -57,7 +58,7 @@
   &__rail-top,
   &__rail-left {
     position: absolute;
-    background: @rail-bg;
+    background: transparent;
     pointer-events: auto;
     border-radius: 2px;
     opacity: 0;
@@ -95,48 +96,53 @@
     justify-content: center;
     width: @hit-size;
     height: @hit-size;
-    pointer-events: auto;
+    pointer-events: none;
     z-index: 13;
 
+    .feishu-table-chrome__dot,
+    .feishu-table-chrome__rail-plus {
+      pointer-events: auto;
+    }
+
     &--col {
-      top: 50%;
+      top: 0;
       transform: translate(-50%, -50%);
 
-      &.is-edge-start {
-        transform: translate(0, -50%);
+      .feishu-table-chrome__rail-plus {
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0.6);
+        transform-origin: center;
       }
 
-      &.is-edge-end {
-        transform: translate(-100%, -50%);
+      &:hover .feishu-table-chrome__rail-plus,
+      &.is-active .feishu-table-chrome__rail-plus {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+        pointer-events: auto;
+        transition-delay: 0.08s;
       }
     }
 
     &--row {
-      left: 50%;
+      left: 0;
       transform: translate(-50%, -50%);
 
-      &.is-edge-start {
-        transform: translate(-50%, 0);
-      }
-
-      &.is-edge-end {
-        transform: translate(-50%, -100%);
-      }
-
       .feishu-table-chrome__rail-plus {
-        inset: 0;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%) scale(0.6);
         transform-origin: center;
       }
-    }
 
-    &:hover .feishu-table-chrome__rail-plus,
-    &.is-active .feishu-table-chrome__rail-plus {
-      opacity: 1;
-      transform: scale(1);
-      pointer-events: auto;
-      transition-delay: 0.08s;
+      &:hover .feishu-table-chrome__rail-plus,
+      &.is-active .feishu-table-chrome__rail-plus {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+        pointer-events: auto;
+        transition-delay: 0.08s;
+      }
     }
-
   }
 
   &__dot {
@@ -153,15 +159,12 @@
   }
 
   &__hit {
-    &.is-edge-start .feishu-table-chrome__dot,
-    &.is-edge-end .feishu-table-chrome__dot {
-      display: none;
-    }
   }
 
   &__rail-plus {
     position: absolute;
-    inset: 1px;
+    width: 16px;
+    height: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -264,4 +267,50 @@
 .feishu-table-chrome__hit.is-active .feishu-table-chrome__dot,
 .feishu-table-chrome__hit:hover .feishu-table-chrome__dot {
   opacity: 0;
+}
+
+.feishu-table-chrome__selection-outline {
+  position: absolute;
+  border: 2px solid @blue;
+  pointer-events: none;
+  box-sizing: border-box;
+  z-index: 10;
+  background: transparent;
+}
+
+.feishu-table-chrome__rail-block {
+  position: absolute;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 14;
+  background-color: transparent;
+  transition: background-color 0.12s ease;
+
+  &--col {
+    top: 0;
+    bottom: 0;
+
+    &:hover:not(.is-selected) {
+      background-color: @rail-bg;
+    }
+
+    &.is-selected {
+      background-color: @rail-selected-bg;
+      box-shadow: inset 0 3px 0 0 @blue;
+    }
+  }
+
+  &--row {
+    left: 0;
+    right: 0;
+
+    &:hover:not(.is-selected) {
+      background-color: @rail-bg;
+    }
+
+    &.is-selected {
+      background-color: @rail-selected-bg;
+      box-shadow: inset 3px 0 0 0 @blue;
+    }
+  }
 }

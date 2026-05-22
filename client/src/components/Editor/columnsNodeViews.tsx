@@ -28,6 +28,7 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
   const plusRef = useRef<HTMLButtonElement>(null);
   const columnPosRef = useRef<number | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
 
@@ -37,6 +38,21 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
       closeTimerRef.current = null;
     }
   }, []);
+
+  const clearHoverTimer = useCallback(() => {
+    if (hoverClearTimerRef.current) {
+      clearTimeout(hoverClearTimerRef.current);
+      hoverClearTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleClearHover = useCallback(() => {
+    clearHoverTimer();
+    hoverClearTimerRef.current = setTimeout(() => {
+      hoverClearTimerRef.current = null;
+      setIsHovered(false);
+    }, 180);
+  }, [clearHoverTimer]);
 
   const closeMenu = useCallback(() => {
     clearCloseTimer();
@@ -84,7 +100,10 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
     return () => window.removeEventListener('feishu-close-column-plus-menus', onCloseAll);
   }, [getPos]);
 
-  useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+  useEffect(() => () => {
+    clearCloseTimer();
+    clearHoverTimer();
+  }, [clearCloseTimer, clearHoverTimer]);
 
   const isColumnEmpty = isColumnBlockEmpty(node);
   const [isHovered, setIsHovered] = useState(false);
@@ -99,15 +118,17 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
 
   const handleWrapMouseEnter = useCallback(() => {
     clearCloseTimer();
+    clearHoverTimer();
     setIsHovered(true);
-  }, [clearCloseTimer]);
+  }, [clearCloseTimer, clearHoverTimer]);
 
   const handleWrapMouseLeave = useCallback((event: React.MouseEvent<HTMLElement>) => {
     const next = event.relatedTarget;
     if (next instanceof Element && isColumnPlusOverlayElement(next)) return;
-    setIsHovered(false);
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    scheduleClearHover();
     scheduleCloseMenu();
-  }, [scheduleCloseMenu]);
+  }, [scheduleClearHover, scheduleCloseMenu]);
 
   const slashMenu = menuOpen && isColumnEmpty
     ? createPortal(
@@ -118,7 +139,7 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
             const next = event.relatedTarget;
             if (next instanceof Element && isColumnPlusOverlayElement(next)) return;
             scheduleCloseMenu();
-            setIsHovered(false);
+            scheduleClearHover();
           }}
         >
           <SlashMenu
@@ -146,6 +167,8 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
         <div
           className="feishu-columns-block__add-hover-wrap"
           contentEditable={false}
+          onMouseEnter={handleWrapMouseEnter}
+          onMouseLeave={handleWrapMouseLeave}
         >
           <button
             ref={plusRef}

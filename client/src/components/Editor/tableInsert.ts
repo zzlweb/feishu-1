@@ -110,6 +110,7 @@ export function resolveCellTextPos(tablePos: number, row: number, col: number, e
 
   let pos = tablePos + 1;
   for (let r = 0; r < safeRow; r++) pos += table.child(r).nodeSize;
+  pos += 1;
   for (let c = 0; c < safeCol; c++) pos += rowNode.child(c).nodeSize;
 
   const cell = rowNode.child(safeCol);

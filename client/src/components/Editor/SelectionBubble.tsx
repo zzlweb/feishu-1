@@ -49,6 +49,7 @@ import {
 } from './blockIndent';
 import './SelectionBubble.less';
 import { openCommentSidebarForEditorSelection } from './commentBlockAnchor';
+import { resolveTableHostFromEditor } from './tableDom';
 
 const IndentRight = wrapIcon(IndentRightIcon);
 const IndentLeft = wrapIcon(IndentLeftIcon);
@@ -193,6 +194,85 @@ function resolveBlockStyleTrigger(editor: Editor): { icon: ReactNode; label: str
   return { icon: <ContextGlyphText size={GLYPH} fill={ICON_MUTED} />, label: '正文' };
 }
 
+function resolveTableCellElement(view: EditorView, cellPos: number): HTMLElement | null {
+  try {
+    const dom = view.domAtPos(cellPos + 1);
+    let node: Node | null = dom.node;
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    return node instanceof Element ? (node.closest('td, th') as HTMLElement | null) : null;
+  } catch {
+    return null;
+  }
+}
+
+interface TableBubbleAnchor {
+  placement: 'top' | 'top-start' | 'bottom' | 'right';
+  offset: [number, number];
+  getRect: (() => DOMRect | null) | null;
+}
+
+function resolveTableHostElement(cellEl: HTMLElement): HTMLElement | null {
+  return cellEl.closest('.feishu-table-host') as HTMLElement | null;
+}
+
+const TABLE_CHROME_GUTTER = 28;
+
+/** 功能面板锚在块柄上方，避免遮挡列/行选择触发区（对齐飞书图三） */
+function resolveTableHandleAnchorRect(tableHost: HTMLElement | null): DOMRect {
+  if (tableHost) {
+    const handle = tableHost.querySelector('.feishu-table-chrome__handle');
+    if (handle instanceof HTMLElement) {
+      const handleRect = handle.getBoundingClientRect();
+      if (handleRect.width > 0 && handleRect.height > 0) {
+        return new DOMRect(handleRect.left, handleRect.top, handleRect.width, handleRect.height);
+      }
+    }
+    const hostRect = tableHost.getBoundingClientRect();
+    return new DOMRect(hostRect.left, hostRect.top - TABLE_CHROME_GUTTER, 2, 2);
+  }
+  return new DOMRect(0, 0, 2, 2);
+}
+
+function resolveTableBubbleAnchor(editor: Editor): TableBubbleAnchor {
+  const { selection } = editor.state;
+  if (!(selection instanceof CellSelection)) {
+    return { placement: 'top', offset: [0, 12], getRect: null };
+  }
+
+  const view = editor.view;
+  const anchorEl = resolveTableCellElement(view, selection.$anchorCell.pos);
+  const headEl = resolveTableCellElement(view, selection.$headCell.pos);
+  if (!anchorEl?.isConnected || !headEl?.isConnected) {
+    return { placement: 'top', offset: [0, 12], getRect: null };
+  }
+
+  const tableHost = resolveTableHostElement(anchorEl);
+
+  if (selection.isColSelection()) {
+    return {
+      placement: 'top-start',
+      offset: [0, 6],
+      getRect: () => resolveTableHandleAnchorRect(tableHost),
+    };
+  }
+
+  if (selection.isRowSelection()) {
+    return {
+      placement: 'top-start',
+      offset: [0, 8],
+      getRect: () => {
+        const a = anchorEl.getBoundingClientRect();
+        const h = headEl.getBoundingClientRect();
+        const top = Math.min(a.top, h.top);
+        const left = Math.min(a.left, h.left);
+        return new DOMRect(left, top, 2, 2);
+      },
+    };
+  }
+
+  return { placement: 'top', offset: [0, 12], getRect: null };
+}
+
 export default function SelectionBubble({ editor, documentId }: SelectionBubbleProps) {
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   const [showHeadingMenu, setShowHeadingMenu] = useState(false);
@@ -318,6 +398,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   const isTableSelection = editor.isActive('table') || editor.state.selection instanceof CellSelection;
   const canMergeCells = editor.can().mergeCells();
   const canSplitCell = editor.can().splitCell();
+  const tableBubbleAnchor = resolveTableBubbleAnchor(editor);
 
   return (
     <BubbleMenu
@@ -327,13 +408,25 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
       updateDelay={100}
       shouldShow={props => shouldShowBubble(props)}
       tippyOptions={{
-        placement: 'top',
+        placement: tableBubbleAnchor.placement,
         duration: [120, 80],
         zIndex: 200,
-        offset: [0, 12],
+        offset: tableBubbleAnchor.offset,
         moveTransition: 'transform 0.15s ease-out',
-        // tippy.js 默认为 maxWidth 350px，toolbar 会变窄导致图标挤压/不全
         maxWidth: 'none',
+        appendTo: () => {
+          const tableHost = resolveTableHostFromEditor(editor);
+          return tableHost || editor.view.dom.parentElement || document.body;
+        },
+        ...(tableBubbleAnchor.getRect
+          ? {
+              getReferenceClientRect: () => {
+                const rect = tableBubbleAnchor.getRect?.();
+                if (rect) return rect;
+                return editor.view.dom.getBoundingClientRect();
+              },
+            }
+          : {}),
       }}
     >
       <div className="selection-bubble-inner" role="toolbar" aria-label="选区格式">
