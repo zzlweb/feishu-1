@@ -38,7 +38,6 @@ import {
   SelGlyphComment,
   SelGlyphTableMerge,
   SelGlyphTableCellBg,
-  SelGlyphDelete,
 } from '../../icons/selectionToolbarGlyphs';
 import { IndentRightIcon, IndentLeftIcon } from 'tdesign-icons-react';
 import { wrapIcon } from '../../icons/wrap';
@@ -50,6 +49,19 @@ import {
 import './SelectionBubble.less';
 import { openCommentSidebarForEditorSelection } from './commentBlockAnchor';
 import { resolveTableHostFromEditor } from './tableDom';
+import { getActiveTableSelectionContext } from './tableInsert';
+import {
+  insertTableColumn,
+  insertTableRow,
+  mergeOrSplitSelectedCells,
+  removeSelectedTableColumn,
+  removeSelectedTableRow,
+  setHeadingLevel,
+  setSelectedTableCellBackground,
+  setTextAlignment,
+  toggleBlockStyle,
+  toggleTableHeaderColumn,
+} from './panelActions';
 
 const IndentRight = wrapIcon(IndentRightIcon);
 const IndentLeft = wrapIcon(IndentLeftIcon);
@@ -140,11 +152,12 @@ function shouldShowBubble({
 }) {
   const { doc, selection } = state;
   const { empty } = selection;
+  const isCellSelection = selection instanceof CellSelection;
   const isEmptyTextBlock = !doc.textBetween(from, to).length && isTextSelection(selection);
   const isChildOfMenu = element.contains(document.activeElement);
   const hasEditorFocus = view.hasFocus() || isChildOfMenu;
 
-  if (!hasEditorFocus || empty || isEmptyTextBlock || !editor.isEditable) {
+  if (!hasEditorFocus || (!isCellSelection && empty) || isEmptyTextBlock || !editor.isEditable) {
     return false;
   }
   if (document.querySelector('.context-menu')) return false;
@@ -347,11 +360,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   };
 
   const setHeading = (level: number) => {
-    if (level === 0) {
-      editor.chain().focus().setParagraph().run();
-    } else {
-      editor.chain().focus().toggleHeading({ level: level as 1 | 2 | 3 | 4 | 5 | 6 }).run();
-    }
+    setHeadingLevel(editor, level);
     closeHeadingStylePanel();
   };
 
@@ -398,6 +407,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   const isTableSelection = editor.isActive('table') || editor.state.selection instanceof CellSelection;
   const canMergeCells = editor.can().mergeCells();
   const canSplitCell = editor.can().splitCell();
+  const tableSelectionContext = isTableSelection ? getActiveTableSelectionContext(editor) : null;
+  const canDeleteTableColumn = Boolean(tableSelectionContext);
+  const canDeleteTableRow = Boolean(tableSelectionContext);
   const tableBubbleAnchor = resolveTableBubbleAnchor(editor);
 
   return (
@@ -434,13 +446,60 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
           <div className="selection-bubble-group selection-bubble-group--table">
             <button
               type="button"
+              className="selection-bubble-btn selection-bubble-btn--table-action"
+              disabled={!tableSelectionContext}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => toggleTableHeaderColumn(editor)}
+              title="设置为标题列"
+            >
+              标题列
+            </button>
+            <button
+              type="button"
+              className="selection-bubble-btn selection-bubble-btn--table-action"
+              disabled={!tableSelectionContext}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => insertTableColumn(editor, 'before')}
+              title="左侧插入列"
+            >
+              左列
+            </button>
+            <button
+              type="button"
+              className="selection-bubble-btn selection-bubble-btn--table-action"
+              disabled={!tableSelectionContext}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => insertTableColumn(editor, 'after')}
+              title="右侧插入列"
+            >
+              右列
+            </button>
+            <button
+              type="button"
+              className="selection-bubble-btn selection-bubble-btn--table-action"
+              disabled={!tableSelectionContext}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => insertTableRow(editor, 'before')}
+              title="上方插入行"
+            >
+              上行
+            </button>
+            <button
+              type="button"
+              className="selection-bubble-btn selection-bubble-btn--table-action"
+              disabled={!tableSelectionContext}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => insertTableRow(editor, 'after')}
+              title="下方插入行"
+            >
+              下行
+            </button>
+            <button
+              type="button"
               className="selection-bubble-btn"
               disabled={!canMergeCells && !canSplitCell}
               onMouseDown={e => e.preventDefault()}
-              onClick={() => {
-                if (canMergeCells) editor.chain().focus().mergeCells().run();
-                else if (canSplitCell) editor.chain().focus().splitCell().run();
-              }}
+              onClick={() => mergeOrSplitSelectedCells(editor)}
               title={canSplitCell ? '拆分单元格' : '合并单元格'}
             >
               <SelGlyphTableMerge size={GLYPH} />
@@ -468,7 +527,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                         title={c.label}
                         onMouseDown={e => e.preventDefault()}
                         onClick={() => {
-                          editor.chain().focus().setCellAttribute('backgroundColor', c.value).run();
+                          setSelectedTableCellBackground(editor, c.value);
                           setShowTableCellColorMenu(false);
                         }}
                       />
@@ -479,7 +538,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-table-color-reset"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      editor.chain().focus().setCellAttribute('backgroundColor', null).run();
+                      setSelectedTableCellBackground(editor, null);
                       setShowTableCellColorMenu(false);
                     }}
                   >
@@ -488,6 +547,26 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                 </div>
               )}
             </div>
+            <button
+              type="button"
+              className="selection-bubble-btn selection-bubble-btn--table-action selection-bubble-btn--delete"
+              disabled={!canDeleteTableColumn}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => removeSelectedTableColumn(editor)}
+              title="删除当前列"
+            >
+              删列
+            </button>
+            <button
+              type="button"
+              className="selection-bubble-btn selection-bubble-btn--table-action selection-bubble-btn--delete"
+              disabled={!canDeleteTableRow}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => removeSelectedTableRow(editor)}
+              title="删除当前行"
+            >
+              删行
+            </button>
           </div>
         )}
         {isTableSelection && <span className="selection-bubble-divider selection-bubble-divider--thin" aria-hidden />}
@@ -635,7 +714,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                   active={editor.isActive('orderedList')}
                   label="有序列表"
                   onClick={() => {
-                    editor.chain().focus().toggleOrderedList().run();
+                    toggleBlockStyle(editor, 'orderedList');
                     closeHeadingStylePanel();
                   }}
                 />
@@ -649,7 +728,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                   active={editor.isActive('bulletList')}
                   label="无序列表"
                   onClick={() => {
-                    editor.chain().focus().toggleBulletList().run();
+                    toggleBlockStyle(editor, 'bulletList');
                     closeHeadingStylePanel();
                   }}
                 />
@@ -663,7 +742,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                   active={editor.isActive('taskList')}
                   label="任务"
                   onClick={() => {
-                    editor.chain().focus().toggleTaskList().run();
+                    toggleBlockStyle(editor, 'taskList');
                     closeHeadingStylePanel();
                   }}
                 />
@@ -677,7 +756,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                   active={editor.isActive('codeBlock')}
                   label="代码块"
                   onClick={() => {
-                    editor.chain().focus().toggleCodeBlock().run();
+                    toggleBlockStyle(editor, 'codeBlock');
                     closeHeadingStylePanel();
                   }}
                 />
@@ -691,7 +770,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                   active={editor.isActive('blockquote')}
                   label="引用"
                   onClick={() => {
-                    editor.chain().focus().toggleBlockquote().run();
+                    toggleBlockStyle(editor, 'blockquote');
                     closeHeadingStylePanel();
                   }}
                 />
@@ -700,10 +779,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                   active={editor.isActive('highlightBlock')}
                   label="高亮块"
                   onClick={() => {
-                    editor.chain().focus().toggleWrap('highlightBlock', {
-                      bgColor: '#fff0d9',
-                      borderColor: '#ffb057',
-                    }).run();
+                    toggleBlockStyle(editor, 'highlightBlock');
                     closeHeadingStylePanel();
                   }}
                 />
@@ -742,7 +818,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className={`selection-bubble-menu-item ${currentAlign === a.key ? 'active' : ''}`}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      editor.chain().focus().setTextAlign(a.key).run();
+                      setTextAlignment(editor, a.key);
                       setShowAlignMenu(false);
                     }}
                   >
@@ -968,46 +1044,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
             <SelGlyphShare size={GLYPH} />
           </button>
 
-          {isTableSelection ? (
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--delete"
-              onMouseDown={e => e.preventDefault()}
-              onMouseEnter={() => {
-                const host = document.querySelector('.feishu-table-host.is-table-block-active');
-                if (host) host.classList.add('is-deleting-selection');
-              }}
-              onMouseLeave={() => {
-                const host = document.querySelector('.feishu-table-host.is-table-block-active');
-                if (host) host.classList.remove('is-deleting-selection');
-              }}
-              onClick={() => {
-                const host = document.querySelector('.feishu-table-host.is-table-block-active');
-                if (host) host.classList.remove('is-deleting-selection');
-
-                const { selection } = editor.state;
-                if (selection instanceof CellSelection) {
-                  if (selection.isColSelection()) {
-                    editor.chain().focus().deleteColumn().run();
-                  } else if (selection.isRowSelection()) {
-                    editor.chain().focus().deleteRow().run();
-                  } else {
-                    // Default fallback for multiple selected cells
-                    editor.chain().focus().deleteRow().run();
-                  }
-                } else {
-                  editor.chain().focus().deleteRow().run();
-                }
-              }}
-              title={
-                editor.state.selection instanceof CellSelection && (editor.state.selection as any).isColSelection()
-                  ? '删除列'
-                  : '删除行'
-              }
-            >
-              <SelGlyphDelete size={GLYPH} />
-            </button>
-          ) : (
+          {!isTableSelection && (
             <button
               type="button"
               className="selection-bubble-btn selection-bubble-btn--icon-quiet"

@@ -1,9 +1,10 @@
-import { Fragment, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { Fragment, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { IconChevronMenuEnd } from '../../icons/feishuDoc';
 import { SLASH_SECTIONS, type SlashMenuItem } from './slashMenuConfig';
 import TableGridPicker from './TableGridPicker';
 import ColumnsCountPicker from './ColumnsCountPicker';
+import { computeSubmenuFlyoutPosition } from './contextSubmenuFlyout';
 
 const GRID_STROKE = 1.65;
 const LIST_STROKE = 1.55;
@@ -12,139 +13,41 @@ interface Props {
   onPickItem: (sectionTitle: string, item: SlashMenuItem) => void;
   onPickTable: (rows: number, cols: number) => void;
   onPickColumns: (columnCount: number) => void;
-  onPanelMouseEnter?: () => void;
-  onPanelMouseLeave?: (e: MouseEvent) => void;
 }
 
 export default function AddBelowSlashSections({
   onPickItem,
   onPickTable,
   onPickColumns,
-  onPanelMouseEnter,
-  onPanelMouseLeave,
 }: Props) {
-  const tableFlyoutRef = useRef<HTMLDivElement>(null);
-  const columnsFlyoutRef = useRef<HTMLDivElement>(null);
-  const tableCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const columnsCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [tableFlyoutPos, setTableFlyoutPos] = useState<{ top: number; left: number } | null>(null);
-  const [columnsFlyoutPos, setColumnsFlyoutPos] = useState<{ top: number; left: number } | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<{
+    kind: 'tableGrid' | 'columnsCount';
+    rect: DOMRect;
+  } | null>(null);
 
-  const clearTableTimer = () => {
-    if (tableCloseTimerRef.current) {
-      clearTimeout(tableCloseTimerRef.current);
-      tableCloseTimerRef.current = null;
-    }
+  const openSubmenu = (kind: 'tableGrid' | 'columnsCount', el: HTMLElement) => {
+    setActiveSubmenu({ kind, rect: el.getBoundingClientRect() });
   };
 
-  const clearColumnsTimer = () => {
-    if (columnsCloseTimerRef.current) {
-      clearTimeout(columnsCloseTimerRef.current);
-      columnsCloseTimerRef.current = null;
-    }
+  const submenuPosition = activeSubmenu
+    ? computeSubmenuFlyoutPosition({
+        trigger: activeSubmenu.rect,
+        panelWidth: activeSubmenu.kind === 'tableGrid' ? 304 : 184,
+        panelHeight: activeSubmenu.kind === 'tableGrid' ? 334 : 164,
+        gap: 8,
+        pad: 8,
+      })
+    : null;
+
+  const handlePickTable = (rows: number, cols: number) => {
+    setActiveSubmenu(null);
+    queueMicrotask(() => onPickTable(rows, cols));
   };
 
-  const scheduleTableClose = () => {
-    clearTableTimer();
-    tableCloseTimerRef.current = setTimeout(() => setTableFlyoutPos(null), 220);
+  const handlePickColumns = (columnCount: number) => {
+    setActiveSubmenu(null);
+    queueMicrotask(() => onPickColumns(columnCount));
   };
-
-  const scheduleColumnsClose = () => {
-    clearColumnsTimer();
-    columnsCloseTimerRef.current = setTimeout(() => setColumnsFlyoutPos(null), 220);
-  };
-
-  const openTableFlyout = (el: HTMLElement) => {
-    clearTableTimer();
-    setColumnsFlyoutPos(null);
-    const r = el.getBoundingClientRect();
-    const pad = 8;
-    const panelW = 220;
-    const gap = 2;
-    let left = r.right + gap;
-    if (left + panelW > window.innerWidth - pad) {
-      left = Math.max(pad, r.left - panelW - gap);
-    }
-    let top = r.top - 2;
-    const panelH = 240;
-    if (top + panelH > window.innerHeight - pad) {
-      top = Math.max(pad, window.innerHeight - pad - panelH);
-    }
-    setTableFlyoutPos({ top, left });
-  };
-
-  const openColumnsFlyout = (el: HTMLElement) => {
-    clearColumnsTimer();
-    setTableFlyoutPos(null);
-    const r = el.getBoundingClientRect();
-    const pad = 8;
-    const panelW = 292;
-    const gap = 2;
-    let left = r.right + gap;
-    if (left + panelW > window.innerWidth - pad) {
-      left = Math.max(pad, r.left - panelW - gap);
-    }
-    let top = r.top - 2;
-    const panelH = 214;
-    if (top + panelH > window.innerHeight - pad) {
-      top = Math.max(pad, window.innerHeight - pad - panelH);
-    }
-    setColumnsFlyoutPos({ top, left });
-  };
-
-  const tableFlyout =
-    tableFlyoutPos &&
-    createPortal(
-      <div
-        ref={tableFlyoutRef}
-        className="slash-table-grid-flyout"
-        style={{
-          position: 'fixed',
-          top: tableFlyoutPos.top,
-          left: tableFlyoutPos.left,
-          zIndex: 10070,
-        }}
-        onMouseEnter={() => {
-          clearTableTimer();
-          onPanelMouseEnter?.();
-        }}
-        onMouseLeave={e => {
-          scheduleTableClose();
-          onPanelMouseLeave?.(e);
-        }}
-        onMouseDown={e => e.preventDefault()}
-      >
-        <TableGridPicker onPick={onPickTable} />
-      </div>,
-      document.body,
-    );
-
-  const columnsFlyout =
-    columnsFlyoutPos &&
-    createPortal(
-      <div
-        ref={columnsFlyoutRef}
-        className="slash-columns-count-flyout"
-        style={{
-          position: 'fixed',
-          top: columnsFlyoutPos.top,
-          left: columnsFlyoutPos.left,
-          zIndex: 10070,
-        }}
-        onMouseEnter={() => {
-          clearColumnsTimer();
-          onPanelMouseEnter?.();
-        }}
-        onMouseLeave={e => {
-          scheduleColumnsClose();
-          onPanelMouseLeave?.(e);
-        }}
-        onMouseDown={e => e.preventDefault()}
-      >
-        <ColumnsCountPicker onPick={onPickColumns} />
-      </div>,
-      document.body,
-    );
 
   return (
     <Fragment>
@@ -192,12 +95,9 @@ export default function AddBelowSlashSections({
                   tabIndex={0}
                   title={item.label}
                   onMouseEnter={e => {
-                    if (isTableGrid) openTableFlyout(e.currentTarget);
-                    else if (isColumnsCount) openColumnsFlyout(e.currentTarget);
-                  }}
-                  onMouseLeave={() => {
-                    if (isTableGrid) scheduleTableClose();
-                    if (isColumnsCount) scheduleColumnsClose();
+                    if (isTableGrid) openSubmenu('tableGrid', e.currentTarget);
+                    else if (isColumnsCount) openSubmenu('columnsCount', e.currentTarget);
+                    else setActiveSubmenu(null);
                   }}
                   onMouseDown={e => {
                     e.preventDefault();
@@ -219,8 +119,29 @@ export default function AddBelowSlashSections({
           )}
         </div>
       ))}
-      {tableFlyout}
-      {columnsFlyout}
+      {activeSubmenu && submenuPosition && createPortal(
+        <div
+          className="slash-submenu-portal"
+          style={{
+            position: 'fixed',
+            left: submenuPosition.left,
+            top: submenuPosition.top,
+            zIndex: 10080,
+          }}
+          onMouseDown={e => e.preventDefault()}
+        >
+          {activeSubmenu.kind === 'tableGrid' ? (
+            <div className="slash-table-grid-flyout is-portal">
+              <TableGridPicker onPick={handlePickTable} />
+            </div>
+          ) : (
+            <div className="slash-columns-count-flyout is-portal">
+              <ColumnsCountPicker onPick={handlePickColumns} />
+            </div>
+          )}
+        </div>,
+        document.body,
+      )}
     </Fragment>
   );
 }

@@ -1,70 +1,64 @@
-@primary: #3370ff;
-@text-primary: #1f2329;
 @text-secondary: #8f959e;
-@border-light: #e8e9eb;
+@cell-active: #8eabf7;
+@cell-active-hover: #7f9ff3;
+@cell-inactive: #f2f3f5;
 
 .table-grid-picker {
   box-sizing: border-box;
-  width: 220px;
-  padding: 12px 14px 14px;
+  width: 304px;
+  padding: 12px;
   background: #fff;
-  border: 1px solid @border-light;
+  border: 1px solid #e8e9eb;
   border-radius: 8px;
   box-shadow:
-    0 12px 32px rgba(31, 35, 41, 0.1),
+    0 14px 36px rgba(31, 35, 41, 0.12),
     0 2px 8px rgba(31, 35, 41, 0.06);
 
   &__head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    height: 20px;
     margin-bottom: 10px;
   }
 
   &__title {
     font-size: 12px;
-    line-height: 18px;
+    line-height: 20px;
     color: @text-secondary;
-    font-weight: 500;
-  }
-
-  &__size {
-    flex-shrink: 0;
-    font-size: 12px;
-    line-height: 18px;
-    color: @text-primary;
-    font-weight: 500;
+    font-weight: 400;
   }
 
   &__grid {
+    box-sizing: border-box;
+    width: 100%;
+    aspect-ratio: 1;
     display: grid;
-    grid-template-columns: repeat(10, 16px);
-    grid-template-rows: repeat(10, 16px);
-    gap: 3px;
+    grid-template-columns: repeat(10, 1fr);
+    grid-template-rows: repeat(10, 1fr);
+    gap: 4px;
+    padding: 10px;
+    border: 1px solid #dee0e3;
+    border-radius: 2px;
+    background: #fff;
   }
 
   &__cell {
-    width: 16px;
-    height: 16px;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
     margin: 0;
     padding: 0;
     border: none;
-    border-radius: 2px;
-    background: #eff0f1;
+    border-radius: 1px;
+    background: @cell-inactive;
     cursor: pointer;
     transition: background 0.08s ease;
 
     &.is-active {
-      background: @primary;
-    }
+      background: @cell-active;
 
-    &:hover {
-      background: rgba(51, 112, 255, 0.72);
-    }
-
-    &.is-active:hover {
-      background: @primary;
+      &:hover {
+        background: @cell-active-hover;
+      }
     }
   }
 }

@@ -1,11 +1,19 @@
 import type { Editor } from '@tiptap/react';
+import type { Node as ProseNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
+import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { getSlashRange } from './slashMenuConfig';
-import { getTableElementFromHost } from './tableDom';
+import { getTablePosFromHost } from './tableDom';
 
 export const TABLE_GRID_MAX = 10;
 
 export function deleteSlashIfAny(editor: Editor) {
+  const plusRange = (editor as any).__plusInsertRange as { from: number; to: number } | null | undefined;
+  if (plusRange && plusRange.from < plusRange.to) {
+    editor.chain().focus().deleteRange(plusRange).run();
+    (editor as any).__plusInsertRange = null;
+    return;
+  }
   const range = getSlashRange(editor);
   if (range.from < range.to) {
     editor.chain().focus().deleteRange(range).run();
@@ -19,9 +27,47 @@ function clampTableSize(rows: number, cols: number) {
   };
 }
 
+function createTableNode(editor: Editor, rows: number, cols: number, withHeaderRow: boolean): ProseNode | null {
+  const tableType = editor.schema.nodes.table;
+  const rowType = editor.schema.nodes.tableRow;
+  const cellType = editor.schema.nodes.tableCell;
+  const headerType = editor.schema.nodes.tableHeader;
+  const paragraphType = editor.schema.nodes.paragraph;
+  if (!tableType || !rowType || !cellType || !paragraphType) return null;
+
+  const rowNodes = Array.from({ length: rows }, (_, rowIndex) => {
+    const currentCellType = withHeaderRow && rowIndex === 0 && headerType ? headerType : cellType;
+    const cells = Array.from({ length: cols }, () => currentCellType.create(null, paragraphType.create()));
+    return rowType.create(null, cells);
+  });
+
+  return tableType.create(null, rowNodes);
+}
+
+function isValidPlusInsertRange(editor: Editor, plusRange: { from: number; to: number }) {
+  if (plusRange.from < 0 || plusRange.to <= plusRange.from) return false;
+  if (plusRange.to > editor.state.doc.content.size) return false;
+  const node = editor.state.doc.nodeAt(plusRange.from);
+  return Boolean(node?.isBlock && plusRange.to === plusRange.from + node.nodeSize);
+}
+
 /** 插入支持富文本的表格（默认无标题行；可通过块菜单切换） */
 export function insertFeishuTable(editor: Editor, rows: number, cols: number, withHeaderRow = false) {
   const { rows: r, cols: c } = clampTableSize(rows, cols);
+  const plusRange = (editor as any).__plusInsertRange as { from: number; to: number } | null | undefined;
+  if (plusRange && isValidPlusInsertRange(editor, plusRange)) {
+    const insertPos = plusRange.from;
+    (editor as any).__plusInsertRange = null;
+    const tableNode = createTableNode(editor, r, c, withHeaderRow);
+    if (!tableNode) return;
+    const tr = editor.state.tr.replaceWith(insertPos, plusRange.to, tableNode).scrollIntoView();
+    editor.view.dispatch(tr);
+    editor.view.focus();
+    editor.commands.fixTables();
+    focusTableCell(editor, insertPos, 0, 0);
+    return;
+  }
+  (editor as any).__plusInsertRange = null;
   deleteSlashIfAny(editor);
   editor.commands.focus();
   editor.commands.insertTable({ rows: r, cols: c, withHeaderRow });
@@ -34,53 +80,6 @@ export function insertFeishuTableAt(editor: Editor, pos: number, rows: number, c
   editor.commands.setTextSelection(pos);
   editor.commands.insertTable({ rows: r, cols: c, withHeaderRow });
   editor.commands.fixTables();
-}
-
-/** 解析表格节点在文档中的起始位置 */
-export function getTablePosFromHost(editor: Editor, host: HTMLElement): number | null {
-  if (!host.isConnected || !editor.view.dom.contains(host)) return null;
-
-  const tryResolve = (node: Node, offset = 0): number | null => {
-    try {
-      const pos = editor.view.posAtDOM(node, offset);
-      const $pos = editor.state.doc.resolve(pos);
-      for (let d = $pos.depth; d > 0; d--) {
-        if ($pos.node(d).type.name === 'table') return $pos.before(d);
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  };
-
-  const fromHost = tryResolve(host, 0);
-  if (fromHost != null) return fromHost;
-
-  const table = getTableElementFromHost(host);
-  if (table) {
-    const fromTable = tryResolve(table, 0);
-    if (fromTable != null) return fromTable;
-
-    const cell = table.querySelector('td, th');
-    if (cell) {
-      const fromCell = tryResolve(cell, 0);
-      if (fromCell != null) return fromCell;
-    }
-  }
-
-  let found: number | null = null;
-  editor.state.doc.descendants((node, pos) => {
-    if (node.type.name !== 'table') return;
-    const dom = editor.view.nodeDOM(pos);
-    if (!dom) return;
-    const el = dom instanceof HTMLElement ? dom : null;
-    if (!el) return;
-    if (el === host || host.contains(el) || el.contains(host)) {
-      found = pos;
-      return false;
-    }
-  });
-  return found;
 }
 
 /** 选中整张表格（块柄悬停时蓝色高亮） */
@@ -231,15 +230,205 @@ export function getActiveTableContext(editor: Editor) {
   return null;
 }
 
+export interface ActiveTableSelectionContext {
+  tablePos: number;
+  rowIndex: number;
+  colIndex: number;
+  rowStart: number;
+  rowEnd: number;
+  colStart: number;
+  colEnd: number;
+  rowCount: number;
+  colCount: number;
+  isRowSelection: boolean;
+  isColSelection: boolean;
+}
+
+export function getActiveTableSelectionContext(editor: Editor): ActiveTableSelectionContext | null {
+  const { state } = editor;
+  const { selection } = state;
+
+  if (selection instanceof CellSelection) {
+    const tableStart = selection.$anchorCell.start(-1);
+    const tablePos = tableStart - 1;
+    const table = state.doc.nodeAt(tablePos);
+    if (!table || table.type.name !== 'table') return null;
+
+    const map = TableMap.get(table);
+    const anchorRect = map.findCell(selection.$anchorCell.pos - tableStart);
+    const headRect = map.findCell(selection.$headCell.pos - tableStart);
+    const rowStart = Math.min(anchorRect.top, headRect.top);
+    const rowEnd = Math.max(anchorRect.bottom, headRect.bottom);
+    const colStart = Math.min(anchorRect.left, headRect.left);
+    const colEnd = Math.max(anchorRect.right, headRect.right);
+
+    return {
+      tablePos,
+      rowIndex: rowStart,
+      colIndex: colStart,
+      rowStart,
+      rowEnd,
+      colStart,
+      colEnd,
+      rowCount: table.childCount,
+      colCount: map.width,
+      isRowSelection: selection.isRowSelection(),
+      isColSelection: selection.isColSelection(),
+    };
+  }
+
+  const ctx = getActiveTableContext(editor);
+  if (!ctx) return null;
+  const table = state.doc.nodeAt(ctx.tablePos);
+  if (!table || table.type.name !== 'table') return null;
+  const map = TableMap.get(table);
+  return {
+    ...ctx,
+    rowStart: ctx.rowIndex,
+    rowEnd: ctx.rowIndex + 1,
+    colStart: ctx.colIndex,
+    colEnd: ctx.colIndex + 1,
+    rowCount: table.childCount,
+    colCount: map.width,
+    isRowSelection: false,
+    isColSelection: false,
+  };
+}
+
 /** 基于当前选区插入行/列（块菜单用） */
 export function insertTableRowRelative(editor: Editor, direction: 'before' | 'after'): boolean {
-  const ctx = getActiveTableContext(editor);
+  const ctx = getActiveTableSelectionContext(editor);
   if (!ctx) return false;
-  return insertTableRowAt(editor, ctx.tablePos, ctx.rowIndex, direction === 'after');
+  const rowIndex = direction === 'after' ? ctx.rowEnd - 1 : ctx.rowStart;
+  return insertTableRowAt(editor, ctx.tablePos, rowIndex, direction === 'after');
 }
 
 export function insertTableColumnRelative(editor: Editor, direction: 'before' | 'after'): boolean {
-  const ctx = getActiveTableContext(editor);
+  const ctx = getActiveTableSelectionContext(editor);
   if (!ctx) return false;
-  return insertTableColumnAt(editor, ctx.tablePos, ctx.colIndex, direction === 'after');
+  const colIndex = direction === 'after' ? ctx.colEnd - 1 : ctx.colStart;
+  return insertTableColumnAt(editor, ctx.tablePos, colIndex, direction === 'after');
+}
+
+export function deleteActiveTableRow(editor: Editor): boolean {
+  const ctx = getActiveTableSelectionContext(editor);
+  if (!ctx) return false;
+  if (!focusTableCell(editor, ctx.tablePos, ctx.rowStart, ctx.colStart)) return false;
+  return editor.chain().focus().deleteRow().run();
+}
+
+export function deleteActiveTableColumn(editor: Editor): boolean {
+  const ctx = getActiveTableSelectionContext(editor);
+  if (!ctx) return false;
+  if (!focusTableCell(editor, ctx.tablePos, ctx.rowStart, ctx.colStart)) return false;
+  return editor.chain().focus().deleteColumn().run();
+}
+
+export function distributeActiveTableColumns(editor: Editor): boolean {
+  const ctx = getActiveTableSelectionContext(editor);
+  if (!ctx) return false;
+  const table = editor.state.doc.nodeAt(ctx.tablePos);
+  if (!table || table.type.name !== 'table') return false;
+
+  const tableEl = editor.view.domAtPos(ctx.tablePos + 1).node instanceof Element
+    ? (editor.view.domAtPos(ctx.tablePos + 1).node as Element).closest('table')
+    : null;
+  const availableWidth = tableEl instanceof HTMLTableElement && tableEl.getBoundingClientRect().width > 0
+    ? tableEl.getBoundingClientRect().width
+    : Math.max(ctx.colCount * 100, 100);
+  const nextWidth = Math.max(64, Math.floor(availableWidth / ctx.colCount));
+
+  let tr = editor.state.tr;
+  let rowPos = ctx.tablePos + 1;
+  for (let rowIndex = 0; rowIndex < table.childCount; rowIndex += 1) {
+    const row = table.child(rowIndex);
+    let cellPos = rowPos + 1;
+    for (let cellIndex = 0; cellIndex < row.childCount; cellIndex += 1) {
+      const cell = row.child(cellIndex);
+      const colspan = Number(cell.attrs.colspan || 1);
+      tr = tr.setNodeMarkup(cellPos, undefined, {
+        ...cell.attrs,
+        colwidth: Array.from({ length: colspan }, () => nextWidth),
+      });
+      cellPos += cell.nodeSize;
+    }
+    rowPos += row.nodeSize;
+  }
+
+  editor.view.dispatch(tr);
+  editor.commands.fixTables();
+  return true;
+}
+
+function normalizeCellText(value: string): string {
+  return value.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').trim();
+}
+
+function parseHtmlTable(html: string): string[][] | null {
+  if (!html || !/<table[\s>]/i.test(html)) return null;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const table = doc.querySelector('table');
+  if (!table) return null;
+
+  const matrix: string[][] = [];
+  table.querySelectorAll('tr').forEach(tr => {
+    const row: string[] = [];
+    tr.querySelectorAll('th,td').forEach(cell => {
+      const colspan = Math.max(1, Number(cell.getAttribute('colspan') || 1));
+      const text = normalizeCellText(cell.textContent || '');
+      for (let i = 0; i < colspan; i += 1) row.push(i === 0 ? text : '');
+    });
+    if (row.length > 0) matrix.push(row);
+  });
+
+  return matrix.length > 0 ? matrix : null;
+}
+
+function parseDelimitedTable(text: string): string[][] | null {
+  const normalized = text.replace(/\r\n?/g, '\n').trimEnd();
+  if (!normalized.includes('\t') && !normalized.includes('\n')) return null;
+  const rows = normalized
+    .split('\n')
+    .map(row => row.split('\t').map(normalizeCellText));
+  const nonEmpty = rows.filter(row => row.some(cell => cell.length > 0));
+  if (nonEmpty.length < 2 && Math.max(...nonEmpty.map(row => row.length), 0) < 2) return null;
+  return nonEmpty.length > 0 ? nonEmpty : null;
+}
+
+function createTableNodeFromMatrix(editor: Editor, matrix: string[][]): ProseNode | null {
+  const tableType = editor.schema.nodes.table;
+  const rowType = editor.schema.nodes.tableRow;
+  const cellType = editor.schema.nodes.tableCell;
+  const paragraphType = editor.schema.nodes.paragraph;
+  if (!tableType || !rowType || !cellType || !paragraphType) return null;
+
+  const cols = Math.max(...matrix.map(row => row.length));
+  if (matrix.length === 0 || cols === 0) return null;
+
+  const rows = matrix.map(row => rowType.create(null, Array.from({ length: cols }, (_, colIndex) => {
+    const text = row[colIndex] ?? '';
+    const paragraph = text
+      ? paragraphType.create(null, editor.schema.text(text))
+      : paragraphType.create();
+    return cellType.create(null, paragraph);
+  })));
+
+  return tableType.create(null, rows);
+}
+
+export function insertTableFromClipboardData(editor: Editor, clipboardData: DataTransfer | null): boolean {
+  if (!clipboardData) return false;
+  if (editor.isActive('table')) return false;
+
+  const matrix =
+    parseHtmlTable(clipboardData.getData('text/html'))
+    ?? parseDelimitedTable(clipboardData.getData('text/plain'));
+  if (!matrix) return false;
+
+  const tableNode = createTableNodeFromMatrix(editor, matrix);
+  if (!tableNode) return false;
+
+  editor.chain().focus().insertContent(tableNode.toJSON()).run();
+  editor.commands.fixTables();
+  return true;
 }

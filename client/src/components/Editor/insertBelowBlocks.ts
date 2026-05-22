@@ -14,14 +14,6 @@ function pickFile(accept: string, onPick: (file: File) => void) {
   input.click();
 }
 
-function readFileAsDataUrl(file: File, onLoad: (url: string) => void) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    if (typeof reader.result === 'string') onLoad(reader.result);
-  };
-  reader.readAsDataURL(file);
-}
-
 async function uploadFile(file: File) {
   const body = new FormData();
   body.append('file', file);
@@ -61,72 +53,57 @@ async function insertFirstTemplateBelow(editor: Editor, pos: number) {
   }).run();
 }
 
-/** 在当前块之后插入新块的插入点（紧跟闭合标签之后） */
 export function getInsertBelowPosition(editor: Editor): number {
   const { $from, to } = editor.state.selection;
   for (let d = $from.depth; d > 0; d--) {
     const node = $from.node(d);
-    if (node.type.name !== 'doc' && node.isBlock) {
-      return $from.after(d);
-    }
+    if (node.type.name !== 'doc' && node.isBlock) return $from.after(d);
   }
-  // NodeSelection on a top-level atom (e.g., divider): $from is at doc level,
-  // so use `to` which is the position right after the atom node.
   if (to > $from.pos) return to;
   return editor.state.doc.content.size;
 }
 
-/** 右键「在下方添加」面板：按 slash 同款语义在当前块下方插入 */
 export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item: SlashMenuItem): void {
   const pos = getInsertBelowPosition(editor);
   const chain = editor.chain().focus();
 
   switch (item.label) {
     case '一级标题':
-      chain
-        .insertContentAt(pos, { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '' }] })
-        .run();
+      chain.insertContentAt(pos, { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '' }] }).run();
       return;
     case '二级标题':
-      chain
-        .insertContentAt(pos, { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '' }] })
-        .run();
+      chain.insertContentAt(pos, { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '' }] }).run();
       return;
     case '三级标题':
-      chain
-        .insertContentAt(pos, { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: '' }] })
-        .run();
+      chain.insertContentAt(pos, { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: '' }] }).run();
+      return;
+    case '四级标题':
+      chain.insertContentAt(pos, { type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: '' }] }).run();
+      return;
+    case '五级标题':
+      chain.insertContentAt(pos, { type: 'heading', attrs: { level: 5 }, content: [{ type: 'text', text: '' }] }).run();
+      return;
+    case '六级标题':
+      chain.insertContentAt(pos, { type: 'heading', attrs: { level: 6 }, content: [{ type: 'text', text: '' }] }).run();
       return;
     case '有序列表':
-      chain
-        .insertContentAt(pos, {
-          type: 'orderedList',
-          content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }],
-        })
-        .run();
+      chain.insertContentAt(pos, {
+        type: 'orderedList',
+        content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }],
+      }).run();
       return;
     case '无序列表':
-      chain
-        .insertContentAt(pos, {
-          type: 'bulletList',
-          content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }],
-        })
-        .run();
+      chain.insertContentAt(pos, {
+        type: 'bulletList',
+        content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }],
+      }).run();
       return;
     case '任务列表':
     case '任务':
-      chain
-        .insertContentAt(pos, {
-          type: 'taskList',
-          content: [
-            {
-              type: 'taskItem',
-              attrs: { checked: false },
-              content: [{ type: 'paragraph' }],
-            },
-          ],
-        })
-        .run();
+      chain.insertContentAt(pos, {
+        type: 'taskList',
+        content: [{ type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph' }] }],
+      }).run();
       return;
     case '代码块':
       chain.insertContentAt(pos, { type: 'codeBlock', attrs: { language: null } }).run();
@@ -138,21 +115,17 @@ export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item:
       chain.insertContentAt(pos, { type: 'horizontalRule' }).run();
       return;
     case '高亮块':
-      chain
-        .insertContentAt(pos, {
-          type: 'highlightBlock',
-          attrs: { bgColor: '#fff0d9', borderColor: '#ffb057' },
-          content: [{ type: 'paragraph' }],
-        })
-        .run();
+      chain.insertContentAt(pos, {
+        type: 'highlightBlock',
+        attrs: { bgColor: '#fff0d9', borderColor: '#ffb057' },
+        content: [{ type: 'paragraph' }],
+      }).run();
       return;
     case '同步块':
       chain.insertContentAt(pos, { type: 'localSyncBlock', content: [{ type: 'paragraph' }] }).run();
       return;
     case '链接':
-      window.dispatchEvent(
-        new CustomEvent('feishu-open-page-link-dialog', { detail: { insertAt: pos } }),
-      );
+      window.dispatchEvent(new CustomEvent('feishu-open-page-link-dialog', { detail: { insertAt: pos } }));
       return;
     case '图片':
       pickFile('image/*', file => {
@@ -183,7 +156,7 @@ export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item:
       return;
     case '表格':
       if (sectionTitle === '多维表格') {
-        chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '多维表格', desc: '表格视图', kind: 'bitable' } }).run();
+        chain.insertContentAt(pos, { type: 'localBitableBlock' }).run();
       } else {
         insertFeishuTableAt(editor, pos, 3, 3);
       }
@@ -198,7 +171,6 @@ export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item:
       chain.insertContentAt(pos, { type: 'localFormulaBlock' }).run();
       return;
     case '模板':
-    case '更多':
       void insertFirstTemplateBelow(editor, pos);
       return;
     case '子文档':
@@ -226,7 +198,7 @@ export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item:
       chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: 'UML 图', desc: 'UML 图占位块', kind: 'uml' } }).run();
       return;
     case '人员':
-      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '人员', desc: '@成员 占位块', kind: 'mention' } }).run();
+      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '人员', desc: '@成员占位块', kind: 'mention' } }).run();
       return;
     default:
       chain.insertContentAt(pos, '<p></p>').run();

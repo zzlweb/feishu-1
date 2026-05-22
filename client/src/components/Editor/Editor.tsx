@@ -18,6 +18,7 @@ import { common, createLowlight } from 'lowlight';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ContextMenu from './ContextMenu';
 import TableContextMenu from './TableContextMenu';
+import { computeBlockPanelPosition } from './floatingPanel';
 import { computeTableBlockMenuPosition } from './tableMenu';
 import SlashMenu from './SlashMenu';
 import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH } from './slashMenuConfig';
@@ -39,7 +40,9 @@ import { FeishuHeading, readHeadingId } from './feishuHeading';
 import { feishuTableExtensions } from './feishuTable';
 import { localColumnsExtensions } from './columnsExtensions';
 import FeishuTableOverlay from './FeishuTableOverlay';
+import { CellSelection } from '@tiptap/pm/tables';
 import {
+  isCellSelectionInTableHost,
   resolveTableHostFromEditor,
   resolveTableHostFromElement,
 } from './tableDom';
@@ -49,6 +52,7 @@ import {
   headingBlockHasChildren,
   syncAllHeadingCollapseStates,
 } from './headingCollapse';
+import { insertTableFromClipboardData } from './tableInsert';
 import './Editor.less';
 
 const Notebook = wrapIcon(BookOpenIcon);
@@ -86,7 +90,7 @@ function getRelatedNode(target: EventTarget | null): Node | null {
 }
 
 const BLOCK_TOOLS_OVERLAY_SELECTOR =
-  '.block-inline-tools, .selection-bubble, .slash-menu, .slash-table-grid-flyout, .slash-columns-count-flyout, .feishu-table-chrome, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .feishu-columns-block__col-wrap, .feishu-columns-block__add-hover-wrap, .feishu-columns-block__add-btn';
+  '.block-inline-tools, .selection-bubble, .slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .feishu-table-chrome, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .feishu-columns-block__col-wrap, .feishu-columns-block__add-hover-wrap, .feishu-columns-block__add-btn';
 
 function isBlockToolsOverlayElement(element: Element | null): boolean {
   return Boolean(element?.closest(BLOCK_TOOLS_OVERLAY_SELECTOR));
@@ -274,27 +278,111 @@ const LocalSyncBlock = TiptapNode.create({
   },
 });
 
+function normalizeBlockUrl(raw: string): string {
+  const t = raw.trim();
+  if (!t) return '';
+  if (/^(https?:|mailto:|tel:)/i.test(t)) return t;
+  if (t.startsWith('//')) return `https:${t}`;
+  if (t.startsWith('/') || t.startsWith('#')) return t;
+  return `https://${t}`;
+}
+
+function LocalButtonBlockView({ node, updateAttributes, selected }: NodeViewProps) {
+  const text = node.attrs.text || '按钮';
+  const url = node.attrs.url || '';
+
+  const openButtonLink = () => {
+    const href = normalizeBlockUrl(url);
+    if (href) window.open(href, '_blank', 'noopener,noreferrer');
+  };
+
+  return (
+    <NodeViewWrapper className={`feishu-button-block${selected ? ' is-selected' : ''}`} contentEditable={false}>
+      <div className="feishu-button-block__preview">
+        <button type="button" className="feishu-action-button" onClick={openButtonLink}>
+          {text}
+        </button>
+      </div>
+      <div className="feishu-button-block__form">
+        <input
+          className="feishu-block-field"
+          value={text}
+          placeholder="按钮文字"
+          onChange={e => updateAttributes({ text: e.target.value })}
+        />
+        <input
+          className="feishu-block-field"
+          value={url}
+          placeholder="链接或页面地址"
+          onChange={e => updateAttributes({ url: e.target.value })}
+        />
+      </div>
+    </NodeViewWrapper>
+  );
+}
+
 const LocalButtonBlock = TiptapNode.create({
   name: 'localButtonBlock',
   group: 'block',
   atom: true,
   addAttributes() {
-    return { text: { default: '按钮' } };
+    return {
+      text: {
+        default: '按钮',
+        parseHTML: element => element.getAttribute('data-text') || element.textContent || '按钮',
+        renderHTML: attributes => ({ 'data-text': attributes.text }),
+      },
+      url: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-url') || '',
+        renderHTML: attributes => ({ 'data-url': attributes.url }),
+      },
+    };
   },
   parseHTML() {
-    return [{ tag: 'button[data-local-block="button"]' }];
+    return [{ tag: 'div[data-local-block="button"]' }, { tag: 'button[data-local-block="button"]' }];
   },
   renderHTML({ HTMLAttributes }) {
-    return ['button', { ...HTMLAttributes, type: 'button', 'data-local-block': 'button', class: 'feishu-action-button' }, HTMLAttributes.text || '按钮'];
+    const href = normalizeBlockUrl(String(HTMLAttributes.url || ''));
+    const button = ['span', { class: 'feishu-action-button' }, HTMLAttributes.text || '按钮'];
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'button', class: 'feishu-button-block' },
+      href ? ['a', { href, class: 'feishu-button-block__link' }, button] : button,
+    ];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(LocalButtonBlockView);
   },
 });
+
+function LocalFormulaBlockView({ node, updateAttributes, selected }: NodeViewProps) {
+  const formula = node.attrs.formula || '';
+
+  return (
+    <NodeViewWrapper className={`feishu-formula-editor${selected ? ' is-selected' : ''}`} contentEditable={false}>
+      <div className="feishu-formula-block">{formula || 'E = mc²'}</div>
+      <textarea
+        className="feishu-formula-editor__input"
+        value={formula}
+        placeholder="输入公式，例如 E = mc²"
+        rows={2}
+        onChange={e => updateAttributes({ formula: e.target.value })}
+      />
+    </NodeViewWrapper>
+  );
+}
 
 const LocalFormulaBlock = TiptapNode.create({
   name: 'localFormulaBlock',
   group: 'block',
   atom: true,
   addAttributes() {
-    return { formula: { default: 'E = mc²' } };
+    return {
+      formula: {
+        default: 'E = mc²',
+        parseHTML: element => element.getAttribute('data-formula') || element.textContent || 'E = mc²',
+        renderHTML: attributes => ({ 'data-formula': attributes.formula }),
+      },
+    };
   },
   parseHTML() {
     return [{ tag: 'div[data-local-block="formula"]' }];
@@ -302,14 +390,267 @@ const LocalFormulaBlock = TiptapNode.create({
   renderHTML({ HTMLAttributes }) {
     return ['div', { ...HTMLAttributes, 'data-local-block': 'formula', class: 'feishu-formula-block' }, HTMLAttributes.formula || 'E = mc²'];
   },
+  addNodeView() {
+    return ReactNodeViewRenderer(LocalFormulaBlockView);
+  },
 });
+
+type BitableRows = string[][];
+
+function parseJsonArray<T>(raw: unknown, fallback: T): T {
+  if (typeof raw !== 'string') return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const DEFAULT_BITABLE_COLUMNS = ['字段 1', '字段 2', '字段 3'];
+const DEFAULT_BITABLE_ROWS: BitableRows = [
+  ['', '', ''],
+  ['', '', ''],
+  ['', '', ''],
+];
+
+function normalizeBitableRows(rows: BitableRows, columnCount: number): BitableRows {
+  return rows.map(row => Array.from({ length: columnCount }, (_, index) => row[index] ?? ''));
+}
+
+function LocalBitableBlockView({ node, updateAttributes, selected }: NodeViewProps) {
+  const title = node.attrs.title || '多维表格';
+  const columns = parseJsonArray<string[]>(node.attrs.columns, DEFAULT_BITABLE_COLUMNS);
+  const rows = normalizeBitableRows(parseJsonArray<BitableRows>(node.attrs.rows, DEFAULT_BITABLE_ROWS), columns.length);
+
+  const commit = (nextColumns: string[], nextRows: BitableRows, nextTitle = title) => {
+    updateAttributes({
+      title: nextTitle,
+      columns: JSON.stringify(nextColumns),
+      rows: JSON.stringify(normalizeBitableRows(nextRows, nextColumns.length)),
+    });
+  };
+
+  const updateCell = (rowIndex: number, colIndex: number, value: string) => {
+    const nextRows = rows.map(row => [...row]);
+    nextRows[rowIndex][colIndex] = value;
+    commit(columns, nextRows);
+  };
+
+  const updateColumn = (colIndex: number, value: string) => {
+    const nextColumns = [...columns];
+    nextColumns[colIndex] = value;
+    commit(nextColumns, rows);
+  };
+
+  const addRow = () => {
+    commit(columns, [...rows, Array.from({ length: columns.length }, () => '')]);
+  };
+
+  const addColumn = () => {
+    if (columns.length >= 8) return;
+    commit([...columns, `字段 ${columns.length + 1}`], rows.map(row => [...row, '']));
+  };
+
+  const removeRow = (rowIndex: number) => {
+    const nextRows = rows.filter((_, index) => index !== rowIndex);
+    commit(columns, nextRows.length > 0 ? nextRows : [Array.from({ length: columns.length }, () => '')]);
+  };
+
+  const removeColumn = (colIndex: number) => {
+    if (columns.length <= 1) return;
+    commit(
+      columns.filter((_, index) => index !== colIndex),
+      rows.map(row => row.filter((_, index) => index !== colIndex)),
+    );
+  };
+
+  return (
+    <NodeViewWrapper className={`feishu-bitable-block${selected ? ' is-selected' : ''}`} contentEditable={false}>
+      <div className="feishu-bitable-block__header">
+        <input
+          className="feishu-bitable-block__title"
+          value={title}
+          onChange={event => commit(columns, rows, event.target.value)}
+        />
+        <div className="feishu-bitable-block__actions">
+          <button type="button" onClick={addRow}>新增记录</button>
+          <button type="button" onClick={addColumn} disabled={columns.length >= 8}>新增字段</button>
+        </div>
+      </div>
+      <div className="feishu-bitable-block__scroll">
+        <table className="feishu-bitable-block__table">
+          <thead>
+            <tr>
+              <th className="feishu-bitable-block__index">#</th>
+              {columns.map((column, colIndex) => (
+                <th key={`bitable-col-${colIndex}`}>
+                  <div className="feishu-bitable-block__field">
+                    <input value={column} onChange={event => updateColumn(colIndex, event.target.value)} />
+                    {columns.length > 1 && (
+                      <button type="button" onClick={() => removeColumn(colIndex)} aria-label="删除字段">×</button>
+                    )}
+                  </div>
+                </th>
+              ))}
+              <th className="feishu-bitable-block__tail" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={`bitable-row-${rowIndex}`}>
+                <td className="feishu-bitable-block__index">
+                  <button type="button" onClick={() => removeRow(rowIndex)} title="删除记录">
+                    {rowIndex + 1}
+                  </button>
+                </td>
+                {columns.map((_, colIndex) => (
+                  <td key={`bitable-cell-${rowIndex}-${colIndex}`}>
+                    <input value={row[colIndex] ?? ''} onChange={event => updateCell(rowIndex, colIndex, event.target.value)} />
+                  </td>
+                ))}
+                <td className="feishu-bitable-block__tail" />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </NodeViewWrapper>
+  );
+}
+
+const LocalBitableBlock = TiptapNode.create({
+  name: 'localBitableBlock',
+  group: 'block',
+  atom: true,
+  addAttributes() {
+    return {
+      title: {
+        default: '多维表格',
+        parseHTML: element => element.getAttribute('data-title') || '多维表格',
+        renderHTML: attributes => ({ 'data-title': attributes.title }),
+      },
+      columns: {
+        default: JSON.stringify(DEFAULT_BITABLE_COLUMNS),
+        parseHTML: element => element.getAttribute('data-columns') || JSON.stringify(DEFAULT_BITABLE_COLUMNS),
+        renderHTML: attributes => ({ 'data-columns': attributes.columns }),
+      },
+      rows: {
+        default: JSON.stringify(DEFAULT_BITABLE_ROWS),
+        parseHTML: element => element.getAttribute('data-rows') || JSON.stringify(DEFAULT_BITABLE_ROWS),
+        renderHTML: attributes => ({ 'data-rows': attributes.rows }),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'div[data-local-block="bitable"]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    const columns = parseJsonArray<string[]>(HTMLAttributes.columns, DEFAULT_BITABLE_COLUMNS);
+    const rows = normalizeBitableRows(parseJsonArray<BitableRows>(HTMLAttributes.rows, DEFAULT_BITABLE_ROWS), columns.length);
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'bitable', class: 'feishu-bitable-block' },
+      ['div', { class: 'feishu-bitable-block__static-title' }, HTMLAttributes.title || '多维表格'],
+      ['table', { class: 'feishu-bitable-block__table' },
+        ['thead', {}, ['tr', {}, ...columns.map(column => ['th', {}, column || '字段'])]],
+        ['tbody', {}, ...rows.map(row => ['tr', {}, ...row.map(cell => ['td', {}, cell || ''])])],
+      ],
+    ];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(LocalBitableBlockView);
+  },
+});
+
+const EMBED_KIND_META: Record<string, { icon: string; title: string; desc: string }> = {
+  bitable: { icon: '▦', title: '多维表格', desc: '表格视图' },
+  kanban: { icon: '▤', title: '看板', desc: '多维表格看板视图' },
+  gantt: { icon: '↔', title: '甘特图', desc: '多维表格甘特视图' },
+  gallery: { icon: '▧', title: '画册', desc: '多维表格画册视图' },
+  board: { icon: '✎', title: '画板', desc: '白板内容' },
+  mindmap: { icon: '◎', title: '思维导图', desc: '脑图内容' },
+  flowchart: { icon: '◇', title: '流程图', desc: '流程图内容' },
+  uml: { icon: 'U', title: 'UML 图', desc: 'UML 图内容' },
+  mention: { icon: '@', title: '人员', desc: '@成员' },
+  template: { icon: '▣', title: '模板', desc: '模板内容' },
+  subdoc: { icon: '↗', title: '子文档', desc: '页面链接' },
+  image: { icon: '□', title: '图片', desc: '图片上传状态' },
+  file: { icon: '⇩', title: '文件', desc: '文件上传状态' },
+  embed: { icon: '+', title: '内容块', desc: '' },
+};
+
+function LocalEmbedBlockView({ node, updateAttributes, selected }: NodeViewProps) {
+  const kind = String(node.attrs.kind || 'embed');
+  const meta = EMBED_KIND_META[kind] || EMBED_KIND_META.embed;
+  const title = node.attrs.title || meta.title;
+  const desc = node.attrs.desc || meta.desc;
+  const href = node.attrs.href || '';
+  const normalizedHref = normalizeBlockUrl(href);
+
+  return (
+    <NodeViewWrapper
+      className={`feishu-local-card feishu-local-card--${kind}${selected ? ' is-selected' : ''}`}
+      data-local-block="embed"
+      contentEditable={false}
+    >
+      <div className="feishu-local-card__icon">{meta.icon}</div>
+      <div className="feishu-local-card__body">
+        <input
+          className="feishu-local-card__title-input"
+          value={title}
+          placeholder={meta.title}
+          onChange={e => updateAttributes({ title: e.target.value })}
+        />
+        <input
+          className="feishu-local-card__desc-input"
+          value={desc}
+          placeholder={meta.desc}
+          onChange={e => updateAttributes({ desc: e.target.value })}
+        />
+      </div>
+      {(kind === 'subdoc' || href) && (
+        <input
+          className="feishu-local-card__href-input"
+          value={href}
+          placeholder="/doc/..."
+          onChange={e => updateAttributes({ href: e.target.value })}
+        />
+      )}
+      {normalizedHref && (
+        <a className="feishu-local-card__action" href={normalizedHref} target="_blank" rel="noreferrer">
+          打开
+        </a>
+      )}
+    </NodeViewWrapper>
+  );
+}
 
 const LocalEmbedBlock = TiptapNode.create({
   name: 'localEmbedBlock',
   group: 'block',
   atom: true,
   addAttributes() {
-    return { title: { default: '内容块' }, desc: { default: '' }, kind: { default: 'embed' }, href: { default: '' } };
+    return {
+      title: {
+        default: '内容块',
+        parseHTML: element => element.getAttribute('data-title') || element.querySelector('.feishu-local-card__title')?.textContent || '内容块',
+        renderHTML: attributes => ({ 'data-title': attributes.title }),
+      },
+      desc: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-desc') || element.querySelector('.feishu-local-card__desc')?.textContent || '',
+        renderHTML: attributes => ({ 'data-desc': attributes.desc }),
+      },
+      kind: {
+        default: 'embed',
+        parseHTML: element => element.getAttribute('data-kind') || 'embed',
+        renderHTML: attributes => ({ 'data-kind': attributes.kind }),
+      },
+      href: {
+        default: '',
+        parseHTML: element => element.getAttribute('href') || element.getAttribute('data-href') || '',
+        renderHTML: attributes => ({ 'data-href': attributes.href }),
+      },
+    };
   },
   parseHTML() {
     return [{ tag: 'div[data-local-block="embed"]' }, { tag: 'a[data-local-block="embed"]' }];
@@ -320,6 +661,9 @@ const LocalEmbedBlock = TiptapNode.create({
       return ['a', { ...HTMLAttributes, href: HTMLAttributes.href, 'data-local-block': 'embed', class: `feishu-local-card feishu-local-card--link feishu-local-card--${HTMLAttributes.kind || 'embed'}` }, ...content];
     }
     return ['div', { ...HTMLAttributes, 'data-local-block': 'embed', class: `feishu-local-card feishu-local-card--${HTMLAttributes.kind || 'embed'}` }, ...content];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(LocalEmbedBlockView);
   },
 });
 
@@ -395,6 +739,7 @@ const editorExtensions = [
   LocalSyncBlock,
   LocalButtonBlock,
   LocalFormulaBlock,
+  LocalBitableBlock,
   LocalEmbedBlock,
   Placeholder.configure({
     includeChildren: false,
@@ -539,54 +884,20 @@ function getBlockToolsAnchorTop(
   return rr.top + rr.height / 2 - areaRectTop;
 }
 
-function clampPanelY(anchor: DOMRect, menuH: number, pad: number): number {
-  const vh = window.innerHeight;
-  const anchorCenterY = anchor.top + anchor.height / 2;
-  const y = anchorCenterY - menuH / 2;
-  return Math.max(pad, Math.min(y, vh - pad - menuH));
-}
-
-/** 块配置面板：优先在块柄左侧展示，减少遮挡正文；左侧放不下时再切到右侧 */
-function computeBlockPanelPosition(
-  anchor: DOMRect,
-  menuW = 230,
-  menuH = 420,
-  pad = 8,
-  gap = 4,
-): { x: number; y: number } {
-  const vw = window.innerWidth;
-
-  const leftX = anchor.left - gap - menuW;
-  const rightX = anchor.right + gap;
-  const fitsLeft = leftX >= pad;
-  const fitsRight = rightX + menuW <= vw - pad;
-
-  if (fitsLeft) {
-    return { x: leftX, y: clampPanelY(anchor, menuH, pad) };
-  }
-
-  let x = fitsRight ? rightX : Math.min(Math.max(leftX, pad), vw - menuW - pad);
-  x = Math.max(pad, Math.min(x, vw - menuW - pad));
-  return { x, y: clampPanelY(anchor, menuH, pad) };
-}
-
 function computePlusMenuPosition(
   anchor: DOMRect,
   _menuW = SLASH_MENU_WIDTH,
   menuH = SLASH_MENU_MAX_HEIGHT,
   pad = 8,
-  gap = 8,
+  gap = 0,
 ): { top: number; left: number } {
   const vh = window.innerHeight;
-
-  // 菜单右缘对齐加号左缘，向左展开（可占用左侧目录轨，不遮挡加号与正文）
-  const left = anchor.left - gap;
-
-  let top = anchor.bottom + gap;
-  if (top + menuH > vh - pad) {
-    top = Math.max(pad, anchor.top - gap - Math.min(menuH, vh - pad * 2));
-  }
-
+  const left = anchor.left + gap;
+  const visibleMenuH = Math.min(menuH, vh - pad * 2);
+  const top = Math.max(
+    pad,
+    Math.min(anchor.top + anchor.height / 2 - visibleMenuH / 2, vh - pad - visibleMenuH),
+  );
   return { top, left };
 }
 
@@ -661,7 +972,6 @@ export default function Editor({
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
   const [slashMenuPos, setSlashMenuPos] = useState({ top: 0, left: 0 });
   const [slashQuery, setSlashQuery] = useState('');
-  /** 面板是否由段落旁「+」悬停/点击打开（与输入 `/` 打开的菜单分流，便于嵌套在同一 hover 容器内） */
   const [slashMenuFromPlus, setSlashMenuFromPlus] = useState(false);
   const [pageLinkDialogVisible, setPageLinkDialogVisible] = useState(false);
   const [pageLinkPopPos, setPageLinkPopPos] = useState({ top: 0, left: 0 });
@@ -678,7 +988,6 @@ export default function Editor({
   const [activeTableHost, setActiveTableHost] = useState<HTMLElement | null>(null);
   const [tableHandleHovered, setTableHandleHovered] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const plusMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contextMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const blockAddButtonRef = useRef<HTMLButtonElement>(null);
@@ -715,29 +1024,23 @@ export default function Editor({
   }, [onToggleHeadingCollapse]);
 
   const closeSlashMenu = useCallback(() => {
-    if (plusMenuCloseTimerRef.current) {
-      clearTimeout(plusMenuCloseTimerRef.current);
-      plusMenuCloseTimerRef.current = null;
-    }
     setSlashMenuVisible(false);
     setSlashMenuFromPlus(false);
   }, []);
 
-  const cancelPlusMenuClose = useCallback(() => {
-    if (plusMenuCloseTimerRef.current) {
-      clearTimeout(plusMenuCloseTimerRef.current);
-      plusMenuCloseTimerRef.current = null;
+  const openPlusMenu = useCallback(() => {
+    if (readOnly) return;
+    const btn = blockAddButtonRef.current;
+    if (btn?.isConnected) {
+      setSlashMenuPos(computePlusMenuPosition(btn.getBoundingClientRect()));
     }
-  }, []);
-
-  const schedulePlusMenuClose = useCallback(() => {
-    cancelPlusMenuClose();
-    plusMenuCloseTimerRef.current = window.setTimeout(() => {
-      plusMenuCloseTimerRef.current = null;
-      setPlusHoveredState(false);
-      closeSlashMenu();
-    }, 250);
-  }, [cancelPlusMenuClose, closeSlashMenu]);
+    if (slashMenuVisible && slashMenuFromPlus) return;
+    setContextMenu(null);
+    setPlusHoveredState(true);
+    setSlashMenuFromPlus(true);
+    setSlashQuery('');
+    setSlashMenuVisible(true);
+  }, [readOnly, setPlusHoveredState, slashMenuFromPlus, slashMenuVisible]);
 
   const cancelContextMenuClose = useCallback(() => {
     if (contextMenuCloseTimerRef.current) {
@@ -938,6 +1241,7 @@ export default function Editor({
       const next = getRelatedNode(e.relatedTarget);
       if (next && e.currentTarget.contains(next)) return;
       if (next instanceof Element && isBlockToolsOverlayElement(next)) return;
+      if (editorRefForCatalogue.current?.state.selection instanceof CellSelection) return;
 
       hideBlockTools();
       setActiveTableHost(null);
@@ -951,6 +1255,7 @@ export default function Editor({
     if (next && e.currentTarget.contains(next)) return;
     if (next instanceof Element && next.closest('.selection-bubble')) return;
     if (next instanceof Element && next.closest('.slash-menu')) return;
+    if (next instanceof Element && next.closest('.slash-submenu-portal')) return;
     if (next instanceof Element && next.closest('.slash-table-grid-flyout')) return;
     if (next instanceof Element && next.closest('.slash-columns-count-flyout')) return;
     if (next instanceof Element && next.closest('.feishu-table-chrome')) return;
@@ -958,8 +1263,10 @@ export default function Editor({
     if (next instanceof Element && next.closest('.context-submenu-flyout')) return;
     if (next instanceof Element && next.closest('.context-add-below-flyout')) return;
     if (next instanceof Element && next.closest('.context-menu')) return;
+    if (editorRefForCatalogue.current?.state.selection instanceof CellSelection) return;
     if (slashMenuVisible && slashMenuFromPlus) {
-      schedulePlusMenuClose();
+      closeSlashMenu();
+      setPlusHoveredState(false);
       return;
     }
     if (contextMenu) return;
@@ -967,12 +1274,20 @@ export default function Editor({
     setContextMenu(null);
     hideBlockTools();
     setActiveTableHost(null);
-  }, [closeSlashMenu, contextMenu, hideBlockTools, schedulePlusMenuClose, slashMenuFromPlus, slashMenuVisible]);
+  }, [closeSlashMenu, contextMenu, hideBlockTools, setPlusHoveredState, slashMenuFromPlus, slashMenuVisible]);
 
   const editor = useEditor({
     extensions: editorExtensions,
     content: content || '<p></p>',
     editable: !readOnly,
+    editorProps: {
+      handlePaste: (_view, event) => {
+        if (readOnly) return false;
+        const activeEditor = editorRefForCatalogue.current;
+        if (!activeEditor) return false;
+        return insertTableFromClipboardData(activeEditor, event.clipboardData);
+      },
+    },
     onCreate: ({ editor: ed }) => {
       ed.commands.fixTables();
     },
@@ -1058,8 +1373,7 @@ export default function Editor({
     const show =
       !readOnly &&
       blockTools.visible &&
-      (blockGutterHovered || plusHovered || Boolean(contextMenu) ||
-        (slashMenuVisible && slashMenuFromPlus));
+      (blockGutterHovered || plusHovered || Boolean(contextMenu) || (slashMenuVisible && slashMenuFromPlus));
     if (!show) {
       setRowHighlightBand(null);
       return;
@@ -1118,21 +1432,19 @@ export default function Editor({
     (e: React.MouseEvent<HTMLDivElement>) => {
       const next = getRelatedNode(e.relatedTarget);
       if (next && e.currentTarget.contains(next)) return;
-      if (next instanceof Element && isBlockToolsOverlayElement(next)) {
-        cancelPlusMenuClose();
-        return;
-      }
+      if (next instanceof Element && isBlockToolsOverlayElement(next)) return;
+      if (next instanceof Element && next.closest('.slash-menu')) return;
+
       const resolved = resolveHoveredBlockInfo(next);
       if (resolved) return;
 
-      if (slashMenuVisible && slashMenuFromPlus) {
-        schedulePlusMenuClose();
-        return;
+      if (slashMenuFromPlus) {
+        closeSlashMenu();
       }
-
+      setPlusHoveredState(false);
       hideBlockTools();
     },
-    [cancelPlusMenuClose, hideBlockTools, resolveHoveredBlockInfo, schedulePlusMenuClose, slashMenuFromPlus, slashMenuVisible],
+    [closeSlashMenu, hideBlockTools, resolveHoveredBlockInfo, setPlusHoveredState, slashMenuFromPlus],
   );
 
   const handleEditorBlankClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1448,10 +1760,7 @@ export default function Editor({
 
   const scheduleContextMenuClose = useCallback(() => {
     cancelContextMenuClose();
-    contextMenuCloseTimerRef.current = window.setTimeout(() => {
-      contextMenuCloseTimerRef.current = null;
-      dismissContextMenuFromHover();
-    }, 200);
+    dismissContextMenuFromHover();
   }, [cancelContextMenuClose, dismissContextMenuFromHover]);
 
   const openBlockConfigMenu = (options?: { skipCooldown?: boolean }) => {
@@ -1504,39 +1813,24 @@ export default function Editor({
     }
   };
 
-  const openPlusMenu = useCallback(() => {
-    cancelPlusMenuClose();
-    setContextMenu(null);
-    const btn = blockAddButtonRef.current;
-    if (btn?.isConnected) {
-      setSlashMenuPos(computePlusMenuPosition(btn.getBoundingClientRect()));
-    }
-    setPlusHoveredState(true);
-    setBlockTools(prev => ({
-      ...prev,
-      visible: true,
-      type: 'paragraph',
-      isEmpty: true,
-      isInColumns: prev.isInColumns,
-      left: prev.left,
-    }));
-    setSlashMenuFromPlus(true);
-    setSlashQuery('');
-    setSlashMenuVisible(true);
-  }, [cancelPlusMenuClose]);
-
   const focusPlusMenuTarget = useCallback(() => {
     const row = activeBlockElRef.current;
     if (!editor || !row?.isConnected) return;
     try {
       const pos = editor.view.posAtDOM(row, 0);
+      const node = editor.state.doc.nodeAt(pos);
+      if (node?.isBlock) {
+        (editor as any).__plusInsertRange = { from: pos, to: pos + node.nodeSize };
+      } else {
+        (editor as any).__plusInsertRange = null;
+      }
       editor.chain().focus(Math.min(pos + 1, editor.state.doc.content.size)).run();
     } catch {
+      (editor as any).__plusInsertRange = null;
       editor.commands.focus();
     }
   }, [editor]);
 
-  useEffect(() => () => cancelPlusMenuClose(), [cancelPlusMenuClose]);
   useEffect(() => () => cancelContextMenuClose(), [cancelContextMenuClose]);
 
   useEffect(() => {
@@ -1709,24 +2003,26 @@ export default function Editor({
                 className={`block-inline-tools${blockTools.isInColumns ? ' is-in-columns' : ''}`}
                 style={{ top: blockTools.top, left: blockTools.left }}
                 onMouseEnter={() => {
-                  cancelPlusMenuClose();
                   setBlockGutterHoveredState(true);
                 }}
                 onMouseLeave={handleBlockToolsMouseLeave}
               >
-                {(slashMenuVisible && slashMenuFromPlus) || (blockTools.isEmpty && blockTools.type === 'paragraph') ? (
+                {blockTools.isEmpty && blockTools.type === 'paragraph' ? (
                   <div
                     className="block-add-hover-wrap"
                     onPointerEnter={openPlusMenu}
+                    onMouseLeave={(e) => {
+                      const next = getRelatedNode(e.relatedTarget);
+                      if (next instanceof Element && next.closest('.slash-menu')) return;
+                      if (next instanceof Element && next.closest('.slash-submenu-portal')) return;
+                      if (!slashMenuFromPlus) setPlusHoveredState(false);
+                    }}
                   >
                     <button
                       ref={blockAddButtonRef}
                       type="button"
                       className="block-add-btn"
                       onMouseDown={e => e.preventDefault()}
-                      onClick={() => {
-                        openPlusMenu();
-                      }}
                       aria-label="插入内容"
                     >
                       <span className="block-add-btn-box">
@@ -1789,12 +2085,16 @@ export default function Editor({
                 activeTableHost?.isConnected
                   ? activeTableHost
                   : resolveTableHostFromEditor(editor);
+              const pinTableChrome =
+                tableHandleHovered
+                || contextMenu?.variant === 'table'
+                || (host?.isConnected ? isCellSelectionInTableHost(editor, host) : false);
               return host?.isConnected ? (
               <FeishuTableOverlay
                 editor={editor}
                 tableHost={host}
                 handleRef={tableHandleRef}
-                pinChrome={tableHandleHovered || contextMenu?.variant === 'table'}
+                pinChrome={pinTableChrome}
                 onTableHandleActiveChange={setTableHandleHovered}
                 onOpenBlockMenu={() => openBlockConfigMenu({ skipCooldown: true })}
                 onScheduleCloseBlockMenu={scheduleContextMenuClose}
@@ -1921,16 +2221,31 @@ export default function Editor({
         />
       )}
       {slashMenuVisible && slashMenuFromPlus && (
-        <SlashMenu
-          editor={editor}
-          position={slashMenuPos}
-          query={slashQuery}
-          onClose={closeSlashMenu}
-          onBeforeSelect={focusPlusMenuTarget}
-          onMouseEnter={cancelPlusMenuClose}
-          onMouseLeave={schedulePlusMenuClose}
-          anchorRef={blockAddButtonRef}
-        />
+        <div
+          className="block-plus-menu-shell"
+          onMouseLeave={(e) => {
+            const next = getRelatedNode(e.relatedTarget);
+            if (next instanceof Element && next.closest('.block-add-hover-wrap')) return;
+            if (next instanceof Element && next.closest('.slash-menu')) return;
+            if (next instanceof Element && next.closest('.slash-submenu-portal')) return;
+            closeSlashMenu();
+            setPlusHoveredState(false);
+          }}
+        >
+          <SlashMenu
+            editor={editor}
+            position={slashMenuPos}
+            query=""
+            onClose={closeSlashMenu}
+            onBeforeSelect={focusPlusMenuTarget}
+            onMouseEnter={() => setPlusHoveredState(true)}
+            onMouseLeave={() => {
+              closeSlashMenu();
+              setPlusHoveredState(false);
+            }}
+            anchorRef={blockAddButtonRef}
+          />
+        </div>
       )}
 
     </div>

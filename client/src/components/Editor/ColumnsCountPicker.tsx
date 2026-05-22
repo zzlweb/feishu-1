@@ -6,7 +6,6 @@ interface Props {
   onPick: (columnCount: number) => void;
 }
 
-/** 飞书分栏选择器固定展示 5 根栏条，对应 1～5 栏 */
 const PICKER_BAR_COUNT = MAX_COLUMNS_PICKER;
 const DEFAULT_COUNT = 3;
 
@@ -25,10 +24,7 @@ export default function ColumnsCountPicker({ onPick }: Props) {
         <span className="columns-count-picker__title">选择栏数</span>
         <span className="columns-count-picker__size">{displayCount}</span>
       </div>
-      <div
-        className="columns-count-picker__bars"
-        onMouseLeave={() => setHoverCount(0)}
-      >
+      <div className="columns-count-picker__bars" onMouseLeave={() => setHoverCount(0)}>
         {Array.from({ length: PICKER_BAR_COUNT }, (_, index) => {
           const count = index + 1;
           const isActive = count <= displayCount;

@@ -102,6 +102,15 @@
       flex-shrink: 0;
     }
 
+    .header-title-stack {
+      min-width: 0;
+    }
+
+    .doc-header-search {
+      width: 220px;
+      flex-shrink: 0;
+    }
+
     .header-left-divider {
       width: 1px;
       height: 18px;
@@ -283,6 +292,11 @@
       }
     }
 
+  }
+
+  .doc-search-hit {
+    animation: doc-search-hit-flash 1.6s ease;
+    border-radius: 4px;
   }
 
   /** 顶图条：横跨主栏+评论栏整行，不参与主区纵向滚动 */
@@ -1320,5 +1334,15 @@
 
   50% {
     opacity: 0.4;
+  }
+}
+
+@keyframes doc-search-hit-flash {
+  0% {
+    background: rgba(255, 197, 61, 0.55);
+  }
+
+  100% {
+    background: transparent;
   }
 }

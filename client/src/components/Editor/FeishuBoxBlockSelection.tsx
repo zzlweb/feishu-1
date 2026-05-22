@@ -36,7 +36,7 @@ function isUiChrome(target: EventTarget | null): boolean {
     ? target
     : target instanceof Text ? target.parentElement : null;
   return Boolean(element?.closest(
-    '.block-inline-tools, .feishu-table-chrome, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .slash-menu, .selection-bubble, .editor-page-link-pop, .feishu-box-selection-layer',
+    '.block-inline-tools, .feishu-table-chrome, .feishu-table-chrome-mount, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .selection-bubble, .editor-page-link-pop, .feishu-box-selection-layer, .column-resize-handle, .block-plus-menu-shell, .feishu-table-host, .tableWrapper, .feishu-columns-node, .feishu-columns-block',
   ));
 }
 
@@ -203,7 +203,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0 || isUiChrome(e.target)) return;
 
-      const canStart = canStartBoxSelect(e.target, area, e.clientY);
+      const canStart = canStartBoxSelect(e.target, area, e.clientX, e.clientY);
 
       if (!canStart) {
         if (selectedRef.current.length > 0) {

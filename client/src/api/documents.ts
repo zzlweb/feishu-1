@@ -58,6 +58,8 @@ export const deleteDocument = (id: string) =>
 export const duplicateDocument = (id: string) =>
   request<Document>(`/documents/${id}/duplicate`, { method: 'POST' });
 
+export const getTemplates = () => request<Template[]>('/documents/templates/list');
+
 export const convertToChild = (id: string, parentId: string) =>
   request<Document>(`/documents/${id}/to-child`, {
     method: 'POST',

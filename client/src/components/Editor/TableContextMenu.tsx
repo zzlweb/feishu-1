@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { Fragment, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
 import {
@@ -22,7 +22,7 @@ import {
 import { SlashGlyphSync } from '../../icons/slashMenuGlyphs';
 import { IconChevronMenuEnd } from '../../icons/feishuDoc';
 import { getInsertBelowPosition, insertBelowSlashItem } from './insertBelowBlocks';
-import { insertFeishuTableAt } from './tableInsert';
+import { getActiveTableContext, insertFeishuTableAt } from './tableInsert';
 import { insertFeishuColumnsAt } from './columnsInsert';
 import AddBelowSlashSections from './AddBelowSlashSections';
 import { syncEditorSelectionToAnchoredBlock } from './blockAnchorSelection';
@@ -38,7 +38,14 @@ import {
   computeSubmenuFlyoutPosition,
 } from './contextSubmenuFlyout';
 import { getActiveTableFlags } from './tableMenu';
-import { getActiveTableContext } from './tableInsert';
+import { useFloatingPanelPosition, isPointerWithinFloatingShell } from './floatingPanel';
+import {
+  distributeSelectedTableColumns,
+  removeActiveTable,
+  setTextAlignment,
+  toggleTableHeaderColumn,
+  toggleTableHeaderRow,
+} from './panelActions';
 import './ContextMenu.less';
 import './SlashMenu.less';
 
@@ -86,18 +93,12 @@ export default function TableContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const indentTriggerRef = useRef<HTMLDivElement>(null);
   const addBelowTriggerRef = useRef<HTMLDivElement>(null);
-  const colorTriggerRef = useRef<HTMLDivElement>(null);
   const indentFlyoutRef = useRef<HTMLDivElement>(null);
   const addBelowFlyoutRef = useRef<HTMLDivElement>(null);
-  const colorFlyoutRef = useRef<HTMLDivElement>(null);
-  const subMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hoverDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [subMenu, setSubMenu] = useState<string | null>(null);
   const [indentFlyoutPos, setIndentFlyoutPos] = useState<{ top: number; left: number } | null>(null);
   const [addBelowFlyoutPos, setAddBelowFlyoutPos] = useState<{ top: number; left: number } | null>(null);
-  const [colorFlyoutPos, setColorFlyoutPos] = useState<{ top: number; left: number } | null>(null);
-  const [finalPos, setFinalPos] = useState({ x, y });
-  const [posVisible, setPosVisible] = useState(false);
+  const { finalPos, posVisible } = useFloatingPanelPosition(x, y, menuRef, 8, anchorRef);
 
   const tableFlags = getActiveTableFlags(editor);
   const indentUi = getEditorIndentUiState(editor);
@@ -106,82 +107,35 @@ export default function TableContextMenu({
   const alignSelectionToBlockAnchor = () =>
     syncEditorSelectionToAnchoredBlock(editor, blockAnchorRef?.current ?? null);
 
-  const clearSubMenuCloseTimer = () => {
-    if (subMenuCloseTimerRef.current) {
-      clearTimeout(subMenuCloseTimerRef.current);
-      subMenuCloseTimerRef.current = null;
-    }
-  };
-
-  const clearHoverDismissTimer = () => {
-    if (hoverDismissTimerRef.current) {
-      clearTimeout(hoverDismissTimerRef.current);
-      hoverDismissTimerRef.current = null;
-    }
-  };
-
   const dismissByHover = () => {
-    clearHoverDismissTimer();
     (onHoverDismiss ?? onClose)();
   };
 
-  const scheduleHoverDismiss = () => {
-    clearHoverDismissTimer();
-    hoverDismissTimerRef.current = window.setTimeout(() => {
-      hoverDismissTimerRef.current = null;
-      dismissByHover();
-    }, 250);
-  };
-
   const pointerStillInShell = (next: EventTarget | null): boolean => {
-    if (!next || !(next instanceof Element)) return false;
-    if (menuRef.current?.contains(next)) return true;
-    if (indentFlyoutRef.current?.contains(next)) return true;
-    if (addBelowFlyoutRef.current?.contains(next)) return true;
-    if (colorFlyoutRef.current?.contains(next)) return true;
-    if (anchorRef?.current?.contains(next)) return true;
-    if (next.closest('.feishu-table-chrome')) return true;
-    if (next.closest('.context-menu')) return true;
-    if (next.closest('.context-submenu-flyout')) return true;
-    if (next.closest('.context-add-below-flyout')) return true;
-    if (next.closest('.slash-table-grid-flyout')) return true;
-    if (next.closest('.slash-columns-count-flyout')) return true;
-    return false;
-  };
-
-  const scheduleSubmenuClose = () => {
-    clearSubMenuCloseTimer();
-    subMenuCloseTimerRef.current = setTimeout(() => setSubMenu(null), 220);
+    return isPointerWithinFloatingShell(next, [menuRef, indentFlyoutRef, addBelowFlyoutRef, anchorRef], [
+      '.feishu-table-chrome',
+      '.context-menu',
+      '.context-submenu-flyout',
+      '.context-add-below-flyout',
+      '.slash-table-grid-flyout',
+      '.slash-columns-count-flyout',
+    ]);
   };
 
   const handleShellMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    scheduleHoverDismiss();
+    dismissByHover();
   };
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
-    scheduleSubmenuClose();
+    setSubMenu(null);
     handleShellMouseLeave(e);
   };
 
   useLayoutEffect(() => {
-    const el = menuRef.current;
-    if (!el) return;
-    const pad = 8;
-    const rect = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const fx = Math.max(pad, Math.min(x, vw - rect.width - pad));
-    const fy = Math.max(pad, Math.min(y, vh - rect.height - pad));
-    setFinalPos({ x: fx, y: fy });
-    setPosVisible(true);
-  }, [x, y]);
-
-  useLayoutEffect(() => {
     setIndentFlyoutPos(null);
     setAddBelowFlyoutPos(null);
-    setColorFlyoutPos(null);
-    if (subMenu !== 'indent' && subMenu !== 'addBelow' && subMenu !== 'cellColor') return;
+    if (subMenu !== 'indent' && subMenu !== 'addBelow') return;
 
     const updateFlyouts = () => {
       if (subMenu === 'indent') {
@@ -214,18 +168,6 @@ export default function TableContextMenu({
         );
         return;
       }
-
-      if (subMenu === 'cellColor') {
-        const el = colorTriggerRef.current;
-        if (!el) return;
-        setColorFlyoutPos(
-          computeSubmenuFlyoutPosition({
-            trigger: el.getBoundingClientRect(),
-            panelWidth: 200,
-            panelHeight: 120,
-          }),
-        );
-      }
     };
 
     updateFlyouts();
@@ -248,12 +190,7 @@ export default function TableContextMenu({
 
   const handleDelete = () => {
     alignSelectionToBlockAnchor();
-    const ctx = getActiveTableContext(editor);
-    if (ctx) {
-      editor.chain().focus().deleteTable().run();
-    } else {
-      editor.chain().focus().deleteSelection().run();
-    }
+    removeActiveTable(editor);
     onClose();
   };
 
@@ -265,7 +202,7 @@ export default function TableContextMenu({
 
   const setAlign = (value: string) => {
     alignSelectionToBlockAnchor();
-    editor.chain().focus().setTextAlign(value).run();
+    setTextAlignment(editor, value as 'left' | 'center' | 'right');
     onClose();
   };
 
@@ -298,74 +235,9 @@ export default function TableContextMenu({
 
   const handleDistributeColumns = () => {
     alignSelectionToBlockAnchor();
-    editor.commands.fixTables();
+    distributeSelectedTableColumns(editor);
     onClose();
   };
-
-  const handleAddRowBefore = () => {
-    alignSelectionToBlockAnchor();
-    editor.chain().focus().addRowBefore().run();
-    onClose();
-  };
-
-  const handleAddRowAfter = () => {
-    alignSelectionToBlockAnchor();
-    editor.chain().focus().addRowAfter().run();
-    onClose();
-  };
-
-  const handleAddColBefore = () => {
-    alignSelectionToBlockAnchor();
-    editor.chain().focus().addColumnBefore().run();
-    onClose();
-  };
-
-  const handleAddColAfter = () => {
-    alignSelectionToBlockAnchor();
-    editor.chain().focus().addColumnAfter().run();
-    onClose();
-  };
-
-  const handleDeleteRow = () => {
-    alignSelectionToBlockAnchor();
-    editor.chain().focus().deleteRow().run();
-    onClose();
-  };
-
-  const handleDeleteCol = () => {
-    alignSelectionToBlockAnchor();
-    editor.chain().focus().deleteColumn().run();
-    onClose();
-  };
-
-  const handleMergeCells = () => {
-    alignSelectionToBlockAnchor();
-    editor.chain().focus().mergeCells().run();
-    onClose();
-  };
-
-  const handleSplitCell = () => {
-    alignSelectionToBlockAnchor();
-    editor.chain().focus().splitCell().run();
-    onClose();
-  };
-
-  const handleSetCellColor = (color: string | null) => {
-    alignSelectionToBlockAnchor();
-    editor.chain().focus().setCellAttribute('backgroundColor', color).run();
-    onClose();
-  };
-
-  const CELL_COLORS = [
-    { label: '清除', value: null, color: '#ffffff', border: '#dee0e3' },
-    { label: '红色', value: '#ffccc7', color: '#ffccc7', border: '#ffccc7' },
-    { label: '橙色', value: '#ffe7ba', color: '#ffe7ba', border: '#ffe7ba' },
-    { label: '黄色', value: '#fff1b8', color: '#fff1b8', border: '#fff1b8' },
-    { label: '绿色', value: '#d9f7be', color: '#d9f7be', border: '#d9f7be' },
-    { label: '蓝色', value: '#bae7ff', color: '#bae7ff', border: '#bae7ff' },
-    { label: '紫色', value: '#efdbff', color: '#efdbff', border: '#efdbff' },
-    { label: '灰色', value: '#f5f5f5', color: '#f5f5f5', border: '#f5f5f5' },
-  ];
 
   const submenuIconStroke = { strokeWidth: 2.75 };
 
@@ -378,8 +250,6 @@ export default function TableContextMenu({
         className="context-submenu-flyout context-align-flyout"
         style={{ position: 'fixed', top: indentFlyoutPos.top, left: indentFlyoutPos.left, zIndex: 10060 }}
         onMouseEnter={() => {
-          clearSubMenuCloseTimer();
-          clearHoverDismissTimer();
           onMouseEnterCancel?.();
         }}
         onMouseLeave={handleFlyoutMouseLeave}
@@ -445,20 +315,12 @@ export default function TableContextMenu({
           zIndex: 10060,
         }}
         onMouseEnter={() => {
-          clearSubMenuCloseTimer();
-          clearHoverDismissTimer();
           onMouseEnterCancel?.();
         }}
         onMouseLeave={handleFlyoutMouseLeave}
         onMouseDown={e => e.preventDefault()}
       >
         <AddBelowSlashSections
-          onPanelMouseEnter={() => {
-            clearSubMenuCloseTimer();
-            clearHoverDismissTimer();
-            onMouseEnterCancel?.();
-          }}
-          onPanelMouseLeave={handleFlyoutMouseLeave}
           onPickItem={(sectionTitle, item) => {
             alignSelectionToBlockAnchor();
             insertBelowSlashItem(editor, sectionTitle, item);
@@ -479,54 +341,6 @@ export default function TableContextMenu({
       document.body,
     );
 
-  const cellColorFlyout =
-    subMenu === 'cellColor' &&
-    colorFlyoutPos &&
-    createPortal(
-      <div
-        ref={colorFlyoutRef}
-        className="context-submenu-flyout context-align-flyout"
-        style={{
-          position: 'fixed',
-          top: colorFlyoutPos.top,
-          left: colorFlyoutPos.left,
-          zIndex: 10060,
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '6px',
-          padding: '8px',
-          width: '160px',
-        }}
-        onMouseEnter={() => {
-          clearSubMenuCloseTimer();
-          clearHoverDismissTimer();
-          onMouseEnterCancel?.();
-        }}
-        onMouseLeave={handleFlyoutMouseLeave}
-        onMouseDown={e => e.preventDefault()}
-      >
-        {CELL_COLORS.map(c => (
-          <button
-            key={c.label}
-            type="button"
-            className="context-color-cell"
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '4px',
-              background: c.color || 'transparent',
-              border: `1px solid ${c.border}`,
-              cursor: 'pointer',
-              padding: 0,
-            }}
-            title={c.label}
-            onClick={() => handleSetCellColor(c.value)}
-          />
-        ))}
-      </div>,
-      document.body,
-    );
-
   return (
     <Fragment>
       <div
@@ -534,7 +348,6 @@ export default function TableContextMenu({
         className="context-menu context-menu-feishu context-menu-feishu--table"
         style={{ left: finalPos.x, top: finalPos.y, visibility: posVisible ? 'visible' : 'hidden' }}
         onMouseEnter={() => {
-          clearHoverDismissTimer();
           onMouseEnterCancel?.();
         }}
         onMouseLeave={handleShellMouseLeave}
@@ -549,12 +362,11 @@ export default function TableContextMenu({
         <div
           ref={indentTriggerRef}
           className="context-menu-item has-submenu"
-          onMouseEnter={() => {
-            clearSubMenuCloseTimer();
-            clearHoverDismissTimer();
-            setSubMenu('indent');
-          }}
-          onMouseLeave={scheduleSubmenuClose}
+        onMouseEnter={() => {
+          onMouseEnterCancel?.();
+          setSubMenu('indent');
+        }}
+        onMouseLeave={() => setSubMenu(null)}
         >
           <span className="context-menu-icon">
             <IndentRight size={18} strokeWidth={2} fill={ICON_MUTED} />
@@ -617,7 +429,7 @@ export default function TableContextMenu({
           className="context-menu-item context-menu-item--toggle"
           onClick={() => {
             alignSelectionToBlockAnchor();
-            editor.chain().focus().toggleHeaderRow().run();
+            toggleTableHeaderRow(editor);
           }}
         >
           <span className="context-menu-icon">▦</span>
@@ -629,7 +441,7 @@ export default function TableContextMenu({
           className="context-menu-item context-menu-item--toggle"
           onClick={() => {
             alignSelectionToBlockAnchor();
-            editor.chain().focus().toggleHeaderColumn().run();
+            toggleTableHeaderColumn(editor);
           }}
         >
           <span className="context-menu-icon">▥</span>
@@ -646,12 +458,11 @@ export default function TableContextMenu({
         <div
           ref={addBelowTriggerRef}
           className="context-menu-item has-submenu"
-          onMouseEnter={() => {
-            clearSubMenuCloseTimer();
-            clearHoverDismissTimer();
-            setSubMenu('addBelow');
-          }}
-          onMouseLeave={scheduleSubmenuClose}
+        onMouseEnter={() => {
+          onMouseEnterCancel?.();
+          setSubMenu('addBelow');
+        }}
+        onMouseLeave={() => setSubMenu(null)}
         >
           <span className="context-menu-icon">
             <ContextGlyphAddBelow size={18} fill={ICON_MUTED} />
@@ -664,7 +475,6 @@ export default function TableContextMenu({
       </div>
       {indentFlyout}
       {addBelowFlyout}
-      {cellColorFlyout}
     </Fragment>
   );
 }

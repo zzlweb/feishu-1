@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/react';
+import { computeBlockPanelPosition } from './floatingPanel';
 
 export interface TableMenuFlags {
   hasHeaderRow: boolean;
@@ -30,11 +31,7 @@ export function getActiveTableFlags(editor: Editor): TableMenuFlags {
   return { hasHeaderRow: false, hasHeaderCol: false };
 }
 
-/** 表格块菜单：锚点在块柄下方展开 */
-export function computeTableBlockMenuPosition(anchor: DOMRect, menuW = 220, pad = 8, gap = 6) {
-  const vw = window.innerWidth;
-  let x = anchor.left;
-  if (x + menuW > vw - pad) x = vw - menuW - pad;
-  if (x < pad) x = pad;
-  return { x, y: anchor.bottom + gap };
+/** 表格块菜单：与段落块柄一致，优先在块柄左侧展开，避免盖住绿色表格按钮 */
+export function computeTableBlockMenuPosition(anchor: DOMRect, menuW = 236, menuH = 480, pad = 8, gap = 4) {
+  return computeBlockPanelPosition(anchor, menuW, menuH, pad, gap);
 }

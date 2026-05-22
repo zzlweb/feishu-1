@@ -7,13 +7,13 @@
 
 .columns-count-picker {
   box-sizing: border-box;
-  width: 292px;
-  padding: 20px 18px 18px;
+  width: 184px;
+  padding: 12px;
   background: #fff;
-  border: none;
+  border: 1px solid #e8e9eb;
   border-radius: 8px;
   box-shadow:
-    0 8px 24px rgba(31, 35, 41, 0.12),
+    0 14px 36px rgba(31, 35, 41, 0.12),
     0 2px 8px rgba(31, 35, 41, 0.06);
 
   &__head {
@@ -21,12 +21,13 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 16px;
+    height: 20px;
+    margin-bottom: 10px;
     padding: 0;
   }
 
   &__title {
-    font-size: 16px;
+    font-size: 12px;
     line-height: 20px;
     color: @text-secondary;
     font-weight: 400;
@@ -35,7 +36,7 @@
   &__size {
     flex-shrink: 0;
     min-width: 16px;
-    font-size: 16px;
+    font-size: 12px;
     line-height: 20px;
     color: @text-primary;
     font-weight: 500;
@@ -46,21 +47,21 @@
     display: flex;
     align-items: stretch;
     justify-content: center;
-    gap: 10px;
-    height: 118px;
-    padding: 18px 18px;
-    border: 1px solid @border-light;
-    border-radius: 6px;
+    gap: 7px;
+    height: 92px;
+    padding: 10px 11px;
+    border: 1px solid #dee0e3;
+    border-radius: 2px;
     background: #fff;
   }
 
   &__bar {
-    flex: 0 0 36px;
+    flex: 0 0 23px;
     margin: 0;
     padding: 0;
     border: none;
     border-radius: 0;
-    background: @bar-inactive;
+    background: #f2f3f5;
     cursor: pointer;
     transition: background 0.08s ease;
 

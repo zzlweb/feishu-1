@@ -5,12 +5,13 @@ import { IconAddOutlined } from '../../icons/feishuDoc';
 import SlashMenu from './SlashMenu';
 import {
   buildGridTemplate,
-  computeSplitterLeft,
   computeColumnPlusMenuPosition,
+  computeSplitterLeft,
   focusColumnAtPos,
   focusColumnEditor,
   insertColumnAfterAt,
   isColumnBlockEmpty,
+  MAX_COLUMNS_BLOCK,
   readColumnRatios,
   resizeColumnsAt,
   resolveColumnPaddingX,
@@ -18,46 +19,35 @@ import {
 } from './columnsHelpers';
 
 const COLUMN_PLUS_OVERLAY_SELECTOR =
-  '.slash-menu, .slash-table-grid-flyout, .slash-columns-count-flyout, .feishu-columns-block__add-hover-wrap, .feishu-columns-block__add-btn, .feishu-columns-block__plus-menu-shell';
+  '.slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .feishu-columns-block__add-hover-wrap, .feishu-columns-block__add-btn, .feishu-columns-block__plus-menu-shell';
 
 function isColumnPlusOverlayElement(element: Element | null): boolean {
   return Boolean(element?.closest(COLUMN_PLUS_OVERLAY_SELECTOR));
 }
 
+function getRelatedNode(target: EventTarget | null): Node | null {
+  if (target instanceof Node) return target;
+  return null;
+}
+
 export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
   const plusRef = useRef<HTMLButtonElement>(null);
   const columnPosRef = useRef<number | null>(null);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hoverClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
 
-  const clearCloseTimer = useCallback(() => {
-    if (closeTimerRef.current) {
+  const cancelScheduledClose = useCallback(() => {
+    if (closeTimerRef.current != null) {
       clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
+      closeTimerRef.current = undefined;
     }
   }, []);
-
-  const clearHoverTimer = useCallback(() => {
-    if (hoverClearTimerRef.current) {
-      clearTimeout(hoverClearTimerRef.current);
-      hoverClearTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleClearHover = useCallback(() => {
-    clearHoverTimer();
-    hoverClearTimerRef.current = setTimeout(() => {
-      hoverClearTimerRef.current = null;
-      setIsHovered(false);
-    }, 180);
-  }, [clearHoverTimer]);
 
   const closeMenu = useCallback(() => {
-    clearCloseTimer();
+    cancelScheduledClose();
     setMenuOpen(false);
-  }, [clearCloseTimer]);
+  }, [cancelScheduledClose]);
 
   const ensureColumnFocus = useCallback(() => {
     if (columnPosRef.current != null) {
@@ -69,7 +59,6 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
 
   const openMenu = useCallback(() => {
     if (!editor.isEditable) return;
-    clearCloseTimer();
     const columnPos = typeof getPos === 'function' ? getPos() : null;
     columnPosRef.current = columnPos;
     window.dispatchEvent(
@@ -79,16 +68,11 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
       focusColumnAtPos(editor, columnPos);
     }
     const button = plusRef.current;
-    if (button) {
+    if (button?.isConnected) {
       setMenuPos(computeColumnPlusMenuPosition(button.getBoundingClientRect()));
     }
     setMenuOpen(true);
-  }, [clearCloseTimer, editor, getPos]);
-
-  const scheduleCloseMenu = useCallback(() => {
-    clearCloseTimer();
-    closeTimerRef.current = setTimeout(() => setMenuOpen(false), 220);
-  }, [clearCloseTimer]);
+  }, [editor, getPos]);
 
   useEffect(() => {
     const onCloseAll = (event: Event) => {
@@ -100,13 +84,7 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
     return () => window.removeEventListener('feishu-close-column-plus-menus', onCloseAll);
   }, [getPos]);
 
-  useEffect(() => () => {
-    clearCloseTimer();
-    clearHoverTimer();
-  }, [clearCloseTimer, clearHoverTimer]);
-
   const isColumnEmpty = isColumnBlockEmpty(node);
-  const [isHovered, setIsHovered] = useState(false);
 
   useEffect(() => {
     if (!isColumnEmpty) {
@@ -114,32 +92,41 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
     }
   }, [closeMenu, isColumnEmpty]);
 
-  const isColumnActive = isHovered || menuOpen;
+  const scheduleClose = useCallback(() => {
+    cancelScheduledClose();
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = undefined;
+      closeMenu();
+    }, 120);
+  }, [cancelScheduledClose, closeMenu]);
+
+  useEffect(() => () => cancelScheduledClose(), [cancelScheduledClose]);
 
   const handleWrapMouseEnter = useCallback(() => {
-    clearCloseTimer();
-    clearHoverTimer();
-    setIsHovered(true);
-  }, [clearCloseTimer, clearHoverTimer]);
+    cancelScheduledClose();
+    if (isColumnEmpty) openMenu();
+  }, [cancelScheduledClose, isColumnEmpty, openMenu]);
 
-  const handleWrapMouseLeave = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    const next = event.relatedTarget;
+  const handleColWrapMouseLeave = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (!menuOpen) return;
+    const next = getRelatedNode(event.relatedTarget);
     if (next instanceof Element && isColumnPlusOverlayElement(next)) return;
-    if (next instanceof Node && event.currentTarget.contains(next)) return;
-    scheduleClearHover();
-    scheduleCloseMenu();
-  }, [scheduleClearHover, scheduleCloseMenu]);
+    scheduleClose();
+  }, [menuOpen, scheduleClose]);
 
   const slashMenu = menuOpen && isColumnEmpty
     ? createPortal(
         <div
           className="feishu-columns-block__plus-menu-shell"
-          onMouseEnter={clearCloseTimer}
+          onMouseEnter={() => {
+            cancelScheduledClose();
+            if (isColumnEmpty) openMenu();
+          }}
           onMouseLeave={(event: React.MouseEvent<HTMLDivElement>) => {
-            const next = event.relatedTarget;
+            const next = getRelatedNode(event.relatedTarget);
             if (next instanceof Element && isColumnPlusOverlayElement(next)) return;
-            scheduleCloseMenu();
-            scheduleClearHover();
+            if (next instanceof Element && next.closest('.feishu-columns-block__col-wrap')) return;
+            closeMenu();
           }}
         >
           <SlashMenu
@@ -148,8 +135,10 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
             query=""
             onClose={closeMenu}
             onBeforeSelect={ensureColumnFocus}
-            onMouseEnter={clearCloseTimer}
-            onMouseLeave={scheduleCloseMenu}
+            onMouseEnter={() => {
+              cancelScheduledClose();
+              if (isColumnEmpty) openMenu();
+            }}
             anchorRef={plusRef}
           />
         </div>,
@@ -159,16 +148,14 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper
-      className={`feishu-columns-block__col-wrap${menuOpen ? ' is-menu-open' : ''}${isColumnActive ? ' is-hovered' : ''}${isColumnEmpty ? ' is-column-empty' : ''}`}
-      onMouseEnter={handleWrapMouseEnter}
-      onMouseLeave={handleWrapMouseLeave}
+      className={`feishu-columns-block__col-wrap${menuOpen ? ' is-menu-open' : ''}${isColumnEmpty ? ' is-column-empty' : ''}`}
+      onMouseLeave={handleColWrapMouseLeave}
     >
       {editor.isEditable && isColumnEmpty && (
         <div
           className="feishu-columns-block__add-hover-wrap"
           contentEditable={false}
           onMouseEnter={handleWrapMouseEnter}
-          onMouseLeave={handleWrapMouseLeave}
         >
           <button
             ref={plusRef}
@@ -176,9 +163,7 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
             className="feishu-columns-block__add-btn"
             title="悬浮插入内容"
             aria-label="插入内容"
-            onPointerEnter={openMenu}
             onMouseDown={event => event.preventDefault()}
-            onClick={openMenu}
           >
             <span className="feishu-columns-block__add-btn-box">
               <IconAddOutlined size={14} color="currentColor" />
@@ -201,6 +186,7 @@ export function ColumnsNodeView({ editor, node, getPos, selected }: NodeViewProp
   const columnsGap = useMemo(() => resolveColumnsGap(columnCount), [columnCount]);
   const columnPaddingX = useMemo(() => resolveColumnPaddingX(columnCount), [columnCount]);
   const [resizingIndex, setResizingIndex] = useState<number | null>(null);
+  const canAddColumn = columnCount < MAX_COLUMNS_BLOCK;
 
   const handleResizeStart = useCallback((leftIndex: number, event: React.MouseEvent) => {
     event.preventDefault();
@@ -269,38 +255,41 @@ export function ColumnsNodeView({ editor, node, getPos, selected }: NodeViewProp
       {columnCount > 1 && (
         <div className="feishu-columns-node__splitter-layer" contentEditable={false}>
           {Array.from({ length: columnCount - 1 }, (_, index) => (
-              <div
-                key={`columns-splitter-${index}`}
-                className={`feishu-columns-node__splitter${resizingIndex === index ? ' is-resizing' : ''}`}
-                style={{ left: computeSplitterLeft(index, columnRatios, columnsGap) }}
+            <div
+              key={`columns-splitter-${index}`}
+              className={`feishu-columns-node__splitter${resizingIndex === index ? ' is-resizing' : ''}`}
+              style={{ left: computeSplitterLeft(index, columnRatios, columnsGap) }}
+            >
+              <span className="feishu-columns-node__insert-line" aria-hidden />
+              <button
+                type="button"
+                className="feishu-columns-node__insert-btn"
+                aria-label="新增分栏"
+                onMouseDown={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={event => {
+                  event.stopPropagation();
+                  if (canAddColumn) insertColumnAfterAt(editor, getPos, index);
+                }}
+                disabled={!canAddColumn}
               >
-                <span className="feishu-columns-node__insert-line" aria-hidden />
-                <button
-                  type="button"
-                  className="feishu-columns-node__insert-btn"
-                  aria-label="新增分栏"
-                  onMouseDown={event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  onClick={event => {
-                    event.stopPropagation();
-                    insertColumnAfterAt(editor, getPos, index);
-                  }}
-                >
-                  <span className="feishu-columns-node__insert-dot" />
-                  <span className="feishu-columns-node__insert-plus">
-                    <span className="feishu-columns-node__insert-plus-icon">+</span>
-                  </span>
-                  <span className="feishu-columns-node__insert-tooltip">新增分栏</span>
-                </button>
-                <div
-                  className="feishu-columns-node__resize-handle"
-                  title="拖动调整栏宽"
-                  onMouseDown={event => handleResizeStart(index, event)}
-                />
-              </div>
-            ))}
+                <span className="feishu-columns-node__insert-dot" />
+                <span className="feishu-columns-node__insert-plus">
+                  <span className="feishu-columns-node__insert-plus-icon">+</span>
+                </span>
+                <span className="feishu-columns-node__insert-tooltip">
+                  {canAddColumn ? '新增分栏' : `最多 ${MAX_COLUMNS_BLOCK} 栏`}
+                </span>
+              </button>
+              <div
+                className="feishu-columns-node__resize-handle"
+                title="拖动调整栏宽"
+                onMouseDown={event => handleResizeStart(index, event)}
+              />
+            </div>
+          ))}
         </div>
       )}
     </NodeViewWrapper>

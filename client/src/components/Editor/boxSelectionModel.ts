@@ -31,7 +31,10 @@ export function setBoxSelectionStore(store: BoxSelectionStore | null): void {
 }
 
 const UI_CHROME =
-  '.block-inline-tools, .feishu-table-chrome, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .slash-menu, .selection-bubble, .editor-page-link-pop, .feishu-box-selection-layer';
+  '.block-inline-tools, .feishu-table-chrome, .feishu-table-chrome-mount, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .selection-bubble, .editor-page-link-pop, .feishu-box-selection-layer, .column-resize-handle, .block-plus-menu-shell';
+
+const TABLE_INTERACTION_SELECTOR =
+  '.feishu-table-host, .tableWrapper, table.feishu-table, .feishu-table-scroll, .feishu-columns-node, .feishu-columns-block';
 
 function isUiChrome(target: EventTarget | null): boolean {
   const element = target instanceof Element
@@ -52,6 +55,45 @@ function getTargetElement(target: EventTarget | null): Element | null {
 
 function isNativeInteractiveElement(element: Element): boolean {
   return Boolean(element.closest('button, input, textarea, select, option, [contenteditable="false"]'));
+}
+
+function isTableInteractionTarget(element: Element): boolean {
+  return Boolean(element.closest(TABLE_INTERACTION_SELECTOR));
+}
+
+/** 点击是否落在顶层块之间的空白区（含最后一个块下方） */
+function isBlankEditorPoint(clientX: number, clientY: number, tiptap: HTMLElement): boolean {
+  const editorRect = tiptap.getBoundingClientRect();
+  if (clientX < editorRect.left || clientX > editorRect.right) return false;
+
+  const children = Array.from(tiptap.children).filter(
+    (child): child is HTMLElement => child instanceof HTMLElement,
+  );
+  if (children.length === 0) return true;
+
+  for (const child of children) {
+    const rect = child.getBoundingClientRect();
+    if (
+      clientX >= rect.left
+      && clientX <= rect.right
+      && clientY >= rect.top
+      && clientY <= rect.bottom
+    ) {
+      return false;
+    }
+  }
+
+  const firstRect = children[0].getBoundingClientRect();
+  if (clientY < firstRect.top - 4) return true;
+
+  for (let i = 0; i < children.length - 1; i += 1) {
+    const topRect = children[i].getBoundingClientRect();
+    const bottomRect = children[i + 1].getBoundingClientRect();
+    if (clientY > topRect.bottom + 2 && clientY < bottomRect.top - 2) return true;
+  }
+
+  const lastRect = children[children.length - 1].getBoundingClientRect();
+  return clientY > lastRect.bottom + 4;
 }
 
 function resolveRowRange(editor: Editor, tr: HTMLElement): { from: number; to: number } | null {
@@ -225,44 +267,41 @@ export function deleteSelectableUnits(editor: Editor, units: SelectableUnit[]): 
   return true;
 }
 
-/** 文档编辑区域：按下左键拖动即可框选块内容 */
+/** 文档编辑区域：仅在空白区域按下左键拖动才开始框选块内容 */
 export function canStartBoxSelect(
   target: EventTarget | null,
   editorArea: HTMLElement,
+  clientX?: number,
   clientY?: number,
 ): boolean {
   const element = getTargetElement(target);
   if (!element) return false;
   if (!editorArea.contains(element)) return false;
   if (isUiChrome(element) || isNativeInteractiveElement(element)) return false;
+  if (isTableInteractionTarget(element)) return false;
 
   if (element === editorArea) return true;
 
   const tiptap = getTiptapRoot(editorArea);
   if (!tiptap) return false;
 
-  // 飞书式框选：在文档编辑区域内按住左键拖动即可开始，光标保持默认箭头。
-  if (element === tiptap || tiptap.contains(element)) return true;
+  if (element === tiptap) return true;
 
-  // 最后一个块下方的空白区
-  if (clientY != null) {
-    const children = tiptap.querySelectorAll(':scope > *');
-    if (children.length === 0) return true;
-    const last = children[children.length - 1];
-    const lastRect = last.getBoundingClientRect();
-    if (clientY > lastRect.bottom + 4) return true;
+  if (clientX != null && clientY != null) {
+    return isBlankEditorPoint(clientX, clientY, tiptap);
   }
 
   return false;
 }
 
 /** 兼容旧入口：判断正文区域是否可用于框选 */
-export function canArmBoxSelect(target: EventTarget | null, editorArea: HTMLElement): boolean {
-  const element = getTargetElement(target);
-  if (!element) return false;
-  if (!editorArea.contains(element)) return false;
-  if (isUiChrome(element) || isNativeInteractiveElement(element)) return false;
-  return Boolean(element.closest('.tiptap, .ProseMirror') || element === editorArea);
+export function canArmBoxSelect(
+  target: EventTarget | null,
+  editorArea: HTMLElement,
+  clientX?: number,
+  clientY?: number,
+): boolean {
+  return canStartBoxSelect(target, editorArea, clientX, clientY);
 }
 
 export function measureUnitBand(

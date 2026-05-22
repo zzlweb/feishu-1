@@ -8,6 +8,7 @@ import TableGridPicker from './TableGridPicker';
 import ColumnsCountPicker from './ColumnsCountPicker';
 import { insertFeishuTable } from './tableInsert';
 import { insertFeishuColumns } from './columnsInsert';
+import { computeSubmenuFlyoutPosition } from './contextSubmenuFlyout';
 import './SlashMenu.less';
 
 interface Props {
@@ -24,15 +25,13 @@ interface Props {
 
 export default function SlashMenu({ editor, position, query, onClose, onBeforeSelect, onMouseEnter, onMouseLeave, variant = 'fixed', anchorRef }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const tableFlyoutRef = useRef<HTMLDivElement>(null);
-  const columnsFlyoutRef = useRef<HTMLDivElement>(null);
-  const tableSubMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const columnsSubMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const [renderPos, setRenderPos] = useState(position);
   const [tooltipItem, setTooltipItem] = useState<{ item: SlashMenuItem; rect: DOMRect } | null>(null);
-  const [tableGridFlyoutPos, setTableGridFlyoutPos] = useState<{ top: number; left: number } | null>(null);
-  const [columnsCountFlyoutPos, setColumnsCountFlyoutPos] = useState<{ top: number; left: number } | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<{
+    kind: 'tableGrid' | 'columnsCount';
+    rect: DOMRect;
+  } | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const filteredSections = SLASH_SECTIONS.map(s => ({
@@ -42,99 +41,12 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
 
   const allItems = filteredSections.flatMap(s => s.items);
 
-  const clearTableSubMenuTimer = () => {
-    if (tableSubMenuCloseTimerRef.current) {
-      clearTimeout(tableSubMenuCloseTimerRef.current);
-      tableSubMenuCloseTimerRef.current = null;
-    }
-  };
-
-  const clearColumnsSubMenuTimer = () => {
-    if (columnsSubMenuCloseTimerRef.current) {
-      clearTimeout(columnsSubMenuCloseTimerRef.current);
-      columnsSubMenuCloseTimerRef.current = null;
-    }
-  };
-
-  const scheduleTableSubMenuClose = () => {
-    clearTableSubMenuTimer();
-    tableSubMenuCloseTimerRef.current = setTimeout(() => setTableGridFlyoutPos(null), 220);
-  };
-
-  const scheduleColumnsSubMenuClose = () => {
-    clearColumnsSubMenuTimer();
-    columnsSubMenuCloseTimerRef.current = setTimeout(() => setColumnsCountFlyoutPos(null), 220);
-  };
-
-  function isInsideColumnsFlyout(target: EventTarget | null): boolean {
-    return target instanceof Element && Boolean(target.closest('.slash-columns-count-flyout'));
-  }
-
-  function isInsideTableFlyout(target: EventTarget | null): boolean {
-    return target instanceof Element && Boolean(target.closest('.slash-table-grid-flyout'));
-  }
-
-  function closeColumnsFlyout() {
-    clearColumnsSubMenuTimer();
-    setColumnsCountFlyoutPos(null);
-  }
-
-  function closeTableFlyout() {
-    clearTableSubMenuTimer();
-    setTableGridFlyoutPos(null);
-  }
-
-  function closeSubmenuFlyouts() {
-    closeTableFlyout();
-    closeColumnsFlyout();
-  }
-
-  const openTableGridFlyout = (el: HTMLElement) => {
-    clearTableSubMenuTimer();
-    setColumnsCountFlyoutPos(null);
-    const r = el.getBoundingClientRect();
-    const pad = 8;
-    const panelW = 220;
-    const gap = 0;
-    let left = r.right + gap;
-    if (left + panelW > window.innerWidth - pad) {
-      left = Math.max(pad, r.left - panelW - gap);
-    }
-    let top = r.top;
-    const panelH = 240;
-    if (top + panelH > window.innerHeight - pad) {
-      top = Math.max(pad, window.innerHeight - pad - panelH);
-    }
-    setTableGridFlyoutPos({ top, left });
-  };
-
-  const openColumnsCountFlyout = (el: HTMLElement) => {
-    clearColumnsSubMenuTimer();
-    setTableGridFlyoutPos(null);
-    const r = el.getBoundingClientRect();
-    const pad = 8;
-    const panelW = 292;
-    const gap = 2;
-    let left = r.right + gap;
-    if (left + panelW > window.innerWidth - pad) {
-      left = Math.max(pad, r.left - panelW - gap);
-    }
-    let top = r.top - 2;
-    const panelH = 214;
-    if (top + panelH > window.innerHeight - pad) {
-      top = Math.max(pad, window.innerHeight - pad - panelH);
-    }
-    setColumnsCountFlyoutPos({ top, left });
-  };
-
   useEffect(() => {
     if (allItems.length === 0) onClose();
   }, [allItems.length, onClose]);
 
   useEffect(() => {
     setActiveIdx(0);
-    setTableGridFlyoutPos(null);
-    setColumnsCountFlyoutPos(null);
   }, [query]);
 
   useLayoutEffect(() => {
@@ -148,7 +60,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
       return;
     }
     const pad = 8;
-    const gap = 8;
+    const gap = anchorRef ? 0 : 8;
     const menuRect = menuEl.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
@@ -157,7 +69,8 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     const anchorEl = anchorRef?.current;
     if (anchorEl?.isConnected) {
       const anchor = anchorEl.getBoundingClientRect();
-      left = anchor.left - gap;
+      left = anchor.left + gap;
+      top = anchor.top + anchor.height / 2 - menuRect.height / 2;
     } else {
       left = Math.max(pad, Math.min(left, vw - menuRect.width - pad));
     }
@@ -183,6 +96,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
         e.preventDefault();
         onBeforeSelect?.();
         allItems[activeIdx]?.action(editor);
+        (editor as any).__plusInsertRange = null;
         onClose();
       } else if (e.key === 'Escape') {
         onClose();
@@ -191,8 +105,6 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     window.addEventListener('keydown', handler, true);
     return () => {
       window.removeEventListener('keydown', handler, true);
-      clearTableSubMenuTimer();
-      clearColumnsSubMenuTimer();
     };
   }, [allItems, activeIdx, editor, onBeforeSelect, onClose]);
 
@@ -207,12 +119,28 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     clearTimeout(tooltipTimerRef.current);
     tooltipTimerRef.current = setTimeout(() => {
       setTooltipItem({ item, rect: el.getBoundingClientRect() });
-    }, 400);
+    }, 180);
   };
 
   const hideTooltip = () => {
     clearTimeout(tooltipTimerRef.current);
     setTooltipItem(null);
+  };
+
+  const pointerInsideMenuShell = (next: EventTarget | null) => {
+    if (!(next instanceof Element)) return false;
+    return Boolean(menuRef.current?.contains(next) || next.closest('.slash-submenu-portal'));
+  };
+
+  const openSubmenu = (kind: 'tableGrid' | 'columnsCount', el: HTMLElement) => {
+    hideTooltip();
+    setActiveSubmenu({ kind, rect: el.getBoundingClientRect() });
+  };
+
+  const closeSubmenuByPointer = (next: EventTarget | null) => {
+    if (pointerInsideMenuShell(next)) return;
+    setActiveSubmenu(null);
+    onMouseLeave?.();
   };
 
   const hasTooltipContent = (item: SlashMenuItem) =>
@@ -237,20 +165,69 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const runItemAction = (item: SlashMenuItem) => {
     onBeforeSelect?.();
     item.action(editor);
+    (editor as any).__plusInsertRange = null;
     onClose();
   };
 
   const handleTablePick = (rows: number, cols: number) => {
-    onBeforeSelect?.();
-    insertFeishuTable(editor, rows, cols);
-    onClose();
+    setActiveSubmenu(null);
+    hideTooltip();
+    queueMicrotask(() => {
+      onBeforeSelect?.();
+      insertFeishuTable(editor, rows, cols);
+      (editor as any).__plusInsertRange = null;
+      onClose();
+    });
   };
 
   const handleColumnsPick = (columnCount: number) => {
-    onBeforeSelect?.();
-    insertFeishuColumns(editor, columnCount);
-    onClose();
+    setActiveSubmenu(null);
+    hideTooltip();
+    queueMicrotask(() => {
+      onBeforeSelect?.();
+      insertFeishuColumns(editor, columnCount);
+      (editor as any).__plusInsertRange = null;
+      onClose();
+    });
   };
+
+  const submenuPosition = activeSubmenu
+    ? computeSubmenuFlyoutPosition({
+        trigger: activeSubmenu.rect,
+        panelWidth: activeSubmenu.kind === 'tableGrid' ? 304 : 184,
+        panelHeight: activeSubmenu.kind === 'tableGrid' ? 334 : 164,
+        gap: 8,
+        pad: 8,
+      })
+    : null;
+
+  const submenuPortal = activeSubmenu && submenuPosition
+    ? createPortal(
+        <div
+          className="slash-submenu-portal"
+          style={{
+            position: 'fixed',
+            left: submenuPosition.left,
+            top: submenuPosition.top,
+            zIndex: 10030,
+          }}
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={e => closeSubmenuByPointer(e.relatedTarget)}
+          onMouseDown={e => e.preventDefault()}
+        >
+          {activeSubmenu.kind === 'tableGrid' ? (
+            <div className="slash-table-grid-flyout is-portal">
+              <TableGridPicker onPick={handleTablePick} />
+            </div>
+          ) : (
+            <div className="slash-columns-count-flyout is-portal">
+              <ColumnsCountPicker onPick={handleColumnsPick} />
+            </div>
+          )}
+        </div>,
+        document.body,
+      )
+    : null;
 
   const tooltipPortal = tooltipItem && hasTooltipContent(tooltipItem.item)
     ? createPortal(
@@ -274,72 +251,6 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
       )
     : null;
 
-  const tableGridFlyout =
-    tableGridFlyoutPos &&
-    createPortal(
-      <div
-        ref={tableFlyoutRef}
-        className="slash-table-grid-flyout"
-        style={{
-          position: 'fixed',
-          top: tableGridFlyoutPos.top,
-          left: tableGridFlyoutPos.left,
-          zIndex: 10060,
-        }}
-        onMouseEnter={() => {
-          clearTableSubMenuTimer();
-          onMouseEnter?.();
-        }}
-        onMouseLeave={(e) => {
-          const next = e.relatedTarget;
-          if (isInsideTableFlyout(next)) return;
-          if (next instanceof Element && next.closest('.slash-menu')) {
-            scheduleTableSubMenuClose();
-            return;
-          }
-          closeTableFlyout();
-          onMouseLeave?.();
-        }}
-        onMouseDown={e => e.preventDefault()}
-      >
-        <TableGridPicker onPick={handleTablePick} />
-      </div>,
-      document.body,
-    );
-
-  const columnsCountFlyout =
-    columnsCountFlyoutPos &&
-    createPortal(
-      <div
-        ref={columnsFlyoutRef}
-        className="slash-columns-count-flyout"
-        style={{
-          position: 'fixed',
-          top: columnsCountFlyoutPos.top,
-          left: columnsCountFlyoutPos.left,
-          zIndex: 10060,
-        }}
-        onMouseEnter={() => {
-          clearColumnsSubMenuTimer();
-          onMouseEnter?.();
-        }}
-        onMouseLeave={(e) => {
-          const next = e.relatedTarget;
-          if (isInsideColumnsFlyout(next)) return;
-          if (next instanceof Element && next.closest('.slash-menu')) {
-            scheduleColumnsSubMenuClose();
-            return;
-          }
-          closeColumnsFlyout();
-          onMouseLeave?.();
-        }}
-        onMouseDown={e => e.preventDefault()}
-      >
-        <ColumnsCountPicker onPick={handleColumnsPick} />
-      </div>,
-      document.body,
-    );
-
   return (
     <Fragment>
       <div
@@ -348,11 +259,9 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
         style={variant === 'anchored' ? undefined : { top: renderPos.top, left: renderPos.left }}
         onMouseEnter={onMouseEnter}
         onScroll={hideTooltip}
-        onMouseLeave={() => {
+        onMouseLeave={e => {
           hideTooltip();
-          scheduleTableSubMenuClose();
-          scheduleColumnsSubMenuClose();
-          onMouseLeave?.();
+          closeSubmenuByPointer(e.relatedTarget);
         }}
       >
         {filteredSections.map(section => (
@@ -375,7 +284,6 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                       aria-label={item.label}
                       onMouseEnter={e => {
                         setActiveIdx(idx);
-                        closeSubmenuFlyouts();
                         if (hasTooltipContent(item)) showTooltip(item, e.currentTarget);
                       }}
                       onMouseLeave={hideTooltip}
@@ -409,39 +317,17 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                     aria-label={item.label}
                     onMouseEnter={e => {
                       setActiveIdx(idx);
-                      if (isTableGrid) {
-                        hideTooltip();
-                        closeColumnsFlyout();
-                        openTableGridFlyout(e.currentTarget);
-                      } else if (isColumnsCount) {
-                        hideTooltip();
-                        closeTableFlyout();
-                        openColumnsCountFlyout(e.currentTarget);
+                      if (!hasSubmenu && hasTooltipContent(item)) {
+                        showTooltip(item, e.currentTarget);
                       } else {
-                        closeSubmenuFlyouts();
-                        if (hasTooltipContent(item)) {
-                          showTooltip(item, e.currentTarget);
-                        }
+                        hideTooltip();
                       }
+                      if (isTableGrid) openSubmenu('tableGrid', e.currentTarget);
+                      else if (isColumnsCount) openSubmenu('columnsCount', e.currentTarget);
+                      else setActiveSubmenu(null);
                     }}
-                    onMouseLeave={(e) => {
+                    onMouseLeave={() => {
                       if (!hasSubmenu) hideTooltip();
-                      if (isTableGrid) {
-                        if (isInsideTableFlyout(e.relatedTarget)) return;
-                        if (e.relatedTarget instanceof Element && e.relatedTarget.closest('.slash-menu')) {
-                          closeTableFlyout();
-                          return;
-                        }
-                        scheduleTableSubMenuClose();
-                      }
-                      if (isColumnsCount) {
-                        if (isInsideColumnsFlyout(e.relatedTarget)) return;
-                        if (e.relatedTarget instanceof Element && e.relatedTarget.closest('.slash-menu')) {
-                          closeColumnsFlyout();
-                          return;
-                        }
-                        scheduleColumnsSubMenuClose();
-                      }
                     }}
                     onMouseDown={e => {
                       e.preventDefault();
@@ -466,8 +352,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
         ))}
 
       </div>
-      {tableGridFlyout}
-      {columnsCountFlyout}
+      {submenuPortal}
       {tooltipPortal}
     </Fragment>
   );

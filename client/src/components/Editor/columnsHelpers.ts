@@ -7,6 +7,7 @@ import { SLASH_MENU_MAX_HEIGHT } from './slashMenuConfig';
 export const MIN_COLUMNS = 1;
 /** Slash / 插入菜单分栏选择器最多预选栏数 */
 export const MAX_COLUMNS_PICKER = 5;
+export const MAX_COLUMNS_BLOCK = 5;
 export const FEISHU_COLUMNS_GAP = 14;
 
 /** 分栏间隙中心线位置（与 CSS grid gap 对齐） */
@@ -134,6 +135,7 @@ export function insertColumnAfterAt(editor: Editor, getPos: NodeViewProps['getPo
   const columnsPos = getPos();
   const columnsNode = editor.state.doc.nodeAt(columnsPos);
   if (!columnsNode || columnsNode.type.name !== 'localColumnsBlock') return;
+  if (columnsNode.childCount >= MAX_COLUMNS_BLOCK) return;
   const safeAfterIndex = Math.max(0, Math.min(afterIndex, columnsNode.childCount - 1));
   const insertIndex = safeAfterIndex + 1;
   const nextChildren: ProseMirrorNode[] = [];
@@ -152,6 +154,59 @@ export function insertColumnAfterAt(editor: Editor, getPos: NodeViewProps['getPo
 
   const nextColumnsNode = columnsNode.type.create(columnsNode.attrs, Fragment.fromArray(nextChildren));
   replaceColumnsNode(editor, columnsPos, columnsNode, nextColumnsNode, insertIndex);
+}
+
+export function unwrapColumnsAt(editor: Editor, getPos: NodeViewProps['getPos']) {
+  if (typeof getPos !== 'function') return;
+  const columnsPos = getPos();
+  const columnsNode = editor.state.doc.nodeAt(columnsPos);
+  if (!columnsNode || columnsNode.type.name !== 'localColumnsBlock') return;
+
+  const blocks: ProseMirrorNode[] = [];
+  for (let columnIndex = 0; columnIndex < columnsNode.childCount; columnIndex += 1) {
+    const column = ensureColumnHasParagraph(editor.schema, columnsNode.child(columnIndex));
+    column.content.forEach(child => {
+      blocks.push(child);
+    });
+  }
+  if (blocks.length === 0) {
+    const paragraph = editor.schema.nodes.paragraph?.createAndFill();
+    if (paragraph) blocks.push(paragraph);
+  }
+
+  const tr = editor.state.tr.replaceWith(
+    columnsPos,
+    columnsPos + columnsNode.nodeSize,
+    Fragment.fromArray(blocks),
+  );
+  const selectionPos = Math.min(columnsPos + 1, tr.doc.content.size);
+  tr.setSelection(TextSelection.near(tr.doc.resolve(selectionPos), 1));
+  editor.view.dispatch(tr.scrollIntoView());
+  editor.view.focus();
+}
+
+export function removeColumnAt(editor: Editor, getPos: NodeViewProps['getPos'], columnIndex: number) {
+  if (typeof getPos !== 'function') return;
+  const columnsPos = getPos();
+  const columnsNode = editor.state.doc.nodeAt(columnsPos);
+  if (!columnsNode || columnsNode.type.name !== 'localColumnsBlock') return;
+  if (columnsNode.childCount <= 1) {
+    unwrapColumnsAt(editor, getPos);
+    return;
+  }
+
+  const safeRemoveIndex = Math.max(0, Math.min(columnIndex, columnsNode.childCount - 1));
+  const remainingCount = columnsNode.childCount - 1;
+  const nextChildren: ProseMirrorNode[] = [];
+
+  for (let index = 0; index < columnsNode.childCount; index += 1) {
+    if (index === safeRemoveIndex) continue;
+    const child = ensureColumnHasParagraph(editor.schema, columnsNode.child(index));
+    nextChildren.push(child.type.create({ ...child.attrs, widthRatio: 100 / remainingCount }, child.content));
+  }
+
+  const nextColumnsNode = columnsNode.type.create(columnsNode.attrs, Fragment.fromArray(nextChildren));
+  replaceColumnsNode(editor, columnsPos, columnsNode, nextColumnsNode, Math.min(safeRemoveIndex, remainingCount - 1));
 }
 
 export function resizeColumnsAt(
