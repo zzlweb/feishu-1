@@ -980,6 +980,7 @@ export default function Editor({
   const [slashMenuPos, setSlashMenuPos] = useState({ top: 0, left: 0 });
   const [slashQuery, setSlashQuery] = useState('');
   const [slashMenuFromPlus, setSlashMenuFromPlus] = useState(false);
+  const [slashMenuFromTableCellPlus, setSlashMenuFromTableCellPlus] = useState(false);
   const [pageLinkDialogVisible, setPageLinkDialogVisible] = useState(false);
   const [pageLinkPopPos, setPageLinkPopPos] = useState({ top: 0, left: 0 });
   const [pageLinkText, setPageLinkText] = useState('');
@@ -1034,6 +1035,7 @@ export default function Editor({
   const closeSlashMenu = useCallback(() => {
     setSlashMenuVisible(false);
     setSlashMenuFromPlus(false);
+    setSlashMenuFromTableCellPlus(false);
   }, []);
 
   const openPlusMenu = useCallback(() => {
@@ -1043,8 +1045,9 @@ export default function Editor({
       setSlashMenuPos(computePlusMenuPosition(btn.getBoundingClientRect()));
     }
     if (slashMenuVisible && slashMenuFromPlus) return;
-    setContextMenu(null);
-    setPlusHoveredState(true);
+      setContextMenu(null);
+      setSlashMenuFromTableCellPlus(false);
+      setPlusHoveredState(true);
     setSlashMenuFromPlus(true);
     setSlashQuery('');
     setSlashMenuVisible(true);
@@ -1399,6 +1402,7 @@ export default function Editor({
           setSlashMenuPos({ top: coords.bottom + 4, left: coords.left });
           setSlashQuery(query);
           setSlashMenuFromPlus(false);
+          setSlashMenuFromTableCellPlus(false);
           setSlashMenuVisible(true);
         } else {
           closeSlashMenu();
@@ -1654,6 +1658,25 @@ export default function Editor({
     window.addEventListener('feishu-open-page-link-dialog', openPageLinkDialog as EventListener);
     return () => window.removeEventListener('feishu-open-page-link-dialog', openPageLinkDialog as EventListener);
   }, [closeSlashMenu, editor, readOnly]);
+
+  useEffect(() => {
+    const openTableCellSlashMenu = (ev: Event) => {
+      if (!editor || readOnly) return;
+      const detail = (ev as CustomEvent<{ x?: number; y?: number }>).detail ?? {};
+      setContextMenu(null);
+      setSlashMenuFromPlus(false);
+      setSlashMenuFromTableCellPlus(true);
+      setSlashQuery('');
+      setSlashMenuPos({
+        left: typeof detail.x === 'number' ? detail.x : 0,
+        top: typeof detail.y === 'number' ? detail.y : 0,
+      });
+      setSlashMenuVisible(true);
+      editor.commands.focus();
+    };
+    window.addEventListener('feishu-open-table-cell-slash-menu', openTableCellSlashMenu as EventListener);
+    return () => window.removeEventListener('feishu-open-table-cell-slash-menu', openTableCellSlashMenu as EventListener);
+  }, [editor, readOnly]);
 
   useEffect(() => {
     setDocTitle(normalizeTitle(title));
@@ -1943,6 +1966,41 @@ export default function Editor({
       document.removeEventListener('scroll', updatePos, true);
     };
   }, [slashMenuVisible, slashMenuFromPlus, readOnly]);
+
+  useEffect(() => {
+    if (!slashMenuVisible || !slashMenuFromTableCellPlus || readOnly) return;
+    let closeTimer: ReturnType<typeof setTimeout> | null = null;
+    const cancelClose = () => {
+      if (closeTimer) {
+        clearTimeout(closeTimer);
+        closeTimer = null;
+      }
+    };
+    const scheduleClose = () => {
+      cancelClose();
+      closeTimer = setTimeout(() => {
+        closeTimer = null;
+        closeSlashMenu();
+      }, 160);
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        scheduleClose();
+        return;
+      }
+      if (target.closest('.slash-menu, .slash-submenu-portal, .feishu-table-chrome__cell-plus')) {
+        cancelClose();
+        return;
+      }
+      scheduleClose();
+    };
+    document.addEventListener('pointermove', handlePointerMove, true);
+    return () => {
+      cancelClose();
+      document.removeEventListener('pointermove', handlePointerMove, true);
+    };
+  }, [closeSlashMenu, readOnly, slashMenuFromTableCellPlus, slashMenuVisible]);
 
   if (!editor) return null;
 
@@ -2289,6 +2347,8 @@ export default function Editor({
           query={slashQuery}
           onClose={closeSlashMenu}
           onBeforeSelect={() => editor.commands.focus()}
+          onMouseEnter={slashMenuFromTableCellPlus ? () => blockHoverFloatingGroup.cancelClose() : undefined}
+          onMouseLeave={slashMenuFromTableCellPlus ? closeSlashMenu : undefined}
         />
       )}
       {slashMenuVisible && slashMenuFromPlus && (

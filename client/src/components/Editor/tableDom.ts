@@ -60,6 +60,12 @@ export function isCellSelectionInTableHost(editor: Editor, host: HTMLElement): b
 export type TableRailPin = { kind: 'col' | 'row'; index: number };
 
 const RAIL_SELECTED_CLASS = 'feishu-table__cell--rail-selected';
+const RAIL_SELECTED_ATTR = 'data-feishu-rail-selected';
+
+function syncRailHostClass(host: HTMLElement, pin: TableRailPin | null) {
+  host.classList.toggle('feishu-table-host--rail-col-selected', pin?.kind === 'col');
+  host.classList.toggle('feishu-table-host--rail-row-selected', pin?.kind === 'row');
+}
 
 /** 根据本地列/行选中状态同步单元格高亮 class（仅在 class 变化时写 DOM，避免 MutationObserver 死循环） */
 export function syncTableRailCellHighlight(
@@ -69,6 +75,7 @@ export function syncTableRailCellHighlight(
 ) {
   const table = getTableElementFromHost(host);
   if (!table) return;
+  syncRailHostClass(host, pin);
 
   const cells = Array.from(table.querySelectorAll('th, td'));
   const nextSelected = new Set<HTMLElement>();
@@ -85,14 +92,18 @@ export function syncTableRailCellHighlight(
           if (row < 0 || col < 0 || row >= map.height || col >= map.width) return;
           const cellPos = tableStart + map.map[row * map.width + col];
           const dom = editor.view.nodeDOM(cellPos);
-          if (dom instanceof HTMLElement) nextSelected.add(dom);
+          if (dom instanceof HTMLElement) {
+            const cellDom = dom.matches('td, th') ? dom : dom.closest('td, th');
+            if (cellDom instanceof HTMLElement) nextSelected.add(cellDom);
+          }
         };
+        const selectedBeforeMap = nextSelected.size;
         if (pin.kind === 'col') {
           for (let row = 0; row < map.height; row += 1) markCellAt(row, pin.index);
         } else {
           for (let col = 0; col < map.width; col += 1) markCellAt(pin.index, col);
         }
-        resolvedByMap = true;
+        resolvedByMap = nextSelected.size > selectedBeforeMap;
       }
     }
     if (!resolvedByMap) {
@@ -117,6 +128,8 @@ export function syncTableRailCellHighlight(
     const isSelected = cell.classList.contains(RAIL_SELECTED_CLASS);
     if (shouldSelect && !isSelected) cell.classList.add(RAIL_SELECTED_CLASS);
     else if (!shouldSelect && isSelected) cell.classList.remove(RAIL_SELECTED_CLASS);
+    if (shouldSelect) cell.setAttribute(RAIL_SELECTED_ATTR, 'true');
+    else cell.removeAttribute(RAIL_SELECTED_ATTR);
   });
 }
 

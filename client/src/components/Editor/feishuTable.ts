@@ -37,6 +37,141 @@ function isTableUiTarget(target: EventTarget | null): boolean {
   ));
 }
 
+function textNodeClientRectsContainPoint(root: Element, clientX: number, clientY: number): boolean {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if (node.textContent?.trim()) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = Array.from(range.getClientRects());
+      range.detach();
+      if (rects.some(rect => (
+        clientX >= rect.left - 2
+        && clientX <= rect.right + 2
+        && clientY >= rect.top - 2
+        && clientY <= rect.bottom + 2
+      ))) {
+        return true;
+      }
+    }
+    node = walker.nextNode();
+  }
+  return false;
+}
+
+function resolveCellElement(target: EventTarget | null): HTMLElement | null {
+  const element = closestElement(target);
+  const cell = element?.closest('td, th');
+  return cell instanceof HTMLElement ? cell : null;
+}
+
+function resolveCellSelectionPos(view: any, cell: HTMLElement): number | null {
+  try {
+    const pos = view.posAtDOM(cell, 0);
+    const $pos = view.state.doc.resolve(pos);
+    for (let depth = $pos.depth; depth > 0; depth -= 1) {
+      const node = $pos.node(depth);
+      if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+        return $pos.before(depth);
+      }
+    }
+    const after = view.state.doc.resolve(Math.min(pos + 1, view.state.doc.content.size));
+    for (let depth = after.depth; depth > 0; depth -= 1) {
+      const node = after.node(depth);
+      if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+        return after.before(depth);
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function findEditableCellTextPos(view: any, cell: HTMLElement, preferEnd: boolean): number | null {
+  const cellPos = resolveCellSelectionPos(view, cell);
+  if (cellPos == null) return null;
+  const cellNode = view.state.doc.nodeAt(cellPos);
+  if (!cellNode) return null;
+  const raw = preferEnd ? cellPos + Math.max(1, cellNode.nodeSize - 2) : cellPos + 1;
+  const pos = Math.max(0, Math.min(raw, view.state.doc.content.size));
+  try {
+    return TextSelection.near(view.state.doc.resolve(pos), preferEnd ? -1 : 1).from;
+  } catch {
+    return null;
+  }
+}
+
+function beginCellRangeDrag(view: any, event: MouseEvent, anchorCell: HTMLElement): boolean {
+  const anchorPos = resolveCellSelectionPos(view, anchorCell);
+  if (anchorPos == null) return false;
+
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const pointerId = event instanceof PointerEvent ? event.pointerId : null;
+  let dragging = false;
+
+  const setCellSelection = (targetCell: HTMLElement) => {
+    const headPos = resolveCellSelectionPos(view, targetCell);
+    if (headPos == null) return;
+    try {
+      const $anchor = view.state.doc.resolve(anchorPos);
+      const $head = view.state.doc.resolve(headPos);
+      view.dispatch(view.state.tr.setSelection(new CellSelection($anchor, $head)).scrollIntoView());
+    } catch {
+      // Ignore transient positions while the editor is mutating.
+    }
+  };
+
+  const onMove = (moveEvent: MouseEvent) => {
+    const dx = Math.abs(moveEvent.clientX - startX);
+    const dy = Math.abs(moveEvent.clientY - startY);
+    if (!dragging && dx < 4 && dy < 4) return;
+    dragging = true;
+    moveEvent.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    const hit = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+    const targetCell = hit?.closest('td, th');
+    if (targetCell instanceof HTMLElement) setCellSelection(targetCell);
+  };
+
+  const finish = (upEvent: MouseEvent) => {
+    document.removeEventListener('mousemove', onMove, true);
+    document.removeEventListener('mouseup', finish, true);
+    if (pointerId != null) {
+      try {
+        anchorCell.releasePointerCapture?.(pointerId);
+      } catch {
+        // Pointer capture may already have been released.
+      }
+    }
+    if (dragging) {
+      upEvent.preventDefault();
+      return;
+    }
+    const textPos = findEditableCellTextPos(view, anchorCell, true);
+    if (textPos != null) {
+      view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(textPos), -1)));
+      view.focus();
+    }
+  };
+
+  event.preventDefault();
+  event.stopPropagation();
+  window.getSelection()?.removeAllRanges();
+  if (pointerId != null) {
+    try {
+      anchorCell.setPointerCapture?.(pointerId);
+    } catch {
+      // Some browsers do not allow capture on table cells.
+    }
+  }
+  document.addEventListener('mousemove', onMove, true);
+  document.addEventListener('mouseup', finish, true);
+  return true;
+}
+
 function isSelectionInsideTable(selection: Selection): boolean {
   const $probe = selection instanceof CellSelection ? selection.$anchorCell : selection.$from;
   for (let depth = $probe.depth; depth > 0; depth -= 1) {
@@ -349,17 +484,7 @@ const FeishuTableInteractions = Extension.create({
           const tableDepth = selection.$anchorCell.depth - 1;
           return editor.chain().focus().setNodeSelection(selection.$anchorCell.before(tableDepth)).run();
         }
-        if (!isSelectionInsideTable(selection as TextSelection | NodeSelection | CellSelection)) return false;
-        const tableDepth = findTableDepth(selection.$from);
-        if (tableDepth == null) return false;
-        const tablePos = selection.$from.before(tableDepth);
-        const table = editor.state.doc.nodeAt(tablePos);
-        if (!table) return false;
-        const map = TableMap.get(table);
-        const firstCell = editor.state.doc.resolve(tablePos + 1 + map.map[0]);
-        const lastCell = editor.state.doc.resolve(tablePos + 1 + map.map[map.map.length - 1]);
-        editor.view.dispatch(editor.state.tr.setSelection(new CellSelection(firstCell, lastCell)));
-        return true;
+        return false;
       },
     };
   },
@@ -382,6 +507,10 @@ const FeishuTableInteractions = Extension.create({
               if (!tableHost) return false;
               document.querySelectorAll('.feishu-table-host.is-table-block-active, .tableWrapper.is-table-block-active')
                 .forEach(host => host.classList.remove('is-table-block-active'));
+              const cell = resolveCellElement(event.target);
+              if (cell && !textNodeClientRectsContainPoint(cell, event.clientX, event.clientY)) {
+                return beginCellRangeDrag(view, event, cell);
+              }
               if (view.state.selection instanceof NodeSelection) {
                 const pos = view.posAtDOM(element.closest('td, th') ?? tableHost, 0);
                 view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos), 1)));

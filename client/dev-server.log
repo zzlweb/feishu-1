@@ -1,0 +1,36 @@
+
+> feishu-doc-client@1.0.0 dev
+> vite --host 127.0.0.1 --port 5174
+
+Port 5174 is in use, trying another one...
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m382[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5175[22m/[39m
+[2m20:07:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:08:03[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.less[22m
+[2m20:14:06[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:14:13[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:14:29[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:14:40[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:14:53[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:15:10[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/Editor.tsx[22m
+[2m20:15:38[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.less[22m
+[2m20:17:25[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:20:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:20:21[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:30:24[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:30:41[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.less[22m
+[2m20:38:13[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:38:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.less[22m
+[2m20:38:46[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/Editor.tsx[22m
+[2m20:39:00[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/Editor.tsx[22m
+[2m20:39:08[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/Editor.tsx[22m
+[2m20:39:26[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/SelectionBubble.tsx[22m
+[2m20:40:04[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/SelectionBubble.tsx[22m
+[2m20:41:49[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/SelectionBubble.tsx[22m
+[2m20:45:14[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:46:17[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/FeishuTableOverlay.tsx[22m
+[2m20:46:23[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/SelectionBubble.tsx[22m
+[2m20:49:21[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/Editor.tsx[22m
+[2m20:50:44[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/Editor.tsx[22m

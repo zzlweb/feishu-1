@@ -190,6 +190,48 @@
     &:hover {
       background: #2b5cce;
     }
+
+    &[data-tooltip]::before,
+    &[data-tooltip]::after {
+      position: absolute;
+      left: 50%;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateX(-50%) translateY(4px);
+      transition:
+        opacity 0.12s ease,
+        transform 0.12s ease;
+    }
+
+    &[data-tooltip]::before {
+      content: attr(data-tooltip);
+      bottom: calc(100% + 12px);
+      min-width: 54px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: #1f2329;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 20px;
+      white-space: nowrap;
+      box-shadow: 0 8px 24px rgba(31, 35, 41, 0.18);
+    }
+
+    &[data-tooltip]::after {
+      content: '';
+      bottom: calc(100% + 5px);
+      width: 0;
+      height: 0;
+      border: 6px solid transparent;
+      border-top-color: #1f2329;
+    }
+
+    &:hover[data-tooltip]::before,
+    &:hover[data-tooltip]::after {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
   }
 
   &__rail-plus-icon {
@@ -312,6 +354,25 @@
 }
 
 /* 操作层在表格宿主内：JS 类 + --visible 控制轨道与灰点（不依赖 :has / 外层 hover） */
+.feishu-table-host--selection-pinned.feishu-table-host--rail-col-selected table.feishu-table .selectedCell,
+.tableWrapper.feishu-table-host--selection-pinned.feishu-table-host--rail-col-selected table.feishu-table .selectedCell,
+.feishu-table-host--selection-pinned.feishu-table-host--rail-row-selected table.feishu-table .selectedCell,
+.tableWrapper.feishu-table-host--selection-pinned.feishu-table-host--rail-row-selected table.feishu-table .selectedCell,
+.feishu-table-host--selection-pinned table.feishu-table .feishu-table__cell--rail-selected,
+.tableWrapper.feishu-table-host--selection-pinned table.feishu-table .feishu-table__cell--rail-selected {
+  background: @rail-selected-bg !important;
+  box-shadow: none !important;
+}
+
+/* 兜底：只要单元格带有 rail-selected 标记，就应用浅蓝底（不依赖宿主类，特指度高于 td 白底规则） */
+.feishu-table-host table.feishu-table .feishu-table__cell--rail-selected,
+.tableWrapper table.feishu-table .feishu-table__cell--rail-selected,
+.feishu-table-host table.feishu-table [data-feishu-rail-selected='true'],
+.tableWrapper table.feishu-table [data-feishu-rail-selected='true'] {
+  background: @rail-selected-bg !important;
+  box-shadow: none !important;
+}
+
 .feishu-table-host--chrome-hot .feishu-table-chrome__rail-top,
 .feishu-table-host--chrome-hot .feishu-table-chrome__rail-left,
 .tableWrapper.feishu-table-host--chrome-hot .feishu-table-chrome__rail-top,
@@ -359,12 +420,88 @@
   pointer-events: none;
   box-sizing: border-box;
   z-index: 10;
+  background: rgba(51, 112, 255, 0.10);
+
+  &--col {
+    border: 0;
+    background: rgba(51, 112, 255, 0.16);
+    box-shadow: none;
+  }
+
+  &--row {
+    border: 0;
+    border-left: 4px solid @blue;
+    background: rgba(51, 112, 255, 0.18);
+    box-shadow: inset 1px 0 0 rgba(51, 112, 255, 0.2);
+  }
+}
+
+.feishu-table-chrome__cell-plus {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 6px;
+  border: none;
+  border-radius: 4px;
   background: transparent;
+  color: #8f959e;
+  cursor: pointer;
+  line-height: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+  z-index: 24;
+  box-shadow: none;
+  transition:
+    color 0.12s ease,
+    border-color 0.12s ease,
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
+
+  &:hover {
+    color: @blue;
+    background: rgba(238, 242, 254, 0.65);
+    transform: translate(-50%, -50%);
+
+    .feishu-table-chrome__cell-plus-box {
+      border-color: rgba(51, 112, 255, 0.28);
+    }
+  }
+
+  &:active {
+    color: #245bdb;
+    background: rgba(228, 235, 252, 0.9);
+
+    .feishu-table-chrome__cell-plus-box {
+      border-color: rgba(51, 112, 255, 0.4);
+    }
+  }
+
+  &-box {
+    width: 24px;
+    height: 24px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #dee0e3;
+    border-radius: 4px;
+    background: #fff;
+    line-height: 0;
+
+    svg {
+      display: block;
+    }
+  }
 }
 
 .feishu-table-chrome__rail-block {
   position: absolute;
-  cursor: grab;
+  cursor: pointer;
   pointer-events: auto;
   z-index: 18;
   background-color: transparent;
@@ -381,22 +518,45 @@
     }
 
     &.is-selected {
-      background-color: @blue;
-      border-radius: 3px 3px 0 0;
+      background-color: @rail-selected-bg;
+
+      &::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 3px;
+        background: @blue;
+        border-radius: 2px 2px 0 0;
+        pointer-events: none;
+      }
     }
   }
 
   &--row {
     left: 0;
     right: 0;
+    cursor: pointer;
 
     &:hover:not(.is-selected) {
       background-color: darken(@rail-bg, 3%);
     }
 
     &.is-selected {
-      background-color: @blue;
-      border-radius: 3px 0 0 3px;
+      background-color: @rail-selected-bg;
+
+      &::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: @blue;
+        border-radius: 2px 0 0 2px;
+        pointer-events: none;
+      }
     }
   }
 }

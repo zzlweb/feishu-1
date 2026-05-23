@@ -3,7 +3,7 @@ import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { SlashGlyphTable } from '../../icons/slashMenuGlyphs';
-import { IconDragOutlined } from '../../icons/feishuDoc';
+import { IconAddOutlined, IconDragOutlined } from '../../icons/feishuDoc';
 import {
   getTableChromeMountFromHost,
   getTableElementFromHost,
@@ -29,7 +29,7 @@ import './FeishuTableOverlay.less';
 
 // Keep the rail at least as large as the hover hit target, otherwise the edge
 // insert button can be visually clipped on the first row/column.
-const RAIL = 12;
+const RAIL = 18;
 const HIT_MARGIN = 12;
 const DRAG_THRESHOLD = 4;
 const MIN_COL_WIDTH = 120;
@@ -116,16 +116,27 @@ function measureTableLayout(host: HTMLElement): TableLayout | null {
     rowBounds.push(r.bottom - originRect.top);
   }
 
-  const cells = trs[0] ? Array.from(trs[0].querySelectorAll('th, td')) : [];
+  const cols = Array.from(table.querySelectorAll('colgroup col'));
   const colBounds: number[] = [];
-  for (const cell of cells) {
-    const r = (cell as HTMLElement).getBoundingClientRect();
+  for (const col of cols) {
+    const r = (col as HTMLElement).getBoundingClientRect();
     colBounds.push(r.left - originRect.left);
   }
-  if (cells.length > 0) {
-    const last = cells[cells.length - 1] as HTMLElement;
+  if (cols.length > 0) {
+    const last = cols[cols.length - 1] as HTMLElement;
     const r = last.getBoundingClientRect();
     colBounds.push(r.right - originRect.left);
+  } else {
+    const cells = trs[0] ? Array.from(trs[0].querySelectorAll('th, td')) : [];
+    for (const cell of cells) {
+      const r = (cell as HTMLElement).getBoundingClientRect();
+      colBounds.push(r.left - originRect.left);
+    }
+    if (cells.length > 0) {
+      const last = cells[cells.length - 1] as HTMLElement;
+      const r = last.getBoundingClientRect();
+      colBounds.push(r.right - originRect.left);
+    }
   }
 
   const tableHeight = rowBounds.length > 0
@@ -177,6 +188,7 @@ type SelectedRail = 'col' | 'row' | null;
 type RailDragPreview = { kind: 'col' | 'row'; from: number; target: number; active: boolean } | null;
 type ColumnResizePreview = { colIndex: number; x: number; active: boolean } | null;
 type RowResizePreview = { rowIndex: number; y: number; active: boolean } | null;
+type CellPlusState = { left: number; top: number; row: number; col: number } | null;
 
 interface ColumnResizeSession {
   colIndex: number;
@@ -223,6 +235,7 @@ function FeishuTableOverlay({
   const [railDragPreview, setRailDragPreview] = useState<RailDragPreview>(null);
   const [columnResizePreview, setColumnResizePreview] = useState<ColumnResizePreview>(null);
   const [rowResizePreview, setRowResizePreview] = useState<RowResizePreview>(null);
+  const [cellPlus, setCellPlus] = useState<CellPlusState>(null);
 
   const tableHoverRef = useRef(false);
   const handleHoverRef = useRef(false);
@@ -236,6 +249,7 @@ function FeishuTableOverlay({
   const remeasureFrameRef = useRef<number | null>(null);
   const columnResizeSessionRef = useRef<ColumnResizeSession | null>(null);
   const rowResizeSessionRef = useRef<RowResizeSession | null>(null);
+  const cellPlusOpenKeyRef = useRef<string | null>(null);
 
   tableSelectionPinnedRef.current = tableSelectionPinned;
   pinnedRailRef.current = pinnedRail;
@@ -248,6 +262,20 @@ function FeishuTableOverlay({
     setHoverCol(null);
     setHoverRow(null);
   }, []);
+
+  const openCellInsertMenu = useCallback(
+    (row: number, col: number, clientX: number, clientY: number) => {
+      const tablePos = getTablePosFromHost(editor, tableHost);
+      if (tablePos == null) return;
+      const cellPos = resolveTableCellPos(editor, tablePos, row, col);
+      if (cellPos == null) return;
+      editor.chain().focus().setTextSelection(cellPos + 1).run();
+      window.dispatchEvent(new CustomEvent('feishu-open-table-cell-slash-menu', {
+        detail: { x: clientX + 8, y: clientY + 8 },
+      }));
+    },
+    [editor, tableHost],
+  );
 
   const cancelHideChrome = useCallback(() => {
     if (hideChromeTimerRef.current != null) {
@@ -384,6 +412,19 @@ function FeishuTableOverlay({
         || (pin != null && prev != null && pin.kind === prev.kind && pin.index === prev.index);
       if (samePin) {
         syncTableRailCellHighlight(tableHost, pin, editor);
+        if (pin) {
+          tableSelectionPinnedRef.current = true;
+          setTableSelectionPinned(true);
+          setRailSelectionKind(pin.kind);
+          setSelectionRange({
+            left: pin.kind === 'col' ? pin.index : 0,
+            right: pin.kind === 'col' ? pin.index + 1 : Math.max(0, (layout?.colBounds.length ?? 1) - 1),
+            top: pin.kind === 'row' ? pin.index : 0,
+            bottom: pin.kind === 'row' ? pin.index + 1 : Math.max(0, (layout?.rowBounds.length ?? 1) - 1),
+          });
+          tableHost.classList.add('feishu-table-host--selection-pinned');
+          activateTableChrome();
+        }
         return;
       }
 
@@ -404,14 +445,14 @@ function FeishuTableOverlay({
       setRailSelectionKind(pin.kind);
       setSelectionRange({
         left: pin.kind === 'col' ? pin.index : 0,
-        right: pin.kind === 'col' ? pin.index + 1 : 0,
+        right: pin.kind === 'col' ? pin.index + 1 : Math.max(0, (layout?.colBounds.length ?? 1) - 1),
         top: pin.kind === 'row' ? pin.index : 0,
-        bottom: pin.kind === 'row' ? pin.index + 1 : 0,
+        bottom: pin.kind === 'row' ? pin.index + 1 : Math.max(0, (layout?.rowBounds.length ?? 1) - 1),
       });
       tableHost.classList.add('feishu-table-host--selection-pinned');
       activateTableChrome();
     },
-    [activateTableChrome, editor, tableHost],
+    [activateTableChrome, editor, layout, tableHost],
   );
 
   const selectColumn = useCallback(
@@ -474,6 +515,8 @@ function FeishuTableOverlay({
       e.currentTarget.setPointerCapture?.(e.pointerId);
       activateTableChrome();
       clearHover();
+      if (kind === 'col') selectColumn(index);
+      else selectRow(index);
 
       const pointerId = e.pointerId;
       const targetEl = e.currentTarget;
@@ -521,8 +564,6 @@ function FeishuTableOverlay({
         event.stopPropagation();
 
         if (!dragging) {
-          if (kind === 'col') selectColumn(index);
-          else selectRow(index);
           return;
         }
 
@@ -807,6 +848,8 @@ function FeishuTableOverlay({
     setSelectionRange(null);
     setRailSelectionKind(null);
     tableHost.classList.remove('feishu-table-host--selection-pinned');
+    tableHost.classList.remove('feishu-table-host--rail-col-selected');
+    tableHost.classList.remove('feishu-table-host--rail-row-selected');
     if (!tableHoverRef.current && !handleHoverRef.current && !pinChromeRef.current) {
       syncHostChromeHot(tableHost, false);
       chromeVisibleRef.current = false;
@@ -882,6 +925,68 @@ function FeishuTableOverlay({
   useLayoutEffect(() => {
     syncTableRailCellHighlight(tableHost, pinnedRailRef.current, editor);
   }, [editor, pinnedRail, tableHost]);
+
+  useLayoutEffect(() => {
+    const table = getTableElementFromHost(tableHost);
+    if (!table) return undefined;
+
+    const syncFromCell = (cell: HTMLElement | null) => {
+      if (!cell || pinnedRailRef.current || columnResizeSessionRef.current || rowResizeSessionRef.current) {
+        setCellPlus(prev => (prev == null ? prev : null));
+        return;
+      }
+      const mountRect = getTableChromeMountFromHost(tableHost).getBoundingClientRect();
+      const cellRect = cell.getBoundingClientRect();
+      const row = Number(cell.getAttribute('data-row-index') ?? cell.dataset.rowIndex ?? 0);
+      const col = Number(cell.getAttribute('data-col-index') ?? cell.dataset.colIndex ?? 0);
+      const key = `${row}:${col}`;
+      if (cellPlusOpenKeyRef.current && cellPlusOpenKeyRef.current !== key) {
+        cellPlusOpenKeyRef.current = null;
+      }
+      const left = cellRect.left - mountRect.left + Math.min(38, Math.max(24, cellRect.width / 2));
+      const top = cellRect.top - mountRect.top + cellRect.height / 2;
+      setCellPlus(prev =>
+        prev
+        && prev.row === row
+        && prev.col === col
+        && Math.abs(prev.left - left) < 0.5
+        && Math.abs(prev.top - top) < 0.5
+          ? prev
+          : { left, top, row, col },
+      );
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('.feishu-table-chrome__cell-plus, .selection-bubble, .context-menu, .slash-menu')) return;
+      const cell = target.closest('[data-table-cell="true"], td, th') as HTMLElement | null;
+      if (!cell || !table.contains(cell)) {
+        setCellPlus(prev => (prev == null ? prev : null));
+        return;
+      }
+      activateTableChrome();
+      syncFromCell(cell);
+    };
+
+    const onPointerLeave = (event: PointerEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Element && next.closest('.feishu-table-chrome__cell-plus, .slash-menu')) return;
+      cellPlusOpenKeyRef.current = null;
+      setCellPlus(prev => (prev == null ? prev : null));
+    };
+
+    table.addEventListener('pointermove', onPointerMove);
+    table.addEventListener('pointerleave', onPointerLeave);
+    if (table.matches(':hover')) {
+      activateTableChrome();
+      syncFromCell(table.querySelector('[data-table-cell="true"]:hover, td:hover, th:hover') as HTMLElement | null);
+    }
+    return () => {
+      table.removeEventListener('pointermove', onPointerMove);
+      table.removeEventListener('pointerleave', onPointerLeave);
+    };
+  }, [activateTableChrome, tableHost]);
 
   // 同步 PM 选区到本地（本地 pinnedRail 为视觉主状态，不被 PM 失败误清）
   useLayoutEffect(() => {
@@ -1129,6 +1234,7 @@ function FeishuTableOverlay({
               type="button"
               className="feishu-table-chrome__rail-plus feishu-table-chrome__rail-plus--col"
               data-no-marquee-selection="true"
+              data-tooltip="插入列"
               aria-label="插入列"
               onMouseDown={e => e.preventDefault()}
               onMouseEnter={() => {
@@ -1213,6 +1319,7 @@ function FeishuTableOverlay({
                 type="button"
                 className="feishu-table-chrome__rail-plus feishu-table-chrome__rail-plus--row"
                 data-no-marquee-selection="true"
+                data-tooltip="插入行"
                 aria-label="插入行"
                 onMouseDown={e => e.preventDefault()}
                 onMouseEnter={() => {
@@ -1324,9 +1431,13 @@ function FeishuTableOverlay({
         />
       )}
 
-      {selectionRange && railSelectionKind === 'cell' && (
+      {selectionRange
+        && colBounds[selectionRange.left] != null
+        && colBounds[selectionRange.right] != null
+        && rowBounds[selectionRange.top] != null
+        && rowBounds[selectionRange.bottom] != null && (
         <div
-          className="feishu-table-chrome__selection-outline"
+          className={`feishu-table-chrome__selection-outline feishu-table-chrome__selection-outline--${railSelectionKind ?? 'cell'}`}
           style={{
             left: colBounds[selectionRange.left],
             top: rowBounds[selectionRange.top],
@@ -1334,6 +1445,39 @@ function FeishuTableOverlay({
             height: rowBounds[selectionRange.bottom] - rowBounds[selectionRange.top],
           }}
         />
+      )}
+
+      {showChrome && !pinnedRail && !railDragPreview?.active && !columnResizePreview?.active && !rowResizePreview?.active && cellPlus && (
+        <button
+          type="button"
+          className="feishu-table-chrome__cell-plus"
+          data-no-marquee-selection="true"
+          data-floating-panel="true"
+          style={{ left: cellPlus.left, top: cellPlus.top }}
+          aria-label="插入内容"
+          onMouseDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onPointerEnter={activateTableChrome}
+          onMouseEnter={e => {
+            activateTableChrome();
+            const key = `${cellPlus.row}:${cellPlus.col}`;
+            if (cellPlusOpenKeyRef.current === key) return;
+            cellPlusOpenKeyRef.current = key;
+            openCellInsertMenu(cellPlus.row, cellPlus.col, e.clientX, e.clientY);
+          }}
+          onClick={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            activateTableChrome();
+            openCellInsertMenu(cellPlus.row, cellPlus.col, e.clientX, e.clientY);
+          }}
+        >
+          <span className="feishu-table-chrome__cell-plus-box">
+            <IconAddOutlined size={14} color="currentColor" />
+          </span>
+        </button>
       )}
 
       {!suppressInsertChrome && hoverRow != null && (

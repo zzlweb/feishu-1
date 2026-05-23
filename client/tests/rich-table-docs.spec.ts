@@ -93,6 +93,51 @@ test('selects a rectangular cell range in either drag direction', async ({ page 
   await expect(page.locator('td.selectedCell')).toHaveCount(9);
 });
 
+test('selects and highlights a full column from the column rail', async ({ page }) => {
+  await openRichTable(page);
+
+  const host = page.locator('.feishu-table-host, .tableWrapper').first();
+  await host.hover();
+  const secondColumnRail = page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--col').nth(1);
+  await expect(secondColumnRail).toBeVisible();
+  await secondColumnRail.click();
+
+  await expect(host).toHaveClass(/feishu-table-host--rail-col-selected|tableWrapper.*feishu-table-host--rail-col-selected/);
+  await expect(page.locator('.feishu-table-chrome__selection-outline--col')).toBeVisible();
+  await expect(secondColumnRail).toHaveClass(/is-selected/);
+});
+
+test('selects and highlights a full row from the row rail', async ({ page }) => {
+  await openRichTable(page);
+
+  const host = page.locator('.feishu-table-host, .tableWrapper').first();
+  await host.hover();
+  const secondRowRail = page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--row').nth(1);
+  await expect(secondRowRail).toBeVisible();
+  await secondRowRail.click();
+
+  await expect(host).toHaveClass(/feishu-table-host--rail-row-selected|tableWrapper.*feishu-table-host--rail-row-selected/);
+  await expect(page.locator('.feishu-table-chrome__selection-outline--row')).toBeVisible();
+  await expect(secondRowRail).toHaveClass(/is-selected/);
+});
+
+test('opens the table-cell insert menu by hovering the in-cell plus button', async ({ page }) => {
+  await openRichTable(page);
+
+  const firstCell = page.locator('td[data-table-cell="true"]').first();
+  const box = await firstCell.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + 30, box!.y + box!.height / 2);
+
+  const plus = page.locator('.feishu-table-chrome__cell-plus').first();
+  await expect(plus).toBeVisible();
+
+  await expect(page.locator('.slash-menu').first()).toBeVisible();
+  await page.mouse.move(20, 20);
+  await expect(page.locator('.slash-menu').first()).toBeHidden();
+  await expect(firstCell.locator('.ProseMirror-selectednode')).toHaveCount(0);
+});
+
 test('resizes columns and rows without creating native text selection', async ({ page }) => {
   await openRichTable(page);
 

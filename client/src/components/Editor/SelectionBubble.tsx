@@ -164,7 +164,7 @@ function shouldShowBubble({
   const isChildOfMenu = element.contains(document.activeElement);
   const hasEditorFocus = view.hasFocus() || isChildOfMenu;
 
-  if (!hasEditorFocus || (!isCellSelection && empty) || isEmptyTextBlock || !editor.isEditable) {
+  if ((!isCellSelection && !hasEditorFocus) || (!isCellSelection && empty) || isEmptyTextBlock || !editor.isEditable) {
     return false;
   }
   if (document.querySelector('.context-menu')) return false;
@@ -316,6 +316,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   const tableDeleteRef = useRef<HTMLDivElement>(null);
   const linkInputRef = useRef<HTMLInputElement>(null);
   const moreHeadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCellSelectionRef = useRef<CellSelection | null>(null);
   const [showHeadingMoreFlyout, setShowHeadingMoreFlyout] = useState(false);
 
   const cancelMoreHeadingClose = useCallback(() => {
@@ -331,13 +332,31 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   }, [cancelMoreHeadingClose]);
 
   useEffect(() => {
-    const onSel = () => refresh();
+    const onSel = () => {
+      if (editor.state.selection instanceof CellSelection) {
+        lastCellSelectionRef.current = editor.state.selection;
+      }
+      refresh();
+    };
     editor.on('selectionUpdate', onSel);
     editor.on('transaction', onSel);
     return () => {
       editor.off('selectionUpdate', onSel);
       editor.off('transaction', onSel);
     };
+  }, [editor]);
+
+  const runWithCellSelection = useCallback((action: () => void) => {
+    const saved = lastCellSelectionRef.current;
+    if (saved && !(editor.state.selection instanceof CellSelection)) {
+      try {
+        editor.view.dispatch(editor.state.tr.setSelection(saved));
+      } catch {
+        lastCellSelectionRef.current = null;
+      }
+    }
+    editor.view.focus();
+    action();
   }, [editor]);
 
   useEffect(() => {
@@ -469,9 +488,10 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
             <button
               type="button"
               className="selection-bubble-btn"
+              data-table-toolbar-action="merge-split"
               disabled={!canMergeCells && !canSplitCell}
               onMouseDown={e => e.preventDefault()}
-              onClick={() => mergeOrSplitSelectedCells(editor)}
+              onClick={() => runWithCellSelection(() => mergeOrSplitSelectedCells(editor))}
               title={canSplitCell ? '拆分单元格' : '合并单元格'}
             >
               <SelGlyphTableMerge size={GLYPH} />
@@ -480,6 +500,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
               <button
                 type="button"
                 className="selection-bubble-btn"
+                data-table-toolbar-action="cell-background"
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => setShowTableCellColorMenu(!showTableCellColorMenu)}
                 title="单元格背景色"
@@ -495,11 +516,12 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                         key={c.label}
                         type="button"
                         className="selection-bubble-table-color-cell"
+                        data-table-cell-bg-color={c.value ?? 'default'}
                         style={{ background: c.color, borderColor: c.border }}
                         title={c.label}
                         onMouseDown={e => e.preventDefault()}
                         onClick={() => {
-                          setSelectedTableCellBackground(editor, c.value);
+                          runWithCellSelection(() => setSelectedTableCellBackground(editor, c.value));
                           setShowTableCellColorMenu(false);
                         }}
                       />
@@ -510,7 +532,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-table-color-reset"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      setSelectedTableCellBackground(editor, null);
+                      runWithCellSelection(() => setSelectedTableCellBackground(editor, null));
                       setShowTableCellColorMenu(false);
                     }}
                   >
@@ -769,7 +791,11 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className={`selection-bubble-menu-item ${currentAlign === a.key ? 'active' : ''}`}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      setTextAlignment(editor, a.key);
+                      if (editor.state.selection instanceof CellSelection || lastCellSelectionRef.current) {
+                        runWithCellSelection(() => setTextAlignment(editor, a.key));
+                      } else {
+                        setTextAlignment(editor, a.key);
+                      }
                       setShowAlignMenu(false);
                     }}
                   >
@@ -828,8 +854,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
           <button
             type="button"
             className={`selection-bubble-btn ${editor.isActive('bold') ? 'active' : ''}`}
+            data-selection-action="bold"
             onMouseDown={e => e.preventDefault()}
-            onClick={() => editor.chain().focus().toggleBold().run()}
+            onClick={() => runWithCellSelection(() => editor.chain().focus().toggleBold().run())}
             title="粗体"
           >
             <SelGlyphBold size={GLYPH} />
@@ -837,8 +864,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
           <button
             type="button"
             className={`selection-bubble-btn ${editor.isActive('strike') ? 'active' : ''}`}
+            data-selection-action="strike"
             onMouseDown={e => e.preventDefault()}
-            onClick={() => editor.chain().focus().toggleStrike().run()}
+            onClick={() => runWithCellSelection(() => editor.chain().focus().toggleStrike().run())}
             title="删除线"
           >
             <SelGlyphStrike size={GLYPH} />
@@ -846,8 +874,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
           <button
             type="button"
             className={`selection-bubble-btn ${editor.isActive('italic') ? 'active' : ''}`}
+            data-selection-action="italic"
             onMouseDown={e => e.preventDefault()}
-            onClick={() => editor.chain().focus().toggleItalic().run()}
+            onClick={() => runWithCellSelection(() => editor.chain().focus().toggleItalic().run())}
             title="斜体"
           >
             <SelGlyphItalic size={GLYPH} />
@@ -855,8 +884,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
           <button
             type="button"
             className={`selection-bubble-btn ${editor.isActive('underline') ? 'active' : ''}`}
+            data-selection-action="underline"
             onMouseDown={e => e.preventDefault()}
-            onClick={() => editor.chain().focus().toggleUnderline().run()}
+            onClick={() => runWithCellSelection(() => editor.chain().focus().toggleUnderline().run())}
             title="下划线"
           >
             <SelGlyphUnderline size={GLYPH} />
@@ -927,8 +957,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
           <button
             type="button"
             className={`selection-bubble-btn ${editor.isActive('code') ? 'active' : ''}`}
+            data-selection-action="inline-code"
             onMouseDown={e => e.preventDefault()}
-            onClick={() => editor.chain().focus().toggleCode().run()}
+            onClick={() => runWithCellSelection(() => editor.chain().focus().toggleCode().run())}
             title="行内代码"
           >
             <SelGlyphCode size={GLYPH} />
@@ -962,6 +993,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
               <button
                 type="button"
                 className={`selection-bubble-btn ${showTableOptions ? 'active' : ''}`}
+                data-table-toolbar-action="table-options"
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => setShowTableOptions(!showTableOptions)}
                 title="表格配置"
@@ -1011,7 +1043,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-menu-item"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      distributeSelectedTableColumns(editor);
+                      runWithCellSelection(() => distributeSelectedTableColumns(editor));
                       setShowTableOptions(false);
                     }}
                   >
@@ -1024,6 +1056,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
               <button
                 type="button"
                 className={`selection-bubble-btn ${showTableInsert ? 'active' : ''}`}
+                data-table-toolbar-action="insert"
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => setShowTableInsert(!showTableInsert)}
                 title="插入行列"
@@ -1037,7 +1070,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-menu-item"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      insertTableColumn(editor, 'before');
+                      runWithCellSelection(() => insertTableColumn(editor, 'before'));
                       setShowTableInsert(false);
                     }}
                   >
@@ -1048,7 +1081,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-menu-item"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      insertTableColumn(editor, 'after');
+                      runWithCellSelection(() => insertTableColumn(editor, 'after'));
                       setShowTableInsert(false);
                     }}
                   >
@@ -1059,7 +1092,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-menu-item"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      insertTableRow(editor, 'before');
+                      runWithCellSelection(() => insertTableRow(editor, 'before'));
                       setShowTableInsert(false);
                     }}
                   >
@@ -1070,7 +1103,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-menu-item"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      insertTableRow(editor, 'after');
+                      runWithCellSelection(() => insertTableRow(editor, 'after'));
                       setShowTableInsert(false);
                     }}
                   >
@@ -1083,6 +1116,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
               <button
                 type="button"
                 className={`selection-bubble-btn ${showTableDelete ? 'active' : ''}`}
+                data-table-toolbar-action="delete"
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => setShowTableDelete(!showTableDelete)}
                 title="删除"
@@ -1096,7 +1130,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-menu-item"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      removeSelectedTableColumn(editor);
+                      runWithCellSelection(() => removeSelectedTableColumn(editor));
                       setShowTableDelete(false);
                     }}
                   >
@@ -1107,7 +1141,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-menu-item"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      removeSelectedTableRow(editor);
+                      runWithCellSelection(() => removeSelectedTableRow(editor));
                       setShowTableDelete(false);
                     }}
                   >
@@ -1118,7 +1152,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     className="selection-bubble-menu-item context-menu-item--danger"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      removeActiveTable(editor);
+                      runWithCellSelection(() => removeActiveTable(editor));
                       setShowTableDelete(false);
                     }}
                   >
