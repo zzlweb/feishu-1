@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 
 export interface FloatingPanelPosition {
   x: number;
@@ -36,84 +36,57 @@ export function computeBlockPanelPosition(
   return { x, y: clampPanelY(anchor, menuH, pad) };
 }
 
-interface PanelBox {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-function panelOverlapsAnchor(panel: PanelBox, anchor: DOMRect, gap: number): boolean {
-  const panelRight = panel.left + panel.width;
-  const panelBottom = panel.top + panel.height;
-  const overlapsX = panel.left < anchor.right + gap && panelRight > anchor.left - gap;
-  const overlapsY = panel.top < anchor.bottom + gap && panelBottom > anchor.top - gap;
-  return overlapsX && overlapsY;
-}
-
-function resolveFloatingPanelPosition(
-  x: number,
-  y: number,
-  panel: PanelBox,
-  pad: number,
-  anchor?: DOMRect | null,
-  anchorGap = 6,
+function clampFloatingPanelPosition(
+  next: FloatingPanelPosition,
+  menuW: number,
+  menuH: number,
+  pad = 8,
 ): FloatingPanelPosition {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  let nextX = Math.max(pad, Math.min(x, vw - panel.width - pad));
-  let nextY = Math.max(pad, Math.min(y, vh - panel.height - pad));
-
-  if (!anchor) return { x: nextX, y: nextY };
-
-  const box = (): PanelBox => ({ left: nextX, top: nextY, width: panel.width, height: panel.height });
-  if (!panelOverlapsAnchor(box(), anchor, anchorGap)) {
-    return { x: nextX, y: nextY };
-  }
-
-  const belowY = anchor.bottom + anchorGap;
-  if (belowY + panel.height <= vh - pad) {
-    nextY = belowY;
-  } else {
-    const aboveY = anchor.top - anchorGap - panel.height;
-    if (aboveY >= pad) nextY = aboveY;
-  }
-
-  const leftX = anchor.left - anchorGap - panel.width;
-  if (leftX >= pad) nextX = leftX;
-
-  if (panelOverlapsAnchor(box(), anchor, anchorGap)) {
-    nextY = Math.max(pad, Math.min(belowY, vh - panel.height - pad));
-  }
-
-  return { x: nextX, y: nextY };
+  return {
+    x: Math.max(pad, Math.min(next.x, vw - menuW - pad)),
+    y: Math.max(pad, Math.min(next.y, vh - menuH - pad)),
+  };
 }
 
-export function useFloatingPanelPosition(
-  x: number,
-  y: number,
+/** 块/表格配置菜单：直接读取锚点 DOM，portal 到 body 后仍与块柄对齐 */
+export function useAnchoredContextMenuPosition(
+  anchorRef: RefObject<HTMLElement | null> | undefined,
   panelRef: RefObject<HTMLElement | null>,
-  pad = 8,
-  anchorRef?: RefObject<HTMLElement | null>,
+  fallback: FloatingPanelPosition,
+  computePosition: (anchor: DOMRect, menuW: number, menuH: number) => FloatingPanelPosition = computeBlockPanelPosition,
 ) {
-  const [finalPos, setFinalPos] = useState<FloatingPanelPosition>({ x, y });
+  const [finalPos, setFinalPos] = useState<FloatingPanelPosition>(fallback);
   const [posVisible, setPosVisible] = useState(false);
 
   useLayoutEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
-    const rect = panel.getBoundingClientRect();
-    const anchor = anchorRef?.current?.getBoundingClientRect() ?? null;
-    const next = resolveFloatingPanelPosition(
-      x,
-      y,
-      { left: 0, top: 0, width: rect.width, height: rect.height },
-      pad,
-      anchor,
-    );
-    setFinalPos(next);
-    setPosVisible(true);
-  }, [x, y, panelRef, pad, anchorRef]);
+
+    const update = () => {
+      const panelRect = panel.getBoundingClientRect();
+      const menuW = panelRect.width || 236;
+      const menuH = panelRect.height || 420;
+      const anchorEl = anchorRef?.current;
+      const raw = anchorEl?.isConnected
+        ? computePosition(anchorEl.getBoundingClientRect(), menuW, menuH)
+        : fallback;
+      const next = clampFloatingPanelPosition(raw, menuW, menuH);
+      setFinalPos(prev => (prev.x === next.x && prev.y === next.y ? prev : next));
+      setPosVisible(true);
+    };
+
+    update();
+    const raf = window.requestAnimationFrame(update);
+    window.addEventListener('resize', update);
+    document.addEventListener('scroll', update, true);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener('resize', update);
+      document.removeEventListener('scroll', update, true);
+    };
+  }, [anchorRef, panelRef, fallback.x, fallback.y, computePosition]);
 
   return { finalPos, posVisible };
 }
@@ -131,4 +104,69 @@ export function isPointerWithinFloatingShell(
     if (next.closest(selector)) return true;
   }
   return false;
+}
+
+export interface HoverFloatingGroupOptions {
+  refs?: Array<RefObject<HTMLElement | null> | undefined>;
+  selectors?: string[];
+  closeDelay?: number;
+  onClose?: () => void;
+}
+
+export function useHoverFloatingGroup({
+  refs = [],
+  selectors = [],
+  closeDelay = 160,
+  onClose,
+}: HoverFloatingGroupOptions) {
+  const closeTimerRef = useRef<number | null>(null);
+  const onCloseRef = useRef(onClose);
+  const refsRef = useRef(refs);
+  const selectorsRef = useRef(selectors);
+
+  onCloseRef.current = onClose;
+  refsRef.current = refs;
+  selectorsRef.current = selectors;
+
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current == null) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+
+  const containsTarget = useCallback((target: EventTarget | null) => {
+    return isPointerWithinFloatingShell(target, refsRef.current, selectorsRef.current);
+  }, []);
+
+  const scheduleClose = useCallback((target?: EventTarget | null) => {
+    if (target && containsTarget(target)) {
+      cancelClose();
+      return;
+    }
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      const active = document.activeElement;
+      if (active && containsTarget(active)) return;
+      onCloseRef.current?.();
+    }, closeDelay);
+  }, [cancelClose, closeDelay, containsTarget]);
+
+  const getHoverProps = useCallback(() => ({
+    onPointerEnter: () => {
+      cancelClose();
+    },
+    onPointerLeave: (event: ReactPointerEvent<HTMLElement>) => {
+      scheduleClose(event.relatedTarget);
+    },
+  }), [cancelClose, scheduleClose]);
+
+  useEffect(() => () => cancelClose(), [cancelClose]);
+
+  return {
+    cancelClose,
+    scheduleClose,
+    containsTarget,
+    getHoverProps,
+  };
 }

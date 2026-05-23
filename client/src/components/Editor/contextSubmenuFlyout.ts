@@ -35,6 +35,9 @@ export function computeSubmenuFlyoutPosition(input: ComputeSubmenuFlyoutInput): 
 }
 
 export const ADD_BELOW_FLYOUT_MAX_HEIGHT = 646;
+export const COLOR_FLYOUT_WIDTH = 252;
+/** 颜色面板实际内容高度约 220–240px；勿用 max-height(420) 参与定位，否则会错误触发底对齐 */
+export const COLOR_FLYOUT_ESTIMATED_HEIGHT = 236;
 
 export function clampFlyoutHeight(measured: number, pad = 8): number {
   return Math.min(ADD_BELOW_FLYOUT_MAX_HEIGHT, measured, window.innerHeight - 2 * pad);

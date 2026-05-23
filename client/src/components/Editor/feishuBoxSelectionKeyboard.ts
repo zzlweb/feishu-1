@@ -1,5 +1,5 @@
 import { Extension, type Editor } from '@tiptap/core';
-import { boxSelectionStore, deleteSelectableUnits } from './boxSelectionModel';
+import { boxSelectionStore, collectSelectableUnits, copySelectableUnits, deleteSelectableUnits } from './boxSelectionModel';
 
 function deleteBoxSelection(editor: Editor): boolean {
   const store = boxSelectionStore;
@@ -25,6 +25,20 @@ export const FeishuBoxSelectionKeyboard = Extension.create({
         if (!boxSelectionStore?.isActive()) return false;
         boxSelectionStore.clearSelection();
         editor.commands.focus();
+        return true;
+      },
+      'Mod-c': ({ editor }) => {
+        if (!boxSelectionStore?.isActive()) return false;
+        void copySelectableUnits(editor, boxSelectionStore.getSelectedUnits());
+        return true;
+      },
+      'Mod-a': ({ editor }) => {
+        if (!boxSelectionStore || editor.state.selection.from !== editor.state.selection.to) return false;
+        const active = document.activeElement;
+        if (active && active !== editor.view.dom) return false;
+        const units = collectSelectableUnits(editor);
+        if (units.length === 0) return false;
+        boxSelectionStore.selectUnits?.(units);
         return true;
       },
     };

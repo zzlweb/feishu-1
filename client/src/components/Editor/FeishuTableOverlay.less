@@ -201,7 +201,8 @@
   }
 
   &__insert-col,
-  &__insert-row {
+  &__insert-row,
+  &__resize-line {
     position: absolute;
     z-index: 3;
     pointer-events: none;
@@ -215,6 +216,78 @@
   &__insert-row {
     height: 2px;
     margin-top: -1px;
+  }
+
+  &__resize-col {
+    position: absolute;
+    width: 9px;
+    margin-left: -4px;
+    z-index: 17;
+    cursor: col-resize;
+    pointer-events: auto;
+    touch-action: none;
+    user-select: none;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 4px;
+      width: 1px;
+      background: transparent;
+      transition: background-color 0.12s ease;
+    }
+
+    &:hover::after {
+      width: 2px;
+      background: @blue;
+    }
+  }
+
+  &__resize-row {
+    position: absolute;
+    height: 9px;
+    margin-top: -4px;
+    z-index: 17;
+    cursor: row-resize;
+    pointer-events: auto;
+    touch-action: none;
+    user-select: none;
+
+    &::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 4px;
+      height: 1px;
+      background: transparent;
+      transition: background-color 0.12s ease;
+    }
+
+    &:hover::after {
+      height: 2px;
+      background: @blue;
+    }
+  }
+
+  &__resize-line {
+    z-index: 20;
+
+    &--col {
+      width: 2px;
+      margin-left: -1px;
+      background: @blue;
+      box-shadow: 0 0 0 1px rgba(51, 112, 255, 0.12);
+    }
+
+    &--row {
+      height: 2px;
+      margin-top: -1px;
+      background: @blue;
+      box-shadow: 0 0 0 1px rgba(51, 112, 255, 0.12);
+    }
   }
 
   &__line {
@@ -291,10 +364,12 @@
 
 .feishu-table-chrome__rail-block {
   position: absolute;
-  cursor: pointer;
+  cursor: grab;
   pointer-events: auto;
-  z-index: 14;
+  z-index: 18;
   background-color: transparent;
+  touch-action: none;
+  user-select: none;
   transition: background-color 0.12s ease;
 
   &--col {
@@ -306,19 +381,8 @@
     }
 
     &.is-selected {
-      background-color: @rail-selected-bg;
-
-      &::after {
-        content: '';
-        position: absolute;
-        left: 0;
-        right: 0;
-        top: 0;
-        height: 3px;
-        background: @blue;
-        border-radius: 2px 2px 0 0;
-        pointer-events: none;
-      }
+      background-color: @blue;
+      border-radius: 3px 3px 0 0;
     }
   }
 
@@ -331,24 +395,68 @@
     }
 
     &.is-selected {
-      background-color: @rail-selected-bg;
-
-      &::after {
-        content: '';
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 3px;
-        background: @blue;
-        border-radius: 2px 0 0 2px;
-        pointer-events: none;
-      }
+      background-color: @blue;
+      border-radius: 3px 0 0 3px;
     }
   }
 }
 
 /* 列/行选中：单元格浅蓝高亮（本地 rail 选中 + ProseMirror selectedCell） */
+.feishu-table-chrome--dragging {
+  user-select: none;
+
+  .feishu-table-chrome__rail-block {
+    cursor: grabbing;
+  }
+
+  .feishu-table-chrome__hit {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.feishu-table-host--column-resizing {
+  cursor: col-resize;
+  user-select: none;
+
+  .feishu-table-chrome__hit,
+  .feishu-table-chrome__resize-col {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.feishu-table-host--row-resizing {
+  cursor: row-resize;
+  user-select: none;
+
+  .feishu-table-chrome__hit,
+  .feishu-table-chrome__resize-row {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.feishu-table-chrome__drag-line {
+  position: absolute;
+  z-index: 19;
+  pointer-events: none;
+  background: @blue;
+  box-shadow: 0 0 0 1px rgba(51, 112, 255, 0.12);
+
+  &--col {
+    width: 3px;
+    margin-left: -1.5px;
+    border-radius: 2px;
+  }
+
+  &--row {
+    height: 3px;
+    margin-top: -1.5px;
+    border-radius: 2px;
+  }
+}
+
 .feishu-table-host--selection-pinned table.feishu-table .selectedCell,
 .tableWrapper.feishu-table-host--selection-pinned table.feishu-table .selectedCell,
 table.feishu-table .feishu-table__cell--rail-selected {

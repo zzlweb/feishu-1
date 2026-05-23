@@ -62,7 +62,11 @@ export type TableRailPin = { kind: 'col' | 'row'; index: number };
 const RAIL_SELECTED_CLASS = 'feishu-table__cell--rail-selected';
 
 /** 根据本地列/行选中状态同步单元格高亮 class（仅在 class 变化时写 DOM，避免 MutationObserver 死循环） */
-export function syncTableRailCellHighlight(host: HTMLElement, pin: TableRailPin | null) {
+export function syncTableRailCellHighlight(
+  host: HTMLElement,
+  pin: TableRailPin | null,
+  editor?: Editor | null,
+) {
   const table = getTableElementFromHost(host);
   if (!table) return;
 
@@ -70,17 +74,40 @@ export function syncTableRailCellHighlight(host: HTMLElement, pin: TableRailPin 
   const nextSelected = new Set<HTMLElement>();
 
   if (pin) {
-    const rows = Array.from(table.querySelectorAll('tr'));
-    if (pin.kind === 'col') {
-      rows.forEach(tr => {
-        const cell = tr.querySelectorAll('th, td')[pin.index];
-        if (cell instanceof HTMLElement) nextSelected.add(cell);
-      });
-    } else {
-      const row = rows[pin.index];
-      row?.querySelectorAll('th, td').forEach(cell => {
-        if (cell instanceof HTMLElement) nextSelected.add(cell);
-      });
+    let resolvedByMap = false;
+    if (editor?.view?.dom) {
+      const tablePos = getTablePosFromHost(editor, host);
+      const tableNode = tablePos != null ? editor.state.doc.nodeAt(tablePos) : null;
+      if (tablePos != null && tableNode) {
+        const map = TableMap.get(tableNode);
+        const tableStart = tablePos + 1;
+        const markCellAt = (row: number, col: number) => {
+          if (row < 0 || col < 0 || row >= map.height || col >= map.width) return;
+          const cellPos = tableStart + map.map[row * map.width + col];
+          const dom = editor.view.nodeDOM(cellPos);
+          if (dom instanceof HTMLElement) nextSelected.add(dom);
+        };
+        if (pin.kind === 'col') {
+          for (let row = 0; row < map.height; row += 1) markCellAt(row, pin.index);
+        } else {
+          for (let col = 0; col < map.width; col += 1) markCellAt(pin.index, col);
+        }
+        resolvedByMap = true;
+      }
+    }
+    if (!resolvedByMap) {
+      const rows = Array.from(table.querySelectorAll('tr'));
+      if (pin.kind === 'col') {
+        rows.forEach(tr => {
+          const cell = tr.querySelectorAll('th, td')[pin.index];
+          if (cell instanceof HTMLElement) nextSelected.add(cell);
+        });
+      } else {
+        const row = rows[pin.index];
+        row?.querySelectorAll('th, td').forEach(cell => {
+          if (cell instanceof HTMLElement) nextSelected.add(cell);
+        });
+      }
     }
   }
 

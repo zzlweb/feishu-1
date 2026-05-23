@@ -10,7 +10,6 @@ function updateColumns(
   overrideValue?: number,
 ) {
   let totalWidth = 0;
-  let fixedWidth = true;
   let nextDOM = colgroup.firstChild;
   const row = node.firstChild;
   if (!row) return;
@@ -18,15 +17,16 @@ function updateColumns(
   for (let i = 0, col = 0; i < row.childCount; i += 1) {
     const { colspan, colwidth } = row.child(i).attrs;
     for (let j = 0; j < colspan; j += 1, col += 1) {
-      const hasWidth = overrideCol === col ? overrideValue : colwidth && colwidth[j];
-      const cssWidth = hasWidth ? `${hasWidth}px` : '';
-      totalWidth += hasWidth || cellMinWidth;
-      if (!hasWidth) fixedWidth = false;
+      const width = Math.max(cellMinWidth, Number(overrideCol === col ? overrideValue : colwidth && colwidth[j]) || cellMinWidth);
+      const cssWidth = `${width}px`;
+      totalWidth += width;
       if (!nextDOM) {
         const colEl = document.createElement('col');
+        colEl.setAttribute('data-col-index', String(col));
         colEl.style.width = cssWidth;
         colgroup.appendChild(colEl);
       } else {
+        (nextDOM as HTMLElement).setAttribute('data-col-index', String(col));
         if ((nextDOM as HTMLElement).style.width !== cssWidth) {
           (nextDOM as HTMLElement).style.width = cssWidth;
         }
@@ -39,13 +39,8 @@ function updateColumns(
     nextDOM.parentNode?.removeChild(nextDOM);
     nextDOM = after;
   }
-  if (fixedWidth) {
-    table.style.width = `${totalWidth}px`;
-    table.style.minWidth = '';
-  } else {
-    table.style.width = '';
-    table.style.minWidth = `${totalWidth}px`;
-  }
+  table.style.width = `${totalWidth}px`;
+  table.style.minWidth = '100%';
 }
 
 /** 飞书表格 NodeView：resizable:false 时 TipTap 默认不包 tableWrapper，此处始终包裹 */
@@ -59,18 +54,24 @@ export class FeishuTableView {
   colgroup: HTMLElement;
   contentDOM: HTMLTableSectionElement;
 
-  constructor(node: ProseMirrorNode, cellMinWidth: number, tableClass = 'feishu-table') {
+  constructor(node: ProseMirrorNode, cellMinWidth: number, viewOrTableClass?: unknown) {
+    const tableClass = typeof viewOrTableClass === 'string' ? viewOrTableClass : 'feishu-table';
     this.node = node;
     this.cellMinWidth = cellMinWidth;
     this.dom = document.createElement('div');
     this.dom.className = 'tableWrapper feishu-table-host';
+    this.dom.setAttribute('data-block-type', 'table');
+    this.dom.setAttribute('data-table-root', 'true');
+    if (node.attrs.tableId) this.dom.setAttribute('data-block-id', node.attrs.tableId);
 
     this.scroll = document.createElement('div');
     this.scroll.className = 'feishu-table-scroll';
+    this.scroll.setAttribute('data-table-wrapper', 'true');
     this.dom.appendChild(this.scroll);
 
     this.table = document.createElement('table');
     this.table.className = tableClass;
+    this.table.setAttribute('data-rich-table', 'true');
     this.scroll.appendChild(this.table);
 
     /* 左右渐隐提示层：置于 scroll 外，避免 overflow 裁剪伪元素 */
@@ -98,6 +99,10 @@ export class FeishuTableView {
   update(node: ProseMirrorNode) {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    if (node.attrs.tableId) {
+      this.dom.setAttribute('data-block-id', node.attrs.tableId);
+      this.table.setAttribute('data-table-id', node.attrs.tableId);
+    }
     updateColumns(node, this.colgroup, this.table, this.cellMinWidth);
     return true;
   }

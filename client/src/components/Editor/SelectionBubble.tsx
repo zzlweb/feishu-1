@@ -38,6 +38,9 @@ import {
   SelGlyphComment,
   SelGlyphTableMerge,
   SelGlyphTableCellBg,
+  SelGlyphTableGrid,
+  SelGlyphTableInsert,
+  SelGlyphDelete,
 } from '../../icons/selectionToolbarGlyphs';
 import { IndentRightIcon, IndentLeftIcon } from 'tdesign-icons-react';
 import { wrapIcon } from '../../icons/wrap';
@@ -50,6 +53,7 @@ import './SelectionBubble.less';
 import { openCommentSidebarForEditorSelection } from './commentBlockAnchor';
 import { resolveTableHostFromEditor } from './tableDom';
 import { getActiveTableSelectionContext } from './tableInsert';
+import { getActiveTableFlags } from './tableMenu';
 import {
   insertTableColumn,
   insertTableRow,
@@ -61,6 +65,9 @@ import {
   setTextAlignment,
   toggleBlockStyle,
   toggleTableHeaderColumn,
+  toggleTableHeaderRow,
+  distributeSelectedTableColumns,
+  removeActiveTable,
 } from './panelActions';
 
 const IndentRight = wrapIcon(IndentRightIcon);
@@ -293,6 +300,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
   const [showTableCellColorMenu, setShowTableCellColorMenu] = useState(false);
+  const [showTableOptions, setShowTableOptions] = useState(false);
+  const [showTableInsert, setShowTableInsert] = useState(false);
+  const [showTableDelete, setShowTableDelete] = useState(false);
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkText, setLinkText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
@@ -301,6 +311,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   const moreRef = useRef<HTMLDivElement>(null);
   const colorRef = useRef<HTMLDivElement>(null);
   const tableCellColorRef = useRef<HTMLDivElement>(null);
+  const tableOptionsRef = useRef<HTMLDivElement>(null);
+  const tableInsertRef = useRef<HTMLDivElement>(null);
+  const tableDeleteRef = useRef<HTMLDivElement>(null);
   const linkInputRef = useRef<HTMLInputElement>(null);
   const moreHeadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showHeadingMoreFlyout, setShowHeadingMoreFlyout] = useState(false);
@@ -339,6 +352,9 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
       if (moreRef.current && !moreRef.current.contains(t)) setShowMoreMenu(false);
       if (colorRef.current && !colorRef.current.contains(t)) setShowColorMenu(false);
       if (tableCellColorRef.current && !tableCellColorRef.current.contains(t)) setShowTableCellColorMenu(false);
+      if (tableOptionsRef.current && !tableOptionsRef.current.contains(t)) setShowTableOptions(false);
+      if (tableInsertRef.current && !tableInsertRef.current.contains(t)) setShowTableInsert(false);
+      if (tableDeleteRef.current && !tableDeleteRef.current.contains(t)) setShowTableDelete(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -441,59 +457,15 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
           : {}),
       }}
     >
-      <div className="selection-bubble-inner" role="toolbar" aria-label="选区格式">
+      <div
+        className="selection-bubble-inner"
+        role="toolbar"
+        aria-label="选区格式"
+        data-floating-panel="true"
+        data-no-marquee-selection="true"
+      >
         {isTableSelection && (
-          <div className="selection-bubble-group selection-bubble-group--table">
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--table-action"
-              disabled={!tableSelectionContext}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => toggleTableHeaderColumn(editor)}
-              title="设置为标题列"
-            >
-              标题列
-            </button>
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--table-action"
-              disabled={!tableSelectionContext}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => insertTableColumn(editor, 'before')}
-              title="左侧插入列"
-            >
-              左列
-            </button>
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--table-action"
-              disabled={!tableSelectionContext}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => insertTableColumn(editor, 'after')}
-              title="右侧插入列"
-            >
-              右列
-            </button>
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--table-action"
-              disabled={!tableSelectionContext}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => insertTableRow(editor, 'before')}
-              title="上方插入行"
-            >
-              上行
-            </button>
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--table-action"
-              disabled={!tableSelectionContext}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => insertTableRow(editor, 'after')}
-              title="下方插入行"
-            >
-              下行
-            </button>
+          <>
             <button
               type="button"
               className="selection-bubble-btn"
@@ -547,29 +519,8 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--table-action selection-bubble-btn--delete"
-              disabled={!canDeleteTableColumn}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => removeSelectedTableColumn(editor)}
-              title="删除当前列"
-            >
-              删列
-            </button>
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--table-action selection-bubble-btn--delete"
-              disabled={!canDeleteTableRow}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => removeSelectedTableRow(editor)}
-              title="删除当前行"
-            >
-              删行
-            </button>
-          </div>
+          </>
         )}
-        {isTableSelection && <span className="selection-bubble-divider selection-bubble-divider--thin" aria-hidden />}
         <div className="selection-bubble-group selection-bubble-group--main">
           <div className="selection-bubble-dropdown" ref={headingRef}>
             <button
@@ -1004,60 +955,236 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
           </div>
         </div>
 
-        <span className="selection-bubble-divider selection-bubble-divider--section" aria-hidden />
+        {isTableSelection && (
+          <>
+            <span className="selection-bubble-divider selection-bubble-divider--thin" aria-hidden />
+            <div className="selection-bubble-dropdown" ref={tableOptionsRef}>
+              <button
+                type="button"
+                className={`selection-bubble-btn ${showTableOptions ? 'active' : ''}`}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => setShowTableOptions(!showTableOptions)}
+                title="表格配置"
+              >
+                <SelGlyphTableGrid size={GLYPH} />
+              </button>
+              {showTableOptions && (
+                <div className="selection-bubble-menu">
+                  <button
+                    type="button"
+                    className={`selection-bubble-menu-item selection-bubble-menu-item--toggle ${
+                      getActiveTableFlags(editor).hasHeaderRow ? 'active' : ''
+                    }`}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      toggleTableHeaderRow(editor);
+                      setShowTableOptions(false);
+                    }}
+                  >
+                    <span>标题行</span>
+                    <span
+                      className={`selection-bubble-menu-item-switch${
+                        getActiveTableFlags(editor).hasHeaderRow ? ' is-on' : ''
+                      }`}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    className={`selection-bubble-menu-item selection-bubble-menu-item--toggle ${
+                      getActiveTableFlags(editor).hasHeaderCol ? 'active' : ''
+                    }`}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      toggleTableHeaderColumn(editor);
+                      setShowTableOptions(false);
+                    }}
+                  >
+                    <span>标题列</span>
+                    <span
+                      className={`selection-bubble-menu-item-switch${
+                        getActiveTableFlags(editor).hasHeaderCol ? ' is-on' : ''
+                      }`}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    className="selection-bubble-menu-item"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      distributeSelectedTableColumns(editor);
+                      setShowTableOptions(false);
+                    }}
+                  >
+                    均分列宽
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="selection-bubble-dropdown" ref={tableInsertRef}>
+              <button
+                type="button"
+                className={`selection-bubble-btn ${showTableInsert ? 'active' : ''}`}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => setShowTableInsert(!showTableInsert)}
+                title="插入行列"
+              >
+                <SelGlyphTableInsert size={GLYPH} />
+              </button>
+              {showTableInsert && (
+                <div className="selection-bubble-menu">
+                  <button
+                    type="button"
+                    className="selection-bubble-menu-item"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      insertTableColumn(editor, 'before');
+                      setShowTableInsert(false);
+                    }}
+                  >
+                    左侧插入列
+                  </button>
+                  <button
+                    type="button"
+                    className="selection-bubble-menu-item"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      insertTableColumn(editor, 'after');
+                      setShowTableInsert(false);
+                    }}
+                  >
+                    右侧插入列
+                  </button>
+                  <button
+                    type="button"
+                    className="selection-bubble-menu-item"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      insertTableRow(editor, 'before');
+                      setShowTableInsert(false);
+                    }}
+                  >
+                    上方插入行
+                  </button>
+                  <button
+                    type="button"
+                    className="selection-bubble-menu-item"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      insertTableRow(editor, 'after');
+                      setShowTableInsert(false);
+                    }}
+                  >
+                    下方插入行
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="selection-bubble-dropdown" ref={tableDeleteRef}>
+              <button
+                type="button"
+                className={`selection-bubble-btn ${showTableDelete ? 'active' : ''}`}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => setShowTableDelete(!showTableDelete)}
+                title="删除"
+              >
+                <SelGlyphDelete size={GLYPH} />
+              </button>
+              {showTableDelete && (
+                <div className="selection-bubble-menu selection-bubble-menu--more">
+                  <button
+                    type="button"
+                    className="selection-bubble-menu-item"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      removeSelectedTableColumn(editor);
+                      setShowTableDelete(false);
+                    }}
+                  >
+                    删除当前列
+                  </button>
+                  <button
+                    type="button"
+                    className="selection-bubble-menu-item"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      removeSelectedTableRow(editor);
+                      setShowTableDelete(false);
+                    }}
+                  >
+                    删除当前行
+                  </button>
+                  <button
+                    type="button"
+                    className="selection-bubble-menu-item context-menu-item--danger"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      removeActiveTable(editor);
+                      setShowTableDelete(false);
+                    }}
+                  >
+                    删除表格
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
-        <div className="selection-bubble-group selection-bubble-group--extra">
-          <div className="selection-bubble-dropdown" ref={moreRef}>
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--icon-quiet"
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => setShowMoreMenu(!showMoreMenu)}
-              title="更多"
-            >
-              <SelGlyphToolbarMore size={GLYPH} />
-            </button>
-            {showMoreMenu && (
-              <div className="selection-bubble-menu selection-bubble-menu--more">
+        {!isTableSelection && (
+          <>
+            <span className="selection-bubble-divider selection-bubble-divider--section" aria-hidden />
+            <div className="selection-bubble-group selection-bubble-group--extra">
+              <div className="selection-bubble-dropdown" ref={moreRef}>
                 <button
                   type="button"
-                  className="selection-bubble-menu-item"
+                  className="selection-bubble-btn selection-bubble-btn--icon-quiet"
                   onMouseDown={e => e.preventDefault()}
-                  onClick={() => {
-                    copySelectedPlainText(editor);
-                    setShowMoreMenu(false);
-                  }}
+                  onClick={() => setShowMoreMenu(!showMoreMenu)}
+                  title="更多"
                 >
-                  复制选中文本
+                  <SelGlyphToolbarMore size={GLYPH} />
                 </button>
+                {showMoreMenu && (
+                  <div className="selection-bubble-menu selection-bubble-menu--more">
+                    <button
+                      type="button"
+                      className="selection-bubble-menu-item"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => {
+                        copySelectedPlainText(editor);
+                        setShowMoreMenu(false);
+                      }}
+                    >
+                      复制选中文本
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          <button
-            type="button"
-            className="selection-bubble-btn selection-bubble-btn--brand-outline"
-            onMouseDown={e => e.preventDefault()}
-            onClick={() => copySelectedPlainText(editor)}
-            title="分享 / 复制文本"
-          >
-            <SelGlyphShare size={GLYPH} />
-          </button>
+              <button
+                type="button"
+                className="selection-bubble-btn selection-bubble-btn--brand-outline"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => copySelectedPlainText(editor)}
+                title="分享 / 复制文本"
+              >
+                <SelGlyphShare size={GLYPH} />
+              </button>
 
-          {!isTableSelection && (
-            <button
-              type="button"
-              className="selection-bubble-btn selection-bubble-btn--icon-quiet"
-              onMouseDown={e => {
-                e.preventDefault();
-                openCommentSidebarForEditorSelection(editor, documentId);
-              }}
-              title="评论"
-            >
-              <SelGlyphComment size={GLYPH} />
-            </button>
-          )}
-        </div>
+              <button
+                type="button"
+                className="selection-bubble-btn selection-bubble-btn--icon-quiet"
+                onMouseDown={e => {
+                  e.preventDefault();
+                  openCommentSidebarForEditorSelection(editor, documentId);
+                }}
+                title="评论"
+              >
+                <SelGlyphComment size={GLYPH} />
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </BubbleMenu>
   );

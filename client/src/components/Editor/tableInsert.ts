@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/react';
-import type { Node as ProseNode } from '@tiptap/pm/model';
+import { Fragment, type Node as ProseNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { getSlashRange } from './slashMenuConfig';
@@ -358,6 +358,159 @@ export function distributeActiveTableColumns(editor: Editor): boolean {
   editor.view.dispatch(tr);
   editor.commands.fixTables();
   return true;
+}
+
+export function setTableColumnWidth(
+  editor: Editor,
+  tablePos: number,
+  colIndex: number,
+  width: number,
+): boolean {
+  const table = editor.state.doc.nodeAt(tablePos);
+  if (!table || table.type.name !== 'table') return false;
+  const map = TableMap.get(table);
+  if (colIndex < 0 || colIndex >= map.width) return false;
+
+  const nextWidth = Math.max(1, Math.round(width));
+  let tr = editor.state.tr;
+  const tableStart = tablePos + 1;
+
+  for (let rowIndex = 0; rowIndex < map.height; rowIndex += 1) {
+    const mapIndex = rowIndex * map.width + colIndex;
+    if (rowIndex > 0 && map.map[mapIndex] === map.map[mapIndex - map.width]) continue;
+
+    const cellOffset = map.map[mapIndex];
+    const cell = table.nodeAt(cellOffset);
+    if (!cell) continue;
+
+    const cellRect = map.findCell(cellOffset);
+    if (colIndex < cellRect.left || colIndex >= cellRect.right) continue;
+
+    const widthIndex = colIndex - cellRect.left;
+    const colspan = Number(cell.attrs.colspan || 1);
+    const colwidth = Array.isArray(cell.attrs.colwidth)
+      ? cell.attrs.colwidth.slice()
+      : Array.from({ length: colspan }, () => 0);
+    while (colwidth.length < colspan) colwidth.push(0);
+    colwidth[widthIndex] = nextWidth;
+
+    tr = tr.setNodeMarkup(tableStart + cellOffset, undefined, {
+      ...cell.attrs,
+      colwidth,
+    });
+  }
+
+  if (!tr.docChanged) return false;
+  editor.view.dispatch(tr);
+  editor.commands.fixTables();
+  return true;
+}
+
+export function setTableRowHeight(
+  editor: Editor,
+  tablePos: number,
+  rowIndex: number,
+  height: number,
+): boolean {
+  const table = editor.state.doc.nodeAt(tablePos);
+  if (!table || table.type.name !== 'table') return false;
+  if (rowIndex < 0 || rowIndex >= table.childCount) return false;
+
+  let rowPos = tablePos + 1;
+  for (let index = 0; index < rowIndex; index += 1) {
+    rowPos += table.child(index).nodeSize;
+  }
+
+  const row = table.child(rowIndex);
+  const nextHeight = Math.max(1, Math.round(height));
+  const tr = editor.state.tr.setNodeMarkup(rowPos, undefined, {
+    ...row.attrs,
+    rowHeight: nextHeight,
+  });
+
+  if (!tr.docChanged) return false;
+  editor.view.dispatch(tr.scrollIntoView());
+  editor.commands.fixTables();
+  return true;
+}
+
+function getSimpleTableDimensions(table: ProseNode): { rows: number; cols: number } | null {
+  if (!table || table.type.name !== 'table' || table.childCount === 0) return null;
+  const cols = table.child(0).childCount;
+  if (cols === 0) return null;
+
+  for (let rowIndex = 0; rowIndex < table.childCount; rowIndex += 1) {
+    const row = table.child(rowIndex);
+    if (row.childCount !== cols) return null;
+    for (let colIndex = 0; colIndex < row.childCount; colIndex += 1) {
+      const cell = row.child(colIndex);
+      if (Number(cell.attrs.rowspan || 1) !== 1 || Number(cell.attrs.colspan || 1) !== 1) {
+        return null;
+      }
+    }
+  }
+
+  return { rows: table.childCount, cols };
+}
+
+function moveArrayItem<T>(items: T[], fromIndex: number, targetIndex: number): { items: T[]; movedIndex: number } | null {
+  if (fromIndex < 0 || fromIndex >= items.length) return null;
+  const safeTarget = Math.max(0, Math.min(targetIndex, items.length));
+  if (safeTarget === fromIndex || safeTarget === fromIndex + 1) return null;
+
+  const next = items.slice();
+  const [item] = next.splice(fromIndex, 1);
+  const insertIndex = safeTarget > fromIndex ? safeTarget - 1 : safeTarget;
+  next.splice(insertIndex, 0, item);
+  return { items: next, movedIndex: insertIndex };
+}
+
+export function moveTableRow(editor: Editor, tablePos: number, fromRow: number, targetRowBoundary: number): number | null {
+  const table = editor.state.doc.nodeAt(tablePos);
+  if (!table || table.type.name !== 'table') return null;
+  const dims = getSimpleTableDimensions(table);
+  if (!dims) return null;
+
+  const moved = moveArrayItem(
+    Array.from({ length: dims.rows }, (_, index) => table.child(index)),
+    fromRow,
+    targetRowBoundary,
+  );
+  if (!moved) return null;
+
+  const nextTable = table.copy(Fragment.fromArray(moved.items));
+  const tr = editor.state.tr.replaceWith(tablePos, tablePos + table.nodeSize, nextTable).scrollIntoView();
+  editor.view.dispatch(tr);
+  editor.commands.fixTables();
+  return moved.movedIndex;
+}
+
+export function moveTableColumn(editor: Editor, tablePos: number, fromCol: number, targetColBoundary: number): number | null {
+  const table = editor.state.doc.nodeAt(tablePos);
+  if (!table || table.type.name !== 'table') return null;
+  const dims = getSimpleTableDimensions(table);
+  if (!dims) return null;
+
+  if (fromCol < 0 || fromCol >= dims.cols) return null;
+  const safeTarget = Math.max(0, Math.min(targetColBoundary, dims.cols));
+  if (safeTarget === fromCol || safeTarget === fromCol + 1) return null;
+  const movedIndex = safeTarget > fromCol ? safeTarget - 1 : safeTarget;
+
+  const rows = Array.from({ length: dims.rows }, (_, rowIndex) => {
+    const row = table.child(rowIndex);
+    const moved = moveArrayItem(
+      Array.from({ length: dims.cols }, (_, colIndex) => row.child(colIndex)),
+      fromCol,
+      safeTarget,
+    );
+    return row.copy(Fragment.fromArray(moved?.items ?? []));
+  });
+
+  const nextTable = table.copy(Fragment.fromArray(rows));
+  const tr = editor.state.tr.replaceWith(tablePos, tablePos + table.nodeSize, nextTable).scrollIntoView();
+  editor.view.dispatch(tr);
+  editor.commands.fixTables();
+  return movedIndex;
 }
 
 function normalizeCellText(value: string): string {

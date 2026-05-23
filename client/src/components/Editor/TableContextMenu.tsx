@@ -37,8 +37,8 @@ import {
   clampFlyoutHeight,
   computeSubmenuFlyoutPosition,
 } from './contextSubmenuFlyout';
-import { getActiveTableFlags } from './tableMenu';
-import { useFloatingPanelPosition, isPointerWithinFloatingShell } from './floatingPanel';
+import { computeTableBlockMenuPosition, getActiveTableFlags } from './tableMenu';
+import { useAnchoredContextMenuPosition, useHoverFloatingGroup } from './floatingPanel';
 import {
   distributeSelectedTableColumns,
   removeActiveTable,
@@ -98,7 +98,12 @@ export default function TableContextMenu({
   const [subMenu, setSubMenu] = useState<string | null>(null);
   const [indentFlyoutPos, setIndentFlyoutPos] = useState<{ top: number; left: number } | null>(null);
   const [addBelowFlyoutPos, setAddBelowFlyoutPos] = useState<{ top: number; left: number } | null>(null);
-  const { finalPos, posVisible } = useFloatingPanelPosition(x, y, menuRef, 8, anchorRef);
+  const { finalPos, posVisible } = useAnchoredContextMenuPosition(
+    anchorRef,
+    menuRef,
+    { x, y },
+    computeTableBlockMenuPosition,
+  );
 
   const tableFlags = getActiveTableFlags(editor);
   const indentUi = getEditorIndentUiState(editor);
@@ -111,28 +116,49 @@ export default function TableContextMenu({
     (onHoverDismiss ?? onClose)();
   };
 
-  const pointerStillInShell = (next: EventTarget | null): boolean => {
-    return isPointerWithinFloatingShell(next, [menuRef, indentFlyoutRef, addBelowFlyoutRef, anchorRef], [
+  const hoverGroup = useHoverFloatingGroup({
+    refs: [menuRef, indentTriggerRef, addBelowTriggerRef, indentFlyoutRef, addBelowFlyoutRef, anchorRef],
+    selectors: [
       '.feishu-table-chrome',
       '.context-menu',
       '.context-submenu-flyout',
       '.context-add-below-flyout',
       '.slash-table-grid-flyout',
       '.slash-columns-count-flyout',
-    ]);
+    ],
+    closeDelay: 160,
+    onClose: () => {
+      setSubMenu(null);
+      dismissByHover();
+    },
+  });
+
+  const pointerStillInShell = (next: EventTarget | null): boolean => {
+    return hoverGroup.containsTarget(next);
   };
 
   const handleShellMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    dismissByHover();
+    hoverGroup.scheduleClose(e.relatedTarget);
   };
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
-    setSubMenu(null);
-    handleShellMouseLeave(e);
+    if (pointerStillInShell(e.relatedTarget)) return;
+    hoverGroup.scheduleClose(e.relatedTarget);
+  };
+
+  const keepHoverAlive = () => {
+    hoverGroup.cancelClose();
+    onMouseEnterCancel?.();
   };
 
   useLayoutEffect(() => {
+    if (!posVisible) {
+      setIndentFlyoutPos(null);
+      setAddBelowFlyoutPos(null);
+      return;
+    }
+
     setIndentFlyoutPos(null);
     setAddBelowFlyoutPos(null);
     if (subMenu !== 'indent' && subMenu !== 'addBelow') return;
@@ -166,15 +192,19 @@ export default function TableContextMenu({
             panelHeight: panelH,
           }),
         );
-        return;
       }
     };
 
     updateFlyouts();
-    if (subMenu === 'addBelow') {
-      requestAnimationFrame(updateFlyouts);
-    }
-  }, [subMenu]);
+    const raf = window.requestAnimationFrame(updateFlyouts);
+    window.addEventListener('resize', updateFlyouts);
+    document.addEventListener('scroll', updateFlyouts, true);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener('resize', updateFlyouts);
+      document.removeEventListener('scroll', updateFlyouts, true);
+    };
+  }, [subMenu, finalPos.x, finalPos.y, posVisible]);
 
   const handleCut = () => {
     alignSelectionToBlockAnchor();
@@ -248,10 +278,10 @@ export default function TableContextMenu({
       <div
         ref={indentFlyoutRef}
         className="context-submenu-flyout context-align-flyout"
+        data-floating-panel="true"
+        data-no-marquee-selection="true"
         style={{ position: 'fixed', top: indentFlyoutPos.top, left: indentFlyoutPos.left, zIndex: 10060 }}
-        onMouseEnter={() => {
-          onMouseEnterCancel?.();
-        }}
+        onPointerEnter={keepHoverAlive}
         onMouseLeave={handleFlyoutMouseLeave}
         onMouseDown={e => e.preventDefault()}
       >
@@ -306,6 +336,8 @@ export default function TableContextMenu({
       <div
         ref={addBelowFlyoutRef}
         className="slash-menu slash-menu-feishu context-add-below-flyout"
+        data-floating-panel="true"
+        data-no-marquee-selection="true"
         style={{
           position: 'fixed',
           top: addBelowFlyoutPos.top,
@@ -314,9 +346,7 @@ export default function TableContextMenu({
           overflowY: 'auto',
           zIndex: 10060,
         }}
-        onMouseEnter={() => {
-          onMouseEnterCancel?.();
-        }}
+        onPointerEnter={keepHoverAlive}
         onMouseLeave={handleFlyoutMouseLeave}
         onMouseDown={e => e.preventDefault()}
       >
@@ -341,17 +371,22 @@ export default function TableContextMenu({
       document.body,
     );
 
-  return (
-    <Fragment>
-      <div
-        ref={menuRef}
-        className="context-menu context-menu-feishu context-menu-feishu--table"
-        style={{ left: finalPos.x, top: finalPos.y, visibility: posVisible ? 'visible' : 'hidden' }}
-        onMouseEnter={() => {
-          onMouseEnterCancel?.();
-        }}
-        onMouseLeave={handleShellMouseLeave}
-      >
+  const menuPanel = (
+    <div
+      ref={menuRef}
+      className="context-menu context-menu-feishu context-menu-feishu--table"
+      data-floating-panel="true"
+      data-no-marquee-selection="true"
+      style={{
+        position: 'fixed',
+        left: finalPos.x,
+        top: finalPos.y,
+        zIndex: 10050,
+        visibility: posVisible ? 'visible' : 'hidden',
+      }}
+      onPointerEnter={keepHoverAlive}
+      onMouseLeave={handleShellMouseLeave}
+    >
         <button type="button" className="context-menu-item" onClick={insertSyncBelow}>
           <span className="context-menu-icon">
             <SlashGlyphSync size={18} />
@@ -362,11 +397,10 @@ export default function TableContextMenu({
         <div
           ref={indentTriggerRef}
           className="context-menu-item has-submenu"
-        onMouseEnter={() => {
-          onMouseEnterCancel?.();
+        onPointerEnter={() => {
+          keepHoverAlive();
           setSubMenu('indent');
         }}
-        onMouseLeave={() => setSubMenu(null)}
         >
           <span className="context-menu-icon">
             <IndentRight size={18} strokeWidth={2} fill={ICON_MUTED} />
@@ -458,11 +492,10 @@ export default function TableContextMenu({
         <div
           ref={addBelowTriggerRef}
           className="context-menu-item has-submenu"
-        onMouseEnter={() => {
-          onMouseEnterCancel?.();
-          setSubMenu('addBelow');
-        }}
-        onMouseLeave={() => setSubMenu(null)}
+          onPointerEnter={() => {
+            keepHoverAlive();
+            setSubMenu('addBelow');
+          }}
         >
           <span className="context-menu-icon">
             <ContextGlyphAddBelow size={18} fill={ICON_MUTED} />
@@ -473,8 +506,14 @@ export default function TableContextMenu({
           </span>
         </div>
       </div>
+  );
+
+  return createPortal(
+    <Fragment>
+      {menuPanel}
       {indentFlyout}
       {addBelowFlyout}
-    </Fragment>
+    </Fragment>,
+    document.body,
   );
 }

@@ -19,10 +19,13 @@ import {
 import './FeishuBoxBlockSelection.less';
 
 const MIN_DRAG_PX = 3;
+const AUTO_SCROLL_EDGE_PX = 40;
+const AUTO_SCROLL_MAX_PX = 18;
 
 interface DragState {
   startX: number;
   startY: number;
+  pointerId: number;
 }
 
 interface Props {
@@ -40,6 +43,30 @@ function isUiChrome(target: EventTarget | null): boolean {
   ));
 }
 
+function findScrollContainer(element: HTMLElement | null): HTMLElement | Window {
+  let current = element?.parentElement ?? null;
+  while (current) {
+    const style = window.getComputedStyle(current);
+    if (/(auto|scroll)/.test(`${style.overflowY}${style.overflow}`) && current.scrollHeight > current.clientHeight) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return window;
+}
+
+function getScrollContainerRect(container: HTMLElement | Window): DOMRect {
+  if (container instanceof Window) {
+    return new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+  }
+  return container.getBoundingClientRect();
+}
+
+function scrollContainerBy(container: HTMLElement | Window, deltaY: number): void {
+  if (container instanceof Window) window.scrollBy({ top: deltaY });
+  else container.scrollTop += deltaY;
+}
+
 export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly }: Props) {
   const [dragging, setDragging] = useState(false);
   const [dragRect, setDragRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
@@ -50,6 +77,9 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
   const pendingDragRef = useRef<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const selectedRef = useRef<SelectableUnit[]>([]);
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const autoScrollRef = useRef<number | null>(null);
+  const scrollContainerRef = useRef<HTMLElement | Window | null>(null);
 
   const editorRef = useRef(editor);
   editorRef.current = editor;
@@ -64,6 +94,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     draggingRef.current = false;
     setDragging(false);
     document.body.classList.remove('feishu-box-select-dragging');
+    editorAreaRef.current?.removeAttribute('data-selection-mode');
   }, []);
 
   const disarm = useCallback(() => {
@@ -83,18 +114,23 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     })));
   }, [editorAreaRef]);
 
+  const selectUnits = useCallback((units: SelectableUnit[]) => {
+    selectedRef.current = units;
+    setSelectedUnits(units);
+    syncSelectionBands(units);
+  }, [syncSelectionBands]);
+
   const finalizeSelection = useCallback((clientRect: ClientRect) => {
     const ed = editorRef.current;
     if (!ed) return;
     const units = findUnitsInClientRect(ed, clientRect);
-    selectedRef.current = units;
-    setSelectedUnits(units);
-    syncSelectionBands(units);
+    selectUnits(units);
     document.body.classList.remove('feishu-box-select-dragging');
+    editorAreaRef.current?.removeAttribute('data-selection-mode');
     if (units.length > 0) {
       ed.view.focus();
     }
-  }, [syncSelectionBands]);
+  }, [editorAreaRef, selectUnits]);
 
   const updateDragOverlay = useCallback((clientRect: ClientRect) => {
     const area = editorAreaRef.current;
@@ -112,69 +148,97 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     }
   }, [editorAreaRef, syncSelectionBands]);
 
-  const beginDrag = useCallback((clientX: number, clientY: number) => {
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollRef.current != null) {
+      window.cancelAnimationFrame(autoScrollRef.current);
+      autoScrollRef.current = null;
+    }
+  }, []);
+
+  const tickAutoScroll = useCallback(() => {
+    if (!draggingRef.current || !dragRef.current || !lastPointerRef.current || !scrollContainerRef.current) {
+      autoScrollRef.current = null;
+      return;
+    }
+
+    const container = scrollContainerRef.current;
+    const bounds = getScrollContainerRect(container);
+    const y = lastPointerRef.current.y;
+    let delta = 0;
+    if (y < bounds.top + AUTO_SCROLL_EDGE_PX) {
+      delta = -Math.ceil(((bounds.top + AUTO_SCROLL_EDGE_PX - y) / AUTO_SCROLL_EDGE_PX) * AUTO_SCROLL_MAX_PX);
+    } else if (y > bounds.bottom - AUTO_SCROLL_EDGE_PX) {
+      delta = Math.ceil(((y - (bounds.bottom - AUTO_SCROLL_EDGE_PX)) / AUTO_SCROLL_EDGE_PX) * AUTO_SCROLL_MAX_PX);
+    }
+
+    if (delta !== 0) {
+      scrollContainerBy(container, delta);
+      const rect = normalizeClientRect(
+        { left: dragRef.current.startX, top: dragRef.current.startY, right: dragRef.current.startX, bottom: dragRef.current.startY },
+        { left: lastPointerRef.current.x, top: lastPointerRef.current.y, right: lastPointerRef.current.x, bottom: lastPointerRef.current.y },
+      );
+      updateDragOverlay(rect);
+    }
+
+    autoScrollRef.current = window.requestAnimationFrame(tickAutoScroll);
+  }, [updateDragOverlay]);
+
+  const ensureAutoScroll = useCallback(() => {
+    if (autoScrollRef.current != null) return;
+    autoScrollRef.current = window.requestAnimationFrame(tickAutoScroll);
+  }, [tickAutoScroll]);
+
+  const beginDrag = useCallback((clientX: number, clientY: number, pointerId: number) => {
     disarm();
     draggingRef.current = true;
     setDragging(true);
-    dragRef.current = { startX: clientX, startY: clientY };
+    dragRef.current = { startX: clientX, startY: clientY, pointerId };
+    lastPointerRef.current = { x: clientX, y: clientY };
+    scrollContainerRef.current = findScrollContainer(editorAreaRef.current);
     window.getSelection()?.removeAllRanges();
     document.body.classList.add('feishu-box-select-dragging');
+    editorAreaRef.current?.setAttribute('data-selection-mode', 'block-marquee');
     updateDragOverlay({
       left: clientX,
       top: clientY,
       right: clientX,
       bottom: clientY,
     });
-  }, [disarm, updateDragOverlay]);
+    ensureAutoScroll();
+  }, [disarm, editorAreaRef, ensureAutoScroll, updateDragOverlay]);
 
   useLayoutEffect(() => {
     setBoxSelectionStore({
       getSelectedUnits: () => selectedRef.current,
+      selectUnits,
       clearSelection: () => {
         clearSelection();
         disarm();
       },
       isActive: () => selectedRef.current.length > 0,
+      isMarqueeActive: () => draggingRef.current,
     });
     return () => setBoxSelectionStore(null);
-  }, [clearSelection, disarm]);
+  }, [clearSelection, disarm, selectUnits]);
 
   useEffect(() => {
     if (readOnly) return;
 
-    const onDocMouseMove = (e: MouseEvent) => {
-      if (!draggingRef.current && pendingDragRef.current) {
-        const dx = Math.abs(e.clientX - pendingDragRef.current.startX);
-        const dy = Math.abs(e.clientY - pendingDragRef.current.startY);
-        if (dx < MIN_DRAG_PX && dy < MIN_DRAG_PX) return;
-        beginDrag(pendingDragRef.current.startX, pendingDragRef.current.startY);
-        pendingDragRef.current = null;
-      }
-      if (!draggingRef.current || !dragRef.current) return;
-      e.preventDefault();
-      const rect = normalizeClientRect(
-        { left: dragRef.current.startX, top: dragRef.current.startY, right: dragRef.current.startX, bottom: dragRef.current.startY },
-        { left: e.clientX, top: e.clientY, right: e.clientX, bottom: e.clientY },
-      );
-      updateDragOverlay(rect);
-    };
-
-    const onDocMouseUp = (e: MouseEvent) => {
-      if (!draggingRef.current && pendingDragRef.current) {
-        pendingDragRef.current = null;
-        return;
-      }
+    const finishDrag = (clientX: number, clientY: number) => {
       if (!draggingRef.current || !dragRef.current) return;
 
       const rect = normalizeClientRect(
         { left: dragRef.current.startX, top: dragRef.current.startY, right: dragRef.current.startX, bottom: dragRef.current.startY },
-        { left: e.clientX, top: e.clientY, right: e.clientX, bottom: e.clientY },
+        { left: clientX, top: clientY, right: clientX, bottom: clientY },
       );
 
       draggingRef.current = false;
       setDragging(false);
       dragRef.current = null;
+      lastPointerRef.current = null;
+      scrollContainerRef.current = null;
       setDragRect(null);
+      stopAutoScroll();
 
       const w = rect.right - rect.left;
       const h = rect.bottom - rect.top;
@@ -183,24 +247,71 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
       } else {
         syncSelectionBands([]);
         document.body.classList.remove('feishu-box-select-dragging');
+        editorAreaRef.current?.removeAttribute('data-selection-mode');
       }
     };
 
-    document.addEventListener('mousemove', onDocMouseMove, true);
-    document.addEventListener('mouseup', onDocMouseUp, true);
-    return () => {
-      document.removeEventListener('mousemove', onDocMouseMove, true);
-      document.removeEventListener('mouseup', onDocMouseUp, true);
-      document.body.classList.remove('feishu-box-select-dragging');
+    const onDocPointerMove = (e: PointerEvent) => {
+      if (!draggingRef.current && pendingDragRef.current) {
+        const dx = Math.abs(e.clientX - pendingDragRef.current.startX);
+        const dy = Math.abs(e.clientY - pendingDragRef.current.startY);
+        if (dx < MIN_DRAG_PX && dy < MIN_DRAG_PX) return;
+        beginDrag(pendingDragRef.current.startX, pendingDragRef.current.startY, pendingDragRef.current.pointerId);
+        pendingDragRef.current = null;
+      }
+      if (!draggingRef.current || !dragRef.current) return;
+      e.preventDefault();
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      const rect = normalizeClientRect(
+        { left: dragRef.current.startX, top: dragRef.current.startY, right: dragRef.current.startX, bottom: dragRef.current.startY },
+        { left: e.clientX, top: e.clientY, right: e.clientX, bottom: e.clientY },
+      );
+      updateDragOverlay(rect);
+      ensureAutoScroll();
     };
-  }, [beginDrag, finalizeSelection, readOnly, syncSelectionBands, updateDragOverlay]);
+
+    const onDocPointerUp = (e: PointerEvent) => {
+      if (!draggingRef.current && pendingDragRef.current) {
+        editorAreaRef.current?.releasePointerCapture?.(pendingDragRef.current.pointerId);
+        pendingDragRef.current = null;
+        return;
+      }
+      editorAreaRef.current?.releasePointerCapture?.(e.pointerId);
+      finishDrag(e.clientX, e.clientY);
+    };
+
+    const onDocPointerCancel = (e: PointerEvent) => {
+      editorAreaRef.current?.releasePointerCapture?.(e.pointerId);
+      pendingDragRef.current = null;
+      draggingRef.current = false;
+      setDragging(false);
+      dragRef.current = null;
+      lastPointerRef.current = null;
+      scrollContainerRef.current = null;
+      setDragRect(null);
+      stopAutoScroll();
+      document.body.classList.remove('feishu-box-select-dragging');
+      editorAreaRef.current?.removeAttribute('data-selection-mode');
+    };
+
+    document.addEventListener('pointermove', onDocPointerMove, true);
+    document.addEventListener('pointerup', onDocPointerUp, true);
+    document.addEventListener('pointercancel', onDocPointerCancel, true);
+    return () => {
+      document.removeEventListener('pointermove', onDocPointerMove, true);
+      document.removeEventListener('pointerup', onDocPointerUp, true);
+      document.removeEventListener('pointercancel', onDocPointerCancel, true);
+      document.body.classList.remove('feishu-box-select-dragging');
+      stopAutoScroll();
+    };
+  }, [beginDrag, editorAreaRef, ensureAutoScroll, finalizeSelection, readOnly, stopAutoScroll, syncSelectionBands, updateDragOverlay]);
 
   useEffect(() => {
     if (readOnly || !editor) return;
     const area = editorAreaRef.current;
     if (!area) return;
 
-    const onMouseDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 || isUiChrome(e.target)) return;
 
       const canStart = canStartBoxSelect(e.target, area, e.clientX, e.clientY);
@@ -217,12 +328,15 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
         clearSelection();
       }
 
-      pendingDragRef.current = { startX: e.clientX, startY: e.clientY };
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      area.setPointerCapture?.(e.pointerId);
+      pendingDragRef.current = { startX: e.clientX, startY: e.clientY, pointerId: e.pointerId };
     };
 
-    area.addEventListener('mousedown', onMouseDown, true);
+    area.addEventListener('pointerdown', onPointerDown, true);
     return () => {
-      area.removeEventListener('mousedown', onMouseDown, true);
+      area.removeEventListener('pointerdown', onPointerDown, true);
     };
   }, [beginDrag, clearSelection, disarm, editor, editorAreaRef, readOnly]);
 

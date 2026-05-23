@@ -1455,8 +1455,8 @@
         table.feishu-table,
         .tableWrapper table.feishu-table,
         .feishu-table-host table.feishu-table {
-          width: auto !important;
-          min-width: 100% !important;
+          width: max-content;
+          min-width: 100%;
           max-width: none !important;
           border-collapse: collapse !important;
           border: 1px solid #dee0e3 !important;
@@ -1546,9 +1546,28 @@
             box-shadow: inset 0 0 0 2px #3370ff !important;
           }
 
+          /* 列/行轨选中：整列/整行浅蓝底，对齐飞书（无单元格内描边） */
+          .feishu-table__cell--rail-selected,
+          th.feishu-table__cell--rail-selected,
+          td.feishu-table__cell--rail-selected,
+          .feishu-table__header-cell.feishu-table__cell--rail-selected {
+            background: #e6eeff !important;
+            box-shadow: none !important;
+          }
+
           .selectedCell::after {
             display: none !important;
             content: none !important;
+          }
+        }
+
+        .feishu-table-host--selection-pinned table.feishu-table,
+        .tableWrapper.feishu-table-host--selection-pinned table.feishu-table {
+          .selectedCell,
+          th.selectedCell,
+          .feishu-table__header-cell.selectedCell {
+            background: #e6eeff !important;
+            box-shadow: none !important;
           }
         }
 
@@ -1560,6 +1579,11 @@
           width: 4px;
           background: @primary;
           pointer-events: none;
+        }
+
+        .feishu-table-host .column-resize-handle,
+        .tableWrapper .column-resize-handle {
+          display: none !important;
         }
 
         .resize-cursor {

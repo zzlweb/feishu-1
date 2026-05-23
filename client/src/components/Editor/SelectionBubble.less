@@ -590,7 +590,46 @@
     gap: 2px;
     padding-right: 2px;
   }
+
+  .selection-bubble-menu-item--toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    .selection-bubble-menu-item-switch {
+      position: relative;
+      width: 34px;
+      height: 18px;
+      border-radius: 9px;
+      background: #c9cdd4;
+      flex-shrink: 0;
+      transition: background 0.15s ease;
+
+      &::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+        transition: transform 0.15s ease;
+      }
+
+      &.is-on {
+        background: #3370ff;
+
+        &::after {
+          transform: translateX(16px);
+        }
+      }
+    }
+  }
 }
+
 
 /* BubbleMenu：选区在 .tippy-content 内，避免 tippy 默认样式裁切图标 */
 .tippy-box:has(.selection-bubble),

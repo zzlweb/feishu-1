@@ -17,6 +17,7 @@ import {
   resolveColumnPaddingX,
   resolveColumnsGap,
 } from './columnsHelpers';
+import { useHoverFloatingGroup } from './floatingPanel';
 
 const COLUMN_PLUS_OVERLAY_SELECTOR =
   '.slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .feishu-columns-block__add-hover-wrap, .feishu-columns-block__add-btn, .feishu-columns-block__plus-menu-shell';
@@ -48,6 +49,13 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
     cancelScheduledClose();
     setMenuOpen(false);
   }, [cancelScheduledClose]);
+
+  const hoverGroup = useHoverFloatingGroup({
+    refs: [plusRef],
+    selectors: COLUMN_PLUS_OVERLAY_SELECTOR.split(',').map(selector => selector.trim()),
+    closeDelay: 160,
+    onClose: closeMenu,
+  });
 
   const ensureColumnFocus = useCallback(() => {
     if (columnPosRef.current != null) {
@@ -92,41 +100,35 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
     }
   }, [closeMenu, isColumnEmpty]);
 
-  const scheduleClose = useCallback(() => {
-    cancelScheduledClose();
-    closeTimerRef.current = setTimeout(() => {
-      closeTimerRef.current = undefined;
-      closeMenu();
-    }, 120);
-  }, [cancelScheduledClose, closeMenu]);
-
   useEffect(() => () => cancelScheduledClose(), [cancelScheduledClose]);
 
   const handleWrapMouseEnter = useCallback(() => {
     cancelScheduledClose();
+    hoverGroup.cancelClose();
     if (isColumnEmpty) openMenu();
-  }, [cancelScheduledClose, isColumnEmpty, openMenu]);
+  }, [cancelScheduledClose, hoverGroup, isColumnEmpty, openMenu]);
 
   const handleColWrapMouseLeave = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (!menuOpen) return;
     const next = getRelatedNode(event.relatedTarget);
-    if (next instanceof Element && isColumnPlusOverlayElement(next)) return;
-    scheduleClose();
-  }, [menuOpen, scheduleClose]);
+    if (hoverGroup.containsTarget(next) || (next instanceof Element && isColumnPlusOverlayElement(next))) return;
+    hoverGroup.scheduleClose(next);
+  }, [hoverGroup, menuOpen]);
 
   const slashMenu = menuOpen && isColumnEmpty
     ? createPortal(
         <div
           className="feishu-columns-block__plus-menu-shell"
-          onMouseEnter={() => {
+          onPointerEnter={() => {
             cancelScheduledClose();
+            hoverGroup.cancelClose();
             if (isColumnEmpty) openMenu();
           }}
           onMouseLeave={(event: React.MouseEvent<HTMLDivElement>) => {
             const next = getRelatedNode(event.relatedTarget);
-            if (next instanceof Element && isColumnPlusOverlayElement(next)) return;
+            if (hoverGroup.containsTarget(next) || (next instanceof Element && isColumnPlusOverlayElement(next))) return;
             if (next instanceof Element && next.closest('.feishu-columns-block__col-wrap')) return;
-            closeMenu();
+            hoverGroup.scheduleClose(next);
           }}
         >
           <SlashMenu
@@ -137,6 +139,7 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
             onBeforeSelect={ensureColumnFocus}
             onMouseEnter={() => {
               cancelScheduledClose();
+              hoverGroup.cancelClose();
               if (isColumnEmpty) openMenu();
             }}
             anchorRef={plusRef}
@@ -155,7 +158,7 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
         <div
           className="feishu-columns-block__add-hover-wrap"
           contentEditable={false}
-          onMouseEnter={handleWrapMouseEnter}
+          onPointerEnter={handleWrapMouseEnter}
         >
           <button
             ref={plusRef}

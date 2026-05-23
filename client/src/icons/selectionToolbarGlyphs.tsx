@@ -258,3 +258,31 @@ export const SelGlyphComment: ComponentType<SelToolbarIconProps> = ({
     />
   </ToolbarSvg>
 );
+
+/** TableGrid/Properties/Options 2x2 grid icon */
+export const SelGlyphTableGrid: ComponentType<SelToolbarIconProps> = ({
+  size,
+  fill = 'currentColor',
+  className,
+}) => (
+  <ToolbarSvg size={size} fill={fill} className={className}>
+    <rect x="4" y="4" width="6" height="6" rx="1" stroke={fill} strokeWidth="2" />
+    <rect x="14" y="4" width="6" height="6" rx="1" stroke={fill} strokeWidth="2" />
+    <rect x="4" y="14" width="6" height="6" rx="1" stroke={fill} strokeWidth="2" />
+    <rect x="14" y="14" width="6" height="6" rx="1" stroke={fill} strokeWidth="2" />
+  </ToolbarSvg>
+);
+
+/** TableInsert column/row icon */
+export const SelGlyphTableInsert: ComponentType<SelToolbarIconProps> = ({
+  size,
+  fill = 'currentColor',
+  className,
+}) => (
+  <ToolbarSvg size={size} fill={fill} className={className}>
+    <path d="M4 4h8v16H4V4Z" stroke={fill} strokeWidth="2" />
+    <path d="M17 12h4M19 10v4" stroke={fill} strokeWidth="2" strokeLinecap="round" />
+    <path d="M13 12h3" stroke={fill} strokeWidth="2" strokeDasharray="1 2" />
+  </ToolbarSvg>
+);
+

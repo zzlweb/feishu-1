@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/react';
 import { TextSelection } from '@tiptap/pm/state';
 import { getBlockAtPos } from './blockOperations';
-import { getTableElementFromHost, resolveTableHostFromElement } from './tableDom';
+import { resolveTableHostFromElement } from './tableDom';
 
 export interface SelectableUnit {
   id: string;
@@ -20,8 +20,10 @@ export interface ClientRect {
 
 export interface BoxSelectionStore {
   getSelectedUnits: () => SelectableUnit[];
+  selectUnits?: (units: SelectableUnit[]) => void;
   clearSelection: () => void;
   isActive: () => boolean;
+  isMarqueeActive?: () => boolean;
 }
 
 export let boxSelectionStore: BoxSelectionStore | null = null;
@@ -31,10 +33,10 @@ export function setBoxSelectionStore(store: BoxSelectionStore | null): void {
 }
 
 const UI_CHROME =
-  '.block-inline-tools, .feishu-table-chrome, .feishu-table-chrome-mount, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .selection-bubble, .editor-page-link-pop, .feishu-box-selection-layer, .column-resize-handle, .block-plus-menu-shell';
+  '[data-no-marquee-selection="true"], [data-floating-panel="true"], [data-block-action-button="true"], [data-drag-handle="true"], .block-inline-tools, .block-add-hover-wrap, .block-add-btn, .block-drag-row, .drag-handle, .hover-drag-icon-wrapper, .feishu-table-chrome, .feishu-table-chrome-mount, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .selection-bubble, .editor-page-link-pop, .feishu-box-selection-layer, .column-resize-handle, .block-plus-menu-shell, .feishu-columns-block__plus-menu-shell, .t-popup, .t-dialog, .t-dropdown, .t-select__dropdown';
 
 const TABLE_INTERACTION_SELECTOR =
-  '.feishu-table-host, .tableWrapper, table.feishu-table, .feishu-table-scroll, .feishu-columns-node, .feishu-columns-block';
+  '.feishu-table-host, .tableWrapper, table.feishu-table, .feishu-table-scroll';
 
 function isUiChrome(target: EventTarget | null): boolean {
   const element = target instanceof Element
@@ -54,11 +56,40 @@ function getTargetElement(target: EventTarget | null): Element | null {
 }
 
 function isNativeInteractiveElement(element: Element): boolean {
-  return Boolean(element.closest('button, input, textarea, select, option, [contenteditable="false"]'));
+  return Boolean(element.closest('button, input, textarea, select, option, a, label, [role="button"], [contenteditable="false"]'));
 }
 
 function isTableInteractionTarget(element: Element): boolean {
   return Boolean(element.closest(TABLE_INTERACTION_SELECTOR));
+}
+
+function isEditableTextTarget(element: Element): boolean {
+  const root = element.closest('.ProseMirror, .tiptap');
+  if (!root) return false;
+  return Boolean(element.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, code, .feishu-code-block__content, td, th'));
+}
+
+function textNodeClientRectsIntersectPoint(root: Element, clientX: number, clientY: number): boolean {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if (node.textContent?.trim()) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = Array.from(range.getClientRects());
+      range.detach();
+      if (rects.some(rect => (
+        clientX >= rect.left - 2
+        && clientX <= rect.right + 2
+        && clientY >= rect.top - 2
+        && clientY <= rect.bottom + 2
+      ))) {
+        return true;
+      }
+    }
+    node = walker.nextNode();
+  }
+  return false;
 }
 
 /** 点击是否落在顶层块之间的空白区（含最后一个块下方） */
@@ -96,22 +127,6 @@ function isBlankEditorPoint(clientX: number, clientY: number, tiptap: HTMLElemen
   return clientY > lastRect.bottom + 4;
 }
 
-function resolveRowRange(editor: Editor, tr: HTMLElement): { from: number; to: number } | null {
-  try {
-    const pos = editor.view.posAtDOM(tr, 0);
-    const $pos = editor.state.doc.resolve(pos);
-    for (let depth = $pos.depth; depth > 0; depth--) {
-      if ($pos.node(depth).type.name !== 'tableRow') continue;
-      const from = $pos.before(depth);
-      const node = $pos.node(depth);
-      return { from, to: from + node.nodeSize };
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
 function resolveListItemRange(editor: Editor, li: HTMLElement): { from: number; to: number } | null {
   try {
     const pos = editor.view.posAtDOM(li, 0);
@@ -146,33 +161,29 @@ function pushUnit(
 }
 
 /** 从 DOM 顶层块收集可框选项（比 nodeDOM 更稳定） */
-export function collectSelectableUnits(editor: Editor): SelectableUnit[] {
-  const units: SelectableUnit[] = [];
-  const seen = new Set<string>();
-  const root = editor.view.dom as HTMLElement;
-
-  for (const child of Array.from(root.children)) {
+function collectFromContainer(editor: Editor, container: HTMLElement, units: SelectableUnit[], seen: Set<string>): void {
+  for (const child of Array.from(container.children)) {
     if (!(child instanceof HTMLElement)) continue;
 
     const tableHost = child.matches('.feishu-table-host, .tableWrapper')
       ? child
       : resolveTableHostFromElement(child);
     if (tableHost) {
-      const table = getTableElementFromHost(tableHost);
-      if (table) {
-        Array.from(table.querySelectorAll('tr')).forEach((tr, rowIndex) => {
-          if (!(tr instanceof HTMLElement)) return;
-          const range = resolveRowRange(editor, tr);
-          if (!range) return;
-          pushUnit(units, seen, {
-            id: `tr-${range.from}`,
-            from: range.from,
-            to: range.to,
-            dom: tr,
-            kind: 'tableRow',
-          });
-        });
-      }
+      const range = resolveBlockRange(editor, tableHost);
+      pushUnit(units, seen, range && {
+        id: `block-${range.from}`,
+        from: range.from,
+        to: range.to,
+        dom: tableHost,
+        kind: 'block',
+      });
+      continue;
+    }
+
+    if (child.classList.contains('feishu-columns-node') || child.classList.contains('feishu-columns-block')) {
+      Array.from(child.querySelectorAll(':scope .feishu-columns-block__col')).forEach(column => {
+        if (column instanceof HTMLElement) collectFromContainer(editor, column, units, seen);
+      });
       continue;
     }
 
@@ -211,6 +222,12 @@ export function collectSelectableUnits(editor: Editor): SelectableUnit[] {
     });
   }
 
+}
+
+export function collectSelectableUnits(editor: Editor): SelectableUnit[] {
+  const units: SelectableUnit[] = [];
+  const seen = new Set<string>();
+  collectFromContainer(editor, editor.view.dom as HTMLElement, units, seen);
   return units;
 }
 
@@ -267,6 +284,19 @@ export function deleteSelectableUnits(editor: Editor, units: SelectableUnit[]): 
   return true;
 }
 
+export async function copySelectableUnits(editor: Editor, units: SelectableUnit[]): Promise<boolean> {
+  if (units.length === 0) return false;
+  const text = units
+    .slice()
+    .sort((a, b) => a.from - b.from)
+    .map(unit => editor.state.doc.textBetween(unit.from, unit.to, '\n', '\n').trim())
+    .filter(Boolean)
+    .join('\n\n');
+  if (!text) return false;
+  await navigator.clipboard.writeText(text);
+  return true;
+}
+
 /** 文档编辑区域：仅在空白区域按下左键拖动才开始框选块内容 */
 export function canStartBoxSelect(
   target: EventTarget | null,
@@ -288,7 +318,28 @@ export function canStartBoxSelect(
   if (element === tiptap) return true;
 
   if (clientX != null && clientY != null) {
-    return isBlankEditorPoint(clientX, clientY, tiptap);
+    const areaRect = editorArea.getBoundingClientRect();
+    const tiptapRect = tiptap.getBoundingClientRect();
+    if (
+      clientX >= areaRect.left
+      && clientX <= areaRect.right
+      && clientY >= areaRect.top
+      && clientY <= areaRect.bottom
+      && (clientX < tiptapRect.left || clientX > tiptapRect.right)
+    ) {
+      return true;
+    }
+
+    if (isBlankEditorPoint(clientX, clientY, tiptap)) return true;
+
+    const textBlock = element.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, code, .feishu-code-block__content');
+    if (textBlock) {
+      return !textNodeClientRectsIntersectPoint(textBlock, clientX, clientY);
+    }
+
+    if (isEditableTextTarget(element)) return false;
+
+    return Boolean(element.closest('[data-local-block], .feishu-code-block, .feishu-highlight-block-wrap, .feishu-divider, img, video'));
   }
 
   return false;

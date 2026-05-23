@@ -46,6 +46,8 @@ import { IconChevronMenuEnd } from '../../icons/feishuDoc';
 import {
   ADD_BELOW_FLYOUT_MAX_HEIGHT,
   clampFlyoutHeight,
+  COLOR_FLYOUT_ESTIMATED_HEIGHT,
+  COLOR_FLYOUT_WIDTH,
   computeSubmenuFlyoutPosition,
 } from './contextSubmenuFlyout';
 import { getInsertBelowPosition, insertBelowSlashItem } from './insertBelowBlocks';
@@ -60,7 +62,7 @@ import {
   applyEditorIndentIncrease,
   getEditorIndentUiState,
 } from './blockIndent';
-import { isPointerWithinFloatingShell, useFloatingPanelPosition } from './floatingPanel';
+import { isPointerWithinFloatingShell, useAnchoredContextMenuPosition, useHoverFloatingGroup } from './floatingPanel';
 import { setHeadingLevel, setTextAlignment, toggleBlockStyle } from './panelActions';
 import './ContextMenu.less';
 import './SlashMenu.less';
@@ -177,12 +179,18 @@ export default function ContextMenu({
   onMouseEnterCancel,
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const { finalPos, posVisible } = useFloatingPanelPosition(x, y, menuRef);
+  const alignTriggerRef = useRef<HTMLDivElement>(null);
+  const colorTriggerRef = useRef<HTMLDivElement>(null);
+  const addBelowTriggerRef = useRef<HTMLDivElement>(null);
+  const addBelowFlyoutRef = useRef<HTMLDivElement>(null);
+  const colorFlyoutRef = useRef<HTMLDivElement>(null);
+  const { finalPos, posVisible } = useAnchoredContextMenuPosition(anchorRef, menuRef, { x, y });
   const [gridTooltip, setGridTooltip] = useState<{ item: GridRowDef; rect: DOMRect } | null>(null);
   const [activeFlyout, setActiveFlyout] = useState<{
     kind: 'align' | 'color' | 'below';
     rect: DOMRect;
   } | null>(null);
+  const [flyoutPanelHeight, setFlyoutPanelHeight] = useState<number | null>(null);
   const gridTooltipTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -226,9 +234,24 @@ export default function ContextMenu({
     (onHoverDismiss ?? onClose)();
   };
 
+  const hoverGroup = useHoverFloatingGroup({
+    refs: [menuRef, alignTriggerRef, colorTriggerRef, colorFlyoutRef, addBelowTriggerRef, addBelowFlyoutRef, anchorRef],
+    selectors: [
+      '.context-menu',
+      '.context-submenu-flyout',
+      '.context-add-below-flyout',
+      '.slash-table-grid-flyout',
+      '.slash-columns-count-flyout',
+    ],
+    closeDelay: 160,
+    onClose: () => {
+      setActiveFlyout(null);
+      dismissByHover();
+    },
+  });
+
   const pointerStillInShell = (next: EventTarget | null): boolean =>
-    isPointerWithinFloatingShell(next, [menuRef, anchorRef], [
-      '.block-inline-tools',
+    hoverGroup.containsTarget(next) || isPointerWithinFloatingShell(next, [menuRef, anchorRef], [
       '.context-menu',
       '.context-submenu-flyout',
       '.context-add-below-flyout',
@@ -238,18 +261,84 @@ export default function ContextMenu({
 
   const handleShellMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    setActiveFlyout(null);
-    dismissByHover();
+    hoverGroup.scheduleClose(e.relatedTarget);
   };
 
-  const openFlyout = (kind: 'align' | 'color' | 'below', el: HTMLElement) => {
-    setActiveFlyout({ kind, rect: el.getBoundingClientRect() });
+  const resolveFlyoutTriggerEl = (kind: 'align' | 'color' | 'below') =>
+    kind === 'align'
+      ? alignTriggerRef.current
+      : kind === 'color'
+        ? colorTriggerRef.current
+        : addBelowTriggerRef.current;
+
+  const resolveFlyoutPanelRef = (kind: 'align' | 'color' | 'below') =>
+    kind === 'color' ? colorFlyoutRef : kind === 'below' ? addBelowFlyoutRef : null;
+
+  const openFlyout = (kind: 'align' | 'color' | 'below', triggerEl: HTMLElement) => {
+    setActiveFlyout({ kind, rect: triggerEl.getBoundingClientRect() });
   };
+
+  useLayoutEffect(() => {
+    if (!activeFlyout || !posVisible) {
+      setFlyoutPanelHeight(null);
+      return;
+    }
+
+    const panelEl = resolveFlyoutPanelRef(activeFlyout.kind)?.current;
+    if (panelEl) {
+      const nextHeight = panelEl.offsetHeight;
+      setFlyoutPanelHeight(prev => (prev === nextHeight ? prev : nextHeight));
+    } else {
+      setFlyoutPanelHeight(null);
+    }
+  }, [
+    activeFlyout?.kind,
+    activeFlyout?.rect.top,
+    activeFlyout?.rect.left,
+    activeFlyout?.rect.right,
+    activeFlyout?.rect.bottom,
+    posVisible,
+    finalPos.x,
+    finalPos.y,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!activeFlyout || !posVisible) return;
+
+    const syncTriggerRect = () => {
+      setActiveFlyout(prev => {
+        if (!prev) return prev;
+        const triggerEl = resolveFlyoutTriggerEl(prev.kind);
+        if (!triggerEl?.isConnected) return prev;
+        const nextRect = triggerEl.getBoundingClientRect();
+        const same =
+          prev.rect.top === nextRect.top
+          && prev.rect.left === nextRect.left
+          && prev.rect.right === nextRect.right
+          && prev.rect.bottom === nextRect.bottom;
+        return same ? prev : { ...prev, rect: nextRect };
+      });
+    };
+
+    syncTriggerRect();
+    const raf = window.requestAnimationFrame(syncTriggerRect);
+    window.addEventListener('resize', syncTriggerRect);
+    document.addEventListener('scroll', syncTriggerRect, true);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener('resize', syncTriggerRect);
+      document.removeEventListener('scroll', syncTriggerRect, true);
+    };
+  }, [activeFlyout?.kind, finalPos.x, finalPos.y, posVisible]);
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    setActiveFlyout(null);
-    dismissByHover();
+    hoverGroup.scheduleClose(e.relatedTarget);
+  };
+
+  const keepHoverAlive = () => {
+    hoverGroup.cancelClose();
+    onMouseEnterCancel?.();
   };
 
   const setHeading = (level: number) => {
@@ -400,10 +489,46 @@ export default function ContextMenu({
   const currentAlign = getCurrentTextAlign(editor);
   const submenuIconStroke = { strokeWidth: 2.75 };
 
+  const getActiveFlyoutPosition = () => {
+    if (!activeFlyout || !posVisible) return null;
+    const size = {
+      align: { width: 200, height: 196 },
+      color: {
+        width: COLOR_FLYOUT_WIDTH,
+        height:
+          flyoutPanelHeight != null && activeFlyout.kind === 'color'
+            ? flyoutPanelHeight
+            : colorFlyoutRef.current?.offsetHeight ?? COLOR_FLYOUT_ESTIMATED_HEIGHT,
+      },
+      below: {
+        width: 252,
+        height: clampFlyoutHeight(addBelowFlyoutRef.current?.scrollHeight ?? ADD_BELOW_FLYOUT_MAX_HEIGHT),
+      },
+    }[activeFlyout.kind];
+    return computeSubmenuFlyoutPosition({
+      trigger: activeFlyout.rect,
+      panelWidth: size.width,
+      panelHeight: size.height,
+      gap: 0,
+      pad: 8,
+    });
+  };
+
+  const flyoutPosition = getActiveFlyoutPosition();
+  const flyoutFixedStyle = flyoutPosition
+    ? {
+        position: 'fixed' as const,
+        top: flyoutPosition.top,
+        left: flyoutPosition.left,
+        zIndex: 10060,
+      }
+    : undefined;
+
   const alignFlyoutPanel = (
     <div
       className="context-submenu-flyout context-align-flyout"
-      onMouseEnter={() => onMouseEnterCancel?.()}
+      style={flyoutFixedStyle}
+      onPointerEnter={keepHoverAlive}
       onMouseLeave={handleFlyoutMouseLeave}
       onMouseDown={e => e.preventDefault()}
     >
@@ -464,8 +589,10 @@ export default function ContextMenu({
 
   const colorFlyoutPanel = (
     <div
+      ref={colorFlyoutRef}
       className="context-submenu-flyout context-color-flyout"
-      onMouseEnter={() => onMouseEnterCancel?.()}
+      style={flyoutFixedStyle}
+      onPointerEnter={keepHoverAlive}
       onMouseLeave={handleFlyoutMouseLeave}
       onMouseDown={e => e.preventDefault()}
     >
@@ -475,9 +602,14 @@ export default function ContextMenu({
 
   const addBelowFlyoutPanel = (
     <div
+      ref={addBelowFlyoutRef}
       className="slash-menu slash-menu-feishu context-add-below-flyout"
-      style={{ maxHeight: clampFlyoutHeight(ADD_BELOW_FLYOUT_MAX_HEIGHT), overflowY: 'auto' }}
-      onMouseEnter={() => onMouseEnterCancel?.()}
+      style={{
+        ...flyoutFixedStyle,
+        maxHeight: clampFlyoutHeight(ADD_BELOW_FLYOUT_MAX_HEIGHT),
+        overflowY: 'auto',
+      }}
+      onPointerEnter={keepHoverAlive}
       onMouseLeave={handleFlyoutMouseLeave}
       onMouseDown={e => e.preventDefault()}
     >
@@ -501,42 +633,21 @@ export default function ContextMenu({
     </div>
   );
 
-  const getActiveFlyoutNode = () => {
-    if (!activeFlyout) return null;
-    if (activeFlyout.kind === 'align') return alignFlyoutPanel;
-    if (activeFlyout.kind === 'color') return colorFlyoutPanel;
-    return addBelowFlyoutPanel;
-  };
-
-  const getActiveFlyoutPosition = () => {
-    if (!activeFlyout) return null;
-    const size = {
-      align: { width: 200, height: 196 },
-      color: { width: 252, height: 420 },
-      below: { width: 252, height: clampFlyoutHeight(ADD_BELOW_FLYOUT_MAX_HEIGHT) },
-    }[activeFlyout.kind];
-    return computeSubmenuFlyoutPosition({
-      trigger: activeFlyout.rect,
-      panelWidth: size.width,
-      panelHeight: size.height,
-      gap: 0,
-      pad: 8,
-    });
-  };
-
-  const flyoutNode = getActiveFlyoutNode();
-  const flyoutPosition = getActiveFlyoutPosition();
-
-  return (
-    <Fragment>
-      <div
-        ref={menuRef}
-        className="context-menu context-menu-feishu"
-        style={{ left: finalPos.x, top: finalPos.y, visibility: posVisible ? 'visible' : 'hidden' }}
-        onMouseEnter={() => { onMouseEnterCancel?.(); }}
-        onMouseLeave={e => { hideGridTooltip(); handleShellMouseLeave(e); }}
-        onScroll={hideGridTooltip}
-      >
+  const menuPanel = (
+    <div
+      ref={menuRef}
+      className="context-menu context-menu-feishu"
+      style={{
+        position: 'fixed',
+        left: finalPos.x,
+        top: finalPos.y,
+        zIndex: 10050,
+        visibility: posVisible ? 'visible' : 'hidden',
+      }}
+      onPointerEnter={keepHoverAlive}
+      onMouseLeave={e => { hideGridTooltip(); handleShellMouseLeave(e); }}
+      onScroll={hideGridTooltip}
+    >
         <div className="context-menu-scroll">
           <div className="context-menu-section context-menu-section--grid">
             <div className="context-block-types context-block-types--icon-grid">
@@ -563,8 +674,12 @@ export default function ContextMenu({
           <div className="context-menu-divider" />
 
           <div
+            ref={alignTriggerRef}
             className={`context-menu-item has-submenu${activeFlyout?.kind === 'align' ? ' is-submenu-open' : ''}`}
-            onMouseEnter={e => openFlyout('align', e.currentTarget)}
+            onPointerEnter={e => {
+              keepHoverAlive();
+              openFlyout('align', e.currentTarget);
+            }}
           >
             <span className="context-menu-icon"><ContextGlyphTypography size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>缩进和对齐</span>
@@ -572,8 +687,12 @@ export default function ContextMenu({
           </div>
 
           <div
+            ref={colorTriggerRef}
             className={`context-menu-item has-submenu${activeFlyout?.kind === 'color' ? ' is-submenu-open' : ''}`}
-            onMouseEnter={e => openFlyout('color', e.currentTarget)}
+            onPointerEnter={e => {
+              keepHoverAlive();
+              openFlyout('color', e.currentTarget);
+            }}
           >
             <span className="context-menu-icon"><ContextGlyphStyleColor size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>颜色</span>
@@ -628,8 +747,12 @@ export default function ContextMenu({
           <div className="context-menu-divider" />
 
           <div
+            ref={addBelowTriggerRef}
             className={`context-menu-item has-submenu${activeFlyout?.kind === 'below' ? ' is-submenu-open' : ''}`}
-            onMouseEnter={e => openFlyout('below', e.currentTarget)}
+            onPointerEnter={e => {
+              keepHoverAlive();
+              openFlyout('below', e.currentTarget);
+            }}
           >
             <span className="context-menu-icon"><ContextGlyphAddBelow size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>在下方添加</span>
@@ -637,23 +760,17 @@ export default function ContextMenu({
           </div>
         </div>
       </div>
+  );
 
-      {flyoutNode && flyoutPosition && createPortal(
-        <div
-          className="context-flyout-portal"
-          style={{
-            position: 'fixed',
-            left: flyoutPosition.left,
-            top: flyoutPosition.top,
-            zIndex: 10060,
-          }}
-        >
-          {flyoutNode}
-        </div>,
-        document.body,
-      )}
+  return createPortal(
+    <Fragment>
+      {menuPanel}
 
-      {gridTooltip && hasGridTooltip(gridTooltip.item) && createPortal(
+      {activeFlyout?.kind === 'align' && flyoutPosition && alignFlyoutPanel}
+      {activeFlyout?.kind === 'color' && flyoutPosition && colorFlyoutPanel}
+      {activeFlyout?.kind === 'below' && flyoutPosition && addBelowFlyoutPanel}
+
+      {gridTooltip && hasGridTooltip(gridTooltip.item) && (
         <div
           className="context-grid-tooltip"
           style={{
@@ -675,9 +792,9 @@ export default function ContextMenu({
               Markdown: {gridTooltip.item.tooltip!.markdown}
             </div>
           )}
-        </div>,
-        document.body,
+        </div>
       )}
-    </Fragment>
+    </Fragment>,
+    document.body,
   );
 }
