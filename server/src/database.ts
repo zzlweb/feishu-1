@@ -18,6 +18,9 @@ export interface CommentRecord {
   id: string;
   document_id: string;
   block_id: string;
+  thread_id?: string;
+  parent_id?: string;
+  message_id?: string;
   content: string;
   author: string;
   position_from: number;
@@ -25,6 +28,17 @@ export interface CommentRecord {
   created_at: string;
   updated_at: string;
   resolved: number;
+  status?: 'open' | 'resolved' | 'deleted' | 'anchor_lost';
+  visibility?: 'public' | 'private';
+  quote?: string;
+  anchor_type?: 'text-range' | 'block' | 'image' | 'video' | 'file' | 'table-cell' | 'table-range' | 'document';
+  anchor_json?: string;
+  mentioned_user_ids?: string;
+  private_visible_user_ids?: string;
+  deleted_at?: string;
+  resolved_at?: string;
+  resolved_by?: string;
+  is_edited?: number;
 }
 
 export interface TemplateRecord {
@@ -131,8 +145,16 @@ export function getCommentsByDocId(docId: string): CommentRecord[] {
   const db = loadDb();
   return db.comments
     .filter(c => c.document_id === docId)
-    .map(c => ({ ...c, block_id: c.block_id || '', updated_at: c.updated_at || c.created_at }))
-    .sort((a, b) => Number(a.resolved) - Number(b.resolved) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    .map(c => ({
+      ...c,
+      block_id: c.block_id || '',
+      thread_id: c.thread_id || c.block_id || c.id,
+      message_id: c.message_id || c.id,
+      status: c.status || (c.resolved ? 'resolved' : 'open'),
+      visibility: c.visibility || 'public',
+      updated_at: c.updated_at || c.created_at,
+    }))
+    .sort((a, b) => Number(a.resolved) - Number(b.resolved) || new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 }
 
 export function createCommentRecord(comment: CommentRecord): CommentRecord {
@@ -148,7 +170,18 @@ export function updateCommentRecord(commentId: string, updates: Partial<CommentR
   if (idx === -1) return undefined;
   const comment = db.comments[idx];
   if (updates.content !== undefined) comment.content = updates.content;
-  if (updates.resolved !== undefined) comment.resolved = updates.resolved;
+  if (updates.resolved !== undefined) {
+    comment.resolved = updates.resolved;
+    comment.status = updates.resolved ? 'resolved' : 'open';
+    comment.resolved_at = updates.resolved ? nowStr() : '';
+    comment.resolved_by = updates.resolved ? (updates.resolved_by || comment.resolved_by || comment.author) : '';
+  }
+  if (updates.status !== undefined) comment.status = updates.status;
+  if (updates.visibility !== undefined) comment.visibility = updates.visibility;
+  if (updates.anchor_json !== undefined) comment.anchor_json = updates.anchor_json;
+  if (updates.quote !== undefined) comment.quote = updates.quote;
+  if (updates.deleted_at !== undefined) comment.deleted_at = updates.deleted_at;
+  if (updates.is_edited !== undefined) comment.is_edited = updates.is_edited;
   comment.updated_at = nowStr();
   db.comments[idx] = comment;
   saveDb(db);

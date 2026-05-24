@@ -7,9 +7,15 @@ import type { Comment } from '../../types';
 interface CommentSidebarProps {
   comments: Comment[];
   activeBlockId: string;
+  pendingThread?: {
+    blockId: string;
+    threadId: string;
+    quote: string;
+    anchorType?: Comment['anchor_type'];
+  } | null;
   inputValue: string;
   onInputChange: (value: string) => void;
-  onSubmit: () => boolean | Promise<boolean>;
+  onSubmit: (threadKey?: string) => boolean | Promise<boolean>;
   onResolve: (comment: Comment) => void;
   onUpdateComment: (comment: Comment, content: string) => boolean | Promise<boolean>;
   onDeleteComment: (comment: Comment) => boolean | Promise<boolean>;
@@ -39,7 +45,7 @@ function formatCommentTime(iso: string) {
 function groupByBlock(comments: Comment[]): Map<string, Comment[]> {
   const map = new Map<string, Comment[]>();
   for (const c of comments) {
-    const key = c.block_id || '__doc__';
+    const key = c.thread_id || c.block_id || c.id || '__doc__';
     const arr = map.get(key);
     if (arr) arr.push(c);
     else map.set(key, [c]);
@@ -89,6 +95,7 @@ function buildCommentMoreOptions(isOwn: boolean): DropdownOption[] {
 export default function CommentSidebar({
   comments,
   activeBlockId,
+  pendingThread,
   inputValue,
   onInputChange,
   onSubmit,
@@ -107,13 +114,41 @@ export default function CommentSidebar({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [likedCommentIds, setLikedCommentIds] = useState<Record<string, true>>({});
+  const [showHistory, setShowHistory] = useState(false);
 
   const unresolvedCount = comments.filter(c => !Number(c.resolved)).length;
+  const visibleComments = comments.filter(c => showHistory ? Number(c.resolved) || c.status === 'deleted' || c.status === 'anchor_lost' : !Number(c.resolved) && c.status !== 'deleted');
+  const displayComments = pendingThread && !visibleComments.some(c => (c.thread_id || c.block_id || c.id) === pendingThread.threadId)
+    ? [
+      ...visibleComments,
+      {
+        id: pendingThread.threadId,
+        document_id: '',
+        block_id: pendingThread.blockId,
+        thread_id: pendingThread.threadId,
+        content: '',
+        author: currentUserName,
+        position_from: 0,
+        position_to: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        resolved: 0,
+        quote: pendingThread.quote,
+        anchor_type: pendingThread.anchorType || 'text-range',
+      } as Comment,
+    ]
+    : visibleComments;
 
-  const submitReply = useCallback(async () => {
-    const ok = await Promise.resolve(onSubmit());
+  useEffect(() => {
+    if (pendingThread) {
+      setReplyingBlockId(pendingThread.threadId);
+    }
+  }, [pendingThread?.threadId]);
+
+  const submitReply = useCallback(async (threadKey?: string) => {
+    const ok = await Promise.resolve(onSubmit(threadKey || replyingBlockId || activeBlockId));
     if (ok !== false) setReplyingBlockId(null);
-  }, [onSubmit]);
+  }, [activeBlockId, onSubmit, replyingBlockId]);
 
   const toggleLike = useCallback((commentId: string) => {
     setLikedCommentIds(prev => {
@@ -137,7 +172,7 @@ export default function CommentSidebar({
     [editDraft, onUpdateComment, cancelEdit],
   );
 
-  const grouped = groupByBlock(comments);
+  const grouped = groupByBlock(displayComments);
   const blockIds = Array.from(grouped.keys());
 
   const updatePositions = useCallback(() => {
@@ -147,8 +182,10 @@ export default function CommentSidebar({
     const newPos = new Map<string, number>();
     for (const bid of blockIds) {
       if (bid === '__doc__') continue;
-      const top = getBlockTop(bid, container, panelsEl);
+      const anchorId = grouped.get(bid)?.[0]?.block_id || bid;
+      const top = getBlockTop(anchorId, container, panelsEl);
       if (top !== null) newPos.set(bid, top);
+      if (top !== null && anchorId !== bid) newPos.set(anchorId, top);
     }
     setPositions(newPos);
   }, [blockIds.join(','), mainScrollRef]);
@@ -169,11 +206,16 @@ export default function CommentSidebar({
 
   const sortedBlocks = blockIds
     .filter(id => id !== '__doc__')
-    .map(blockId => ({
-      blockId,
-      comments: grouped.get(blockId)!,
-      top: positions.get(blockId) ?? 0,
-    }))
+    .map(threadKey => {
+      const blockComments = grouped.get(threadKey)!;
+      const anchorBlockId = blockComments[0]?.block_id || threadKey;
+      return {
+      blockId: threadKey,
+      anchorBlockId,
+      comments: blockComments,
+      top: positions.get(anchorBlockId) ?? positions.get(threadKey) ?? 0,
+      };
+    })
     .sort((a, b) => a.top - b.top);
 
   const MIN_GAP = 8;
@@ -214,7 +256,7 @@ export default function CommentSidebar({
       </div>
 
       <div className="comment-sidebar-pos__panels" ref={panelsContainerRef}>
-        {comments.length === 0 ? (
+        {displayComments.length === 0 ? (
           <div className="comment-sidebar-pos__empty">
             <div className="comment-sidebar-pos__empty-icon">💬</div>
             <div>暂无评论</div>
@@ -222,19 +264,19 @@ export default function CommentSidebar({
         ) : (
           <div className="comment-sidebar-pos__track" style={{ minHeight: `max(100%, ${Math.max(panelsScrollExtent, 1)}px)` }}>
             <input ref={attachInputRef} type="file" multiple accept="image/gif,image/jpg,image/jpeg,image/bmp,image/png" className="comment-panel__file-input" tabIndex={-1} aria-hidden />
-            {resolvedPanels.map(({ blockId, comments: blockComments, top }, panelIdx) => {
+            {resolvedPanels.map(({ blockId, anchorBlockId, comments: blockComments, top }, panelIdx) => {
               const isActive = blockId === activeBlockId;
               const firstUnresolved = blockComments.find(c => !Number(c.resolved));
               const prevPanelBlockId = panelIdx > 0 ? resolvedPanels[panelIdx - 1]!.blockId : null;
               const nextPanelBlockId = panelIdx >= 0 && panelIdx < resolvedPanels.length - 1 ? resolvedPanels[panelIdx + 1]!.blockId : null;
 
               const openComposer = () => {
-                onJumpToBlock(blockId);
+                onJumpToBlock(anchorBlockId || blockId);
                 setReplyingBlockId(blockId);
                 onInputChange('');
               };
 
-              const quotePreview = getBlockQuotePreview(blockId, mainScrollRef.current);
+              const quotePreview = blockComments[0]?.quote || getBlockQuotePreview(blockComments[0]?.block_id || blockId, mainScrollRef.current);
               const quoteLabel = quotePreview || '高亮块';
 
               return (
@@ -245,11 +287,11 @@ export default function CommentSidebar({
                         <span
                           className="comment-panel__quote-text"
                           title={quoteLabel}
-                          onClick={() => onJumpToBlock(blockId)}
+                          onClick={() => onJumpToBlock(anchorBlockId || blockId)}
                           onKeyDown={e => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
-                              onJumpToBlock(blockId);
+                              onJumpToBlock(anchorBlockId || blockId);
                             }
                           }}
                           role="link"
@@ -297,7 +339,7 @@ export default function CommentSidebar({
                     </div>
 
                     <div className="comment-panel__reply-list">
-                      {blockComments.map(comment => {
+                      {blockComments.filter(comment => comment.content.trim().length > 0).map(comment => {
                         const isOwn = comment.author.trim() === currentUserName.trim();
                         const isEditing = editingCommentId === comment.id;
                         const isLiked = Boolean(likedCommentIds[comment.id]);
@@ -429,7 +471,7 @@ export default function CommentSidebar({
                                 onKeyDown={e => {
                                   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                                     e.preventDefault();
-                                    void submitReply();
+                                    void submitReply(blockId);
                                   }
                                   if (e.key === 'Escape') setReplyingBlockId(null);
                                 }}
@@ -451,7 +493,7 @@ export default function CommentSidebar({
                           {inputValue.trim().length > 0 && (
                             <div className="comment-panel__textarea-actions">
                               <button type="button" className="comment-panel__textarea-btn-cancel" onClick={() => setReplyingBlockId(null)}>取消</button>
-                              <button type="button" className="comment-panel__textarea-btn-submit" onClick={() => void submitReply()}>回复</button>
+                              <button type="button" className="comment-panel__textarea-btn-submit" onClick={() => void submitReply(blockId)}>回复</button>
                             </div>
                           )}
                         </div>

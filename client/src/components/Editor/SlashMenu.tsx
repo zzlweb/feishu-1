@@ -18,7 +18,7 @@ interface Props {
   onClose: () => void;
   onBeforeSelect?: () => void;
   onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
+  onMouseLeave?: (relatedTarget: EventTarget | null) => void;
   variant?: 'fixed' | 'anchored';
   anchorRef?: RefObject<HTMLElement | null>;
 }
@@ -129,7 +129,11 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
 
   const pointerInsideMenuShell = (next: EventTarget | null) => {
     if (!(next instanceof Element)) return false;
-    return Boolean(menuRef.current?.contains(next) || next.closest('.slash-submenu-portal'));
+    return Boolean(
+      menuRef.current?.contains(next)
+      || next.closest('.slash-submenu-portal')
+      || next.closest('.slash-tooltip'),
+    );
   };
 
   const openSubmenu = (kind: 'tableGrid' | 'columnsCount', el: HTMLElement) => {
@@ -140,7 +144,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const closeSubmenuByPointer = (next: EventTarget | null) => {
     if (pointerInsideMenuShell(next)) return;
     setActiveSubmenu(null);
-    onMouseLeave?.();
+    onMouseLeave?.(next);
   };
 
   const hasTooltipContent = (item: SlashMenuItem) =>

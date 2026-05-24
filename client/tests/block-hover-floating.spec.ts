@@ -62,3 +62,33 @@ test('keeps block controls and portal panel stable across hover gaps', async ({ 
 
   await expect(slashMenu).toBeHidden();
 });
+
+test('closes plus slash menu when pointer leaves panel for editor content', async ({ page }) => {
+  await page.goto('/doc/hover-floating-e2e');
+
+  const firstParagraph = page.locator('.ProseMirror p').first();
+  await expect(firstParagraph).toBeVisible();
+  await firstParagraph.hover();
+
+  const addButton = page.locator('.block-add-btn').first();
+  await expect(addButton).toBeVisible();
+  await addButton.hover();
+
+  const slashMenu = page.locator('.block-plus-menu-shell .slash-menu-feishu').first();
+  await expect(slashMenu).toBeVisible();
+
+  const menuBox = await slashMenu.boundingBox();
+  expect(menuBox).not.toBeNull();
+  if (menuBox) {
+    await page.mouse.move(menuBox.x + menuBox.width / 2, menuBox.y + 40);
+  }
+
+  const editorArea = page.locator('.editor-content-area');
+  const areaBox = await editorArea.boundingBox();
+  expect(areaBox).not.toBeNull();
+  if (areaBox) {
+    await page.mouse.move(areaBox.x + areaBox.width * 0.7, areaBox.y + areaBox.height * 0.6, { steps: 10 });
+  }
+
+  await expect(slashMenu).toBeHidden({ timeout: 2000 });
+});

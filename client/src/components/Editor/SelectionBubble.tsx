@@ -253,6 +253,27 @@ function resolveTableHandleAnchorRect(tableHost: HTMLElement | null): DOMRect {
   return new DOMRect(0, 0, 2, 2);
 }
 
+function resolveSelectedTableCellsRect(tableHost: HTMLElement | null, fallbackA: HTMLElement, fallbackB: HTMLElement): DOMRect {
+  const selectedCells = tableHost
+    ? Array.from(tableHost.querySelectorAll('td.selectedCell, th.selectedCell, td.feishu-table__cell--rail-selected, th.feishu-table__cell--rail-selected, [data-feishu-rail-selected="true"]'))
+      .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    : [];
+  const cells = selectedCells.length > 0 ? selectedCells : [fallbackA, fallbackB];
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  cells.forEach(cell => {
+    const rect = cell.getBoundingClientRect();
+    left = Math.min(left, rect.left);
+    top = Math.min(top, rect.top);
+    right = Math.max(right, rect.right);
+    bottom = Math.max(bottom, rect.bottom);
+  });
+  if (!Number.isFinite(left) || !Number.isFinite(top)) return fallbackA.getBoundingClientRect();
+  return new DOMRect(left, top, Math.max(2, right - left), Math.max(2, bottom - top));
+}
+
 function resolveTableBubbleAnchor(editor: Editor): TableBubbleAnchor {
   const { selection } = editor.state;
   if (!(selection instanceof CellSelection)) {
@@ -271,22 +292,16 @@ function resolveTableBubbleAnchor(editor: Editor): TableBubbleAnchor {
   if (selection.isColSelection()) {
     return {
       placement: 'top-start',
-      offset: [0, 6],
-      getRect: () => resolveTableHandleAnchorRect(tableHost),
+      offset: [0, 14],
+      getRect: () => resolveSelectedTableCellsRect(tableHost, anchorEl, headEl),
     };
   }
 
   if (selection.isRowSelection()) {
     return {
       placement: 'top-start',
-      offset: [0, 8],
-      getRect: () => {
-        const a = anchorEl.getBoundingClientRect();
-        const h = headEl.getBoundingClientRect();
-        const top = Math.min(a.top, h.top);
-        const left = Math.min(a.left, h.left);
-        return new DOMRect(left, top, 2, 2);
-      },
+      offset: [0, 14],
+      getRect: () => resolveSelectedTableCellsRect(tableHost, anchorEl, headEl),
     };
   }
 
@@ -457,7 +472,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
       tippyOptions={{
         placement: tableBubbleAnchor.placement,
         duration: [120, 80],
-        zIndex: 200,
+        zIndex: 260,
         offset: tableBubbleAnchor.offset,
         moveTransition: 'transform 0.15s ease-out',
         maxWidth: 'none',

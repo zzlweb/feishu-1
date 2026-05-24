@@ -25,11 +25,18 @@ import {
   setTableColumnWidth,
   setTableRowHeight,
 } from './tableInsert';
+import {
+  mergeOrSplitSelectedCells,
+  removeSelectedTableColumn,
+  removeSelectedTableRow,
+  setSelectedTableCellBackground,
+  setTextAlignment,
+} from './panelActions';
 import './FeishuTableOverlay.less';
 
 // Keep the rail at least as large as the hover hit target, otherwise the edge
 // insert button can be visually clipped on the first row/column.
-const RAIL = 18;
+const RAIL = 10;
 const HIT_MARGIN = 12;
 const DRAG_THRESHOLD = 4;
 const MIN_COL_WIDTH = 120;
@@ -465,11 +472,18 @@ function FeishuTableOverlay({
       try {
         const $cell = state.doc.resolve(cellPos);
         const selection = CellSelection.colSelection($cell);
+        const surface = getTableScrollFromHost(tableHost);
+        const scrollLeft = surface.scrollLeft;
         suppressSelectionClearRef.current = true;
         applyPinnedRail({ kind: 'col', index: colIndex });
-        editor.view.dispatch(state.tr.setSelection(selection).scrollIntoView());
+        editor.view.dispatch(state.tr.setSelection(selection));
+        surface.scrollLeft = scrollLeft;
         syncTableRailCellHighlight(tableHost, { kind: 'col', index: colIndex }, editor);
         editor.view.focus();
+        window.requestAnimationFrame(() => {
+          surface.scrollLeft = scrollLeft;
+          syncTableRailCellHighlight(tableHost, { kind: 'col', index: colIndex }, editor);
+        });
         clearHover();
         window.setTimeout(() => {
           suppressSelectionClearRef.current = false;
@@ -491,11 +505,18 @@ function FeishuTableOverlay({
       try {
         const $cell = state.doc.resolve(cellPos);
         const selection = CellSelection.rowSelection($cell);
+        const surface = getTableScrollFromHost(tableHost);
+        const scrollLeft = surface.scrollLeft;
         suppressSelectionClearRef.current = true;
         applyPinnedRail({ kind: 'row', index: rowIndex });
-        editor.view.dispatch(state.tr.setSelection(selection).scrollIntoView());
+        editor.view.dispatch(state.tr.setSelection(selection));
+        surface.scrollLeft = scrollLeft;
         syncTableRailCellHighlight(tableHost, { kind: 'row', index: rowIndex }, editor);
         editor.view.focus();
+        window.requestAnimationFrame(() => {
+          surface.scrollLeft = scrollLeft;
+          syncTableRailCellHighlight(tableHost, { kind: 'row', index: rowIndex }, editor);
+        });
         clearHover();
         window.setTimeout(() => {
           suppressSelectionClearRef.current = false;
@@ -1103,6 +1124,14 @@ function FeishuTableOverlay({
   const visibleWidth = viewportWidth;
   const handleLeft = visibleLeft - 4;
   const handleTop = tableOffsetTop - 4;
+  const selectionToolbar = pinnedRail && selectionRange
+    && colBounds[selectionRange.left] != null
+    && rowBounds[selectionRange.top] != null
+    ? {
+      left: Math.max(visibleLeft, colBounds[selectionRange.left]),
+      top: Math.max(0, rowBounds[selectionRange.top] - 76),
+    }
+    : null;
   const colHitsToRender = colBounds
     .map((x, i) => ({ x, i }))
     .filter(({ x }) => x > colBounds[0] + 2 && x < colBounds[colBounds.length - 1] - 2 && x >= viewStart && x <= viewStart + viewportWidth);
@@ -1211,7 +1240,7 @@ function FeishuTableOverlay({
           );
         })}
 
-        {!suppressInsertChrome && colHitsToRender.map(({ x, i }) => (
+        {colHitsToRender.map(({ x, i }) => (
           <div
             key={`c-${i}`}
             className={[
@@ -1293,9 +1322,13 @@ function FeishuTableOverlay({
           );
         })}
 
-        {!suppressInsertChrome && rowBounds
+        {rowBounds
           .map((y, i) => ({ y, i }))
-          .filter(({ y }) => y > rowBounds[0] + 2 && y < rowBounds[rowBounds.length - 1] - 2)
+          .filter(({ y }) => (
+            rowBounds.length <= 2
+              ? y >= rowBounds[0] - 1 && y <= rowBounds[rowBounds.length - 1] + 1
+              : y > rowBounds[0] + 2 && y < rowBounds[rowBounds.length - 1] - 2
+          ))
           .map(({ y, i }) => (
             <div
               key={`r-${i}`}
@@ -1445,6 +1478,33 @@ function FeishuTableOverlay({
             height: rowBounds[selectionRange.bottom] - rowBounds[selectionRange.top],
           }}
         />
+      )}
+
+      {selectionToolbar && (
+        <div
+          className="feishu-table-selection-toolbar"
+          data-no-marquee-selection="true"
+          data-floating-panel="true"
+          style={{ left: selectionToolbar.left, top: selectionToolbar.top }}
+          onMouseDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          <button type="button" title="合并/拆分" onClick={() => mergeOrSplitSelectedCells(editor)}>⛓</button>
+          <span className="feishu-table-selection-toolbar__divider" />
+          <button type="button" title="单元格背景" onClick={() => setSelectedTableCellBackground(editor, '#e6eeff')}>🎨</button>
+          <span className="feishu-table-selection-toolbar__divider" />
+          <button type="button" title="左对齐" onClick={() => setTextAlignment(editor, 'left')}>☰</button>
+          <button type="button" title="居中" onClick={() => setTextAlignment(editor, 'center')}>≡</button>
+          <button type="button" title="右对齐" onClick={() => setTextAlignment(editor, 'right')}>☷</button>
+          <span className="feishu-table-selection-toolbar__divider" />
+          <button type="button" title="加粗" onClick={() => editor.chain().focus().toggleBold().run()}>B</button>
+          <button type="button" title="删除行/列" className="is-danger" onClick={() => {
+            if (pinnedRail?.kind === 'col') removeSelectedTableColumn(editor);
+            else removeSelectedTableRow(editor);
+          }}>⌫</button>
+        </div>
       )}
 
       {showChrome && !pinnedRail && !railDragPreview?.active && !columnResizePreview?.active && !rowResizePreview?.active && cellPlus && (

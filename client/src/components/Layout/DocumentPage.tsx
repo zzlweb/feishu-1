@@ -23,6 +23,15 @@ export default function DocumentPage() {
   const [commentSidebarVisible, setCommentSidebarVisible] = useState(false);
   const [activeCommentBlockId, setActiveCommentBlockId] = useState('');
   const [commentInput, setCommentInput] = useState('');
+  const [pendingCommentAnchor, setPendingCommentAnchor] = useState<{
+    blockId: string;
+    threadId: string;
+    anchorType: Comment['anchor_type'];
+    positionFrom: number;
+    positionTo: number;
+    quote: string;
+    anchorJson: string;
+  } | null>(null);
   const outlineWasVisibleRef = useRef(false);
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -110,12 +119,34 @@ export default function DocumentPage() {
 
   useEffect(() => {
     const handleOpenCommentSidebar = (event: Event) => {
-      const detail = (event as CustomEvent<{ documentId?: string; blockId?: string }>).detail;
+      const detail = (event as CustomEvent<{
+        documentId?: string;
+        blockId?: string;
+        threadId?: string;
+        anchorType?: Comment['anchor_type'];
+        position_from?: number;
+        position_to?: number;
+        quote?: string;
+        anchor_json?: string;
+      }>).detail;
       if (!detail?.blockId) return;
       /* 不传 documentId 的旧事件仍打开（单页会话）；传入则必须与当前路由文档一致 */
       if (detail.documentId != null && detail.documentId !== id) return;
       const blockId = detail.blockId;
       setActiveCommentBlockId(blockId);
+      if (detail.threadId && !comments.some(c => (c.thread_id || c.block_id || c.id) === detail.threadId)) {
+        setPendingCommentAnchor({
+          blockId,
+          threadId: detail.threadId,
+          anchorType: detail.anchorType || 'block',
+          positionFrom: detail.position_from || 0,
+          positionTo: detail.position_to || 0,
+          quote: detail.quote || '',
+          anchorJson: detail.anchor_json || '',
+        });
+      } else {
+        setPendingCommentAnchor(null);
+      }
       setCommentSidebarVisible(true);
       window.setTimeout(() => {
         mainScrollRef.current?.querySelector(`#${CSS.escape(blockId)}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -123,7 +154,7 @@ export default function DocumentPage() {
     };
     window.addEventListener('feishu-open-comment-sidebar', handleOpenCommentSidebar);
     return () => window.removeEventListener('feishu-open-comment-sidebar', handleOpenCommentSidebar);
-  }, [id]);
+  }, [comments, id]);
 
   const handleSave = async (data: { title?: string; content?: string; icon?: string; cover_url?: string }) => {
     if (!id) return;
@@ -147,28 +178,44 @@ export default function DocumentPage() {
     setTimeout(() => setSaveStatus('idle'), 2000);
   }, [id]);
 
-  const handleSubmitComment = useCallback(async (): Promise<boolean> => {
+  const handleSubmitComment = useCallback(async (threadKey?: string): Promise<boolean> => {
     if (!id || !commentInput.trim()) return false;
+    const activeThreadKey = threadKey || activeCommentBlockId;
+    const pending = pendingCommentAnchor?.threadId === activeThreadKey ? pendingCommentAnchor : null;
+    const existingThread = comments.find(c => (c.thread_id || c.block_id || c.id) === activeThreadKey);
+    const generatedReplyId = `reply-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const res = await addComment(id, {
-      block_id: activeCommentBlockId,
+      id: pending ? pending.threadId : generatedReplyId,
+      thread_id: pending?.threadId || existingThread?.thread_id || existingThread?.block_id || activeThreadKey,
+      parent_id: pending ? '' : (existingThread?.id || ''),
+      block_id: pending?.blockId || existingThread?.block_id || activeThreadKey,
       content: commentInput.trim(),
       author: doc?.author || '张正亮',
-      position_from: 0,
-      position_to: 0,
+      position_from: pending?.positionFrom || existingThread?.position_from || 0,
+      position_to: pending?.positionTo || existingThread?.position_to || 0,
+      quote: pending?.quote || existingThread?.quote || '',
+      anchor_type: pending?.anchorType || existingThread?.anchor_type || 'block',
+      anchor_json: pending?.anchorJson || existingThread?.anchor_json || '',
     });
     if (res.code === 0 && res.data) {
-      setComments(prev => [res.data!, ...prev]);
+      setComments(prev => [...prev, res.data!]);
       setCommentInput('');
+      setPendingCommentAnchor(null);
       return true;
     }
     return false;
-  }, [activeCommentBlockId, commentInput, doc?.author, id]);
+  }, [activeCommentBlockId, commentInput, comments, doc?.author, id, pendingCommentAnchor]);
 
   const handleToggleResolveComment = useCallback(async (comment: Comment) => {
     if (!id) return;
     const res = await updateComment(id, comment.id, { resolved: comment.resolved ? 0 : 1 });
     if (res.code === 0 && res.data) {
-      setComments(prev => prev.map(item => item.id === comment.id ? res.data! : item));
+      const threadKey = comment.thread_id || comment.block_id || comment.id;
+      setComments(prev => prev.map(item => (
+        (item.thread_id || item.block_id || item.id) === threadKey
+          ? { ...item, resolved: res.data!.resolved, status: res.data!.resolved ? 'resolved' : 'open' }
+          : item
+      )));
     }
   }, [id]);
 
@@ -195,8 +242,22 @@ export default function DocumentPage() {
 
   const handleJumpToCommentBlock = useCallback((blockId: string) => {
     setActiveCommentBlockId(blockId);
-    mainScrollRef.current?.querySelector(`#${CSS.escape(blockId)}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const root = mainScrollRef.current;
+    if (!root) return;
+    root.querySelectorAll('.feishu-comment-highlight--active').forEach(el => el.classList.remove('feishu-comment-highlight--active'));
+    const target = root.querySelector(`#${CSS.escape(blockId)}`) || root.querySelector(`[data-comment-thread-id="${CSS.escape(blockId)}"]`);
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (target instanceof HTMLElement) target.classList.add('feishu-comment-highlight--active');
   }, []);
+
+  useEffect(() => {
+    const root = mainScrollRef.current;
+    if (!root) return;
+    root.querySelectorAll('.feishu-comment-highlight--active').forEach(el => el.classList.remove('feishu-comment-highlight--active'));
+    if (!activeCommentBlockId) return;
+    const target = root.querySelector(`#${CSS.escape(activeCommentBlockId)}`) || root.querySelector(`[data-comment-thread-id="${CSS.escape(activeCommentBlockId)}"]`);
+    if (target instanceof HTMLElement) target.classList.add('feishu-comment-highlight--active');
+  }, [activeCommentBlockId, comments]);
 
   useEffect(() => {
     const el = mainScrollRef.current;
@@ -302,6 +363,7 @@ export default function DocumentPage() {
               <CommentSidebar
                 comments={comments}
                 activeBlockId={activeCommentBlockId}
+                pendingThread={pendingCommentAnchor}
                 inputValue={commentInput}
                 onInputChange={setCommentInput}
                 onSubmit={handleSubmitComment}

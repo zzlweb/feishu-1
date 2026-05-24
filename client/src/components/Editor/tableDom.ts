@@ -81,8 +81,24 @@ export function syncTableRailCellHighlight(
   const nextSelected = new Set<HTMLElement>();
 
   if (pin) {
-    let resolvedByMap = false;
-    if (editor?.view?.dom) {
+    const markDomGrid = () => {
+      const rows = Array.from(table.querySelectorAll('tr'));
+      if (pin.kind === 'col') {
+        rows.forEach(tr => {
+          const cell = tr.querySelectorAll('th, td')[pin.index];
+          if (cell instanceof HTMLElement) nextSelected.add(cell);
+        });
+      } else {
+        const row = rows[pin.index];
+        row?.querySelectorAll('th, td').forEach(cell => {
+          if (cell instanceof HTMLElement) nextSelected.add(cell);
+        });
+      }
+    };
+
+    markDomGrid();
+
+    if (nextSelected.size === 0 && editor?.view?.dom) {
       const tablePos = getTablePosFromHost(editor, host);
       const tableNode = tablePos != null ? editor.state.doc.nodeAt(tablePos) : null;
       if (tablePos != null && tableNode) {
@@ -97,27 +113,11 @@ export function syncTableRailCellHighlight(
             if (cellDom instanceof HTMLElement) nextSelected.add(cellDom);
           }
         };
-        const selectedBeforeMap = nextSelected.size;
         if (pin.kind === 'col') {
           for (let row = 0; row < map.height; row += 1) markCellAt(row, pin.index);
         } else {
           for (let col = 0; col < map.width; col += 1) markCellAt(pin.index, col);
         }
-        resolvedByMap = nextSelected.size > selectedBeforeMap;
-      }
-    }
-    if (!resolvedByMap) {
-      const rows = Array.from(table.querySelectorAll('tr'));
-      if (pin.kind === 'col') {
-        rows.forEach(tr => {
-          const cell = tr.querySelectorAll('th, td')[pin.index];
-          if (cell instanceof HTMLElement) nextSelected.add(cell);
-        });
-      } else {
-        const row = rows[pin.index];
-        row?.querySelectorAll('th, td').forEach(cell => {
-          if (cell instanceof HTMLElement) nextSelected.add(cell);
-        });
       }
     }
   }

@@ -11,6 +11,10 @@ export function makeParagraphCommentBlockId() {
   return `block-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function makeCommentThreadId() {
+  return `comment-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 function readStoredBlockId(node: ProseNode): string | null {
   const id = node.attrs?.blockId as string | undefined;
   return typeof id === 'string' && id.length > 0 ? id : null;
@@ -81,6 +85,43 @@ export function resolveCommentAnchorFromEditor(editor: Editor): {
 /** 与高亮菜单「评论」一致：沿用 attrs.blockId；否则用已在 DOM 上的 id（NodeView）；再否则分配 highlight-… 并写入。 */
 export function openCommentSidebarForEditorSelection(editor: Editor, documentId: string): boolean {
   if (!documentId) return false;
+  const { from, to, empty } = editor.state.selection;
+
+  if (!empty && from !== to && editor.state.schema.marks.commentHighlight) {
+    const threadId = makeCommentThreadId();
+    const selectedText = editor.state.doc.textBetween(from, to, ' ', ' ').replace(/\s+/g, ' ').trim();
+    const quote = selectedText.length > 120 ? `${selectedText.slice(0, 120)}...` : selectedText;
+    const mark = editor.state.schema.marks.commentHighlight.create({
+      threadId,
+      blockId: threadId,
+      status: 'open',
+      quote,
+    });
+    const tr = editor.state.tr.addMark(from, to, mark);
+    tr.setMeta('addToHistory', false);
+    editor.view.dispatch(tr);
+    window.dispatchEvent(
+      new CustomEvent('feishu-open-comment-sidebar', {
+        detail: {
+          documentId,
+          blockId: threadId,
+          threadId,
+          anchorType: 'text-range',
+          position_from: from,
+          position_to: to,
+          quote,
+          anchor_json: JSON.stringify({
+            type: 'text-range',
+            textRange: { startOffset: from, endOffset: to },
+            quote,
+            anchorSnapshot: { selectedText },
+          }),
+        },
+      }),
+    );
+    return true;
+  }
+
   const anchor = resolveCommentAnchorFromEditor(editor);
   if (!anchor) return false;
 
@@ -104,7 +145,7 @@ export function openCommentSidebarForEditorSelection(editor: Editor, documentId:
 
   window.dispatchEvent(
     new CustomEvent('feishu-open-comment-sidebar', {
-      detail: { documentId, blockId },
+      detail: { documentId, blockId, threadId: blockId, anchorType: 'block' },
     }),
   );
   return true;

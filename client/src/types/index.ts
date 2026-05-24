@@ -15,6 +15,9 @@ export interface Comment {
   id: string;
   document_id: string;
   block_id: string;
+  thread_id?: string;
+  parent_id?: string;
+  message_id?: string;
   content: string;
   author: string;
   position_from: number;
@@ -22,6 +25,17 @@ export interface Comment {
   created_at: string;
   updated_at: string;
   resolved: number;
+  status?: 'open' | 'resolved' | 'deleted' | 'anchor_lost';
+  visibility?: 'public' | 'private';
+  quote?: string;
+  anchor_type?: 'text-range' | 'block' | 'image' | 'video' | 'file' | 'table-cell' | 'table-range' | 'document';
+  anchor_json?: string;
+  mentioned_user_ids?: string;
+  private_visible_user_ids?: string;
+  deleted_at?: string;
+  resolved_at?: string;
+  resolved_by?: string;
+  is_edited?: number;
 }
 
 export interface Template {

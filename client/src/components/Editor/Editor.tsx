@@ -1,5 +1,5 @@
 import { useEditor, EditorContent, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type Editor as TipTapEditor, type NodeViewProps } from '@tiptap/react';
-import { Extension, Node as TiptapNode } from '@tiptap/core';
+import { Extension, Mark, Node as TiptapNode } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -59,6 +59,236 @@ const Notebook = wrapIcon(BookOpenIcon);
 const Help = wrapIcon(HelpCircleIcon);
 
 const lowlight = createLowlight(common);
+const MEDIA_UPLOAD_EVENT = 'feishu-media-upload-action';
+const MEDIA_UPLOAD_MAX_SIZE = 200 * 1024 * 1024;
+const BLOCKED_FILE_EXTENSIONS = new Set(['exe', 'bat', 'cmd', 'sh', 'msi', 'com', 'scr', 'ps1']);
+const mediaUploadFiles = new Map<string, { file: File; objectUrl?: string; controller?: AbortController }>();
+
+function createMediaId(prefix = 'media') {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function getFileExtension(name: string) {
+  const clean = name.split('?')[0] ?? name;
+  const dot = clean.lastIndexOf('.');
+  return dot >= 0 ? clean.slice(dot + 1).toLowerCase() : '';
+}
+
+function classifyMediaFile(file: File): 'image' | 'video' | 'audio' | 'document' | 'archive' | 'file' {
+  const mime = file.type.toLowerCase();
+  const ext = getFileExtension(file.name);
+  if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'heic', 'heif'].includes(ext)) return 'image';
+  if (mime.startsWith('video/') || ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) return 'video';
+  if (mime.startsWith('audio/') || ['mp3', 'm4a', 'wav', 'ogg', 'webm'].includes(ext)) return 'audio';
+  if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'csv'].includes(ext)) return 'document';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'archive';
+  return 'file';
+}
+
+function canPreviewMedia(kind: string, mime = '') {
+  return kind === 'image' || kind === 'video' || kind === 'audio' || mime === 'application/pdf';
+}
+
+function formatFileSize(size: number) {
+  if (!size) return '0 KB';
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(2)} MB`;
+  return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function mediaIcon(kind: string, extension = '') {
+  if (kind === 'image') return 'IMG';
+  if (kind === 'video') return 'VID';
+  if (kind === 'audio') return 'AUD';
+  if (extension === 'pdf') return 'PDF';
+  if (['doc', 'docx'].includes(extension)) return 'DOC';
+  if (['xls', 'xlsx', 'csv'].includes(extension)) return 'XLS';
+  if (['ppt', 'pptx'].includes(extension)) return 'PPT';
+  if (kind === 'archive') return 'ZIP';
+  return 'FILE';
+}
+
+function updateMediaBlockAttrs(editor: TipTapEditor, uploadId: string, attrs: Record<string, unknown>, addToHistory = false) {
+  const { state, view } = editor;
+  let tr = state.tr;
+  let changed = false;
+  state.doc.descendants((node, pos) => {
+    if (node.type.name !== 'localFileBlock' || node.attrs.uploadId !== uploadId) return;
+    tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attrs });
+    changed = true;
+    return false;
+  });
+  if (!changed) return false;
+  if (!addToHistory) tr = tr.setMeta('addToHistory', false);
+  view.dispatch(tr);
+  return true;
+}
+
+function sanitizeEditorHtmlForSave(html: string) {
+  if (typeof DOMParser === 'undefined') return html;
+  const doc = new DOMParser().parseFromString(`<div data-editor-save-root="true">${html}</div>`, 'text/html');
+  const root = doc.querySelector('[data-editor-save-root="true"]');
+  if (!root) return html;
+
+  root.querySelectorAll('[data-local-block="file"]').forEach(element => {
+    Array.from(element.attributes).forEach(attribute => {
+      if (attribute.name.toLowerCase().includes('localobjecturl')) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+    element.querySelectorAll('[src^="blob:"]').forEach(media => media.removeAttribute('src'));
+  });
+
+  return root.innerHTML;
+}
+
+function uploadMediaFile(file: File, signal: AbortSignal, onProgress: (progress: number) => void) {
+  return new Promise<{ name: string; size: number; type: string; url: string }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    xhr.open('POST', '/api/uploads');
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable) onProgress(Math.max(1, Math.min(98, Math.round((event.loaded / event.total) * 100))));
+    };
+    xhr.onload = () => {
+      signal.removeEventListener('abort', abort);
+      try {
+        const json = JSON.parse(xhr.responseText || '{}');
+        if (xhr.status >= 200 && xhr.status < 300 && json.code === 0) {
+          resolve(json.data);
+        } else {
+          reject(new Error(json.message || `上传失败 (${xhr.status})`));
+        }
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('上传失败'));
+      }
+    };
+    xhr.onerror = () => {
+      signal.removeEventListener('abort', abort);
+      reject(new Error('网络错误，上传失败'));
+    };
+    xhr.onabort = () => {
+      signal.removeEventListener('abort', abort);
+      reject(new DOMException('上传已取消', 'AbortError'));
+    };
+    const form = new FormData();
+    form.append('file', file);
+    xhr.send(form);
+  });
+}
+
+function createPendingMediaNode(file: File) {
+  const uploadId = createMediaId('upload');
+  const blockId = createMediaId('media');
+  const extension = getFileExtension(file.name);
+  const mediaKind = classifyMediaFile(file);
+  const canUseLocalPreview = mediaKind === 'image' || mediaKind === 'video' || mediaKind === 'audio' || extension === 'pdf';
+  const localObjectUrl = canUseLocalPreview ? URL.createObjectURL(file) : '';
+  if (localObjectUrl) mediaUploadFiles.set(uploadId, { file, objectUrl: localObjectUrl });
+  else mediaUploadFiles.set(uploadId, { file });
+  return {
+    uploadId,
+    node: {
+      type: 'localFileBlock',
+      attrs: {
+        id: blockId,
+        uploadId,
+        name: file.name,
+        size: file.size,
+        mime: file.type,
+        extension,
+        mediaKind,
+        viewMode: mediaKind === 'image' || mediaKind === 'video' || mediaKind === 'audio' || extension === 'pdf' ? 'preview' : 'card',
+        uploadStatus: 'local',
+        uploadProgress: 0,
+        localObjectUrl,
+        errorMessage: '',
+      },
+    },
+  };
+}
+
+function validateDroppedFile(file: File): string | null {
+  const extension = getFileExtension(file.name);
+  if (BLOCKED_FILE_EXTENSIONS.has(extension)) return '出于安全原因，暂不支持上传该类型文件';
+  if (file.size > MEDIA_UPLOAD_MAX_SIZE) return '文件超过 200MB 限制';
+  return null;
+}
+
+function startMediaUpload(editor: TipTapEditor, uploadId: string) {
+  const task = mediaUploadFiles.get(uploadId);
+  if (!task) {
+    updateMediaBlockAttrs(editor, uploadId, { uploadStatus: 'failed', errorMessage: '本地文件已不可用' });
+    return;
+  }
+  task.controller?.abort();
+  const controller = new AbortController();
+  mediaUploadFiles.set(uploadId, { ...task, controller });
+  updateMediaBlockAttrs(editor, uploadId, { uploadStatus: 'uploading', uploadProgress: 1, errorMessage: '' });
+  void uploadMediaFile(task.file, controller.signal, progress => {
+    const blockStillExists = updateMediaBlockAttrs(editor, uploadId, { uploadStatus: 'uploading', uploadProgress: progress });
+    if (!blockStillExists) controller.abort();
+  }).then(result => {
+    if (controller.signal.aborted) return;
+    if (task.objectUrl) URL.revokeObjectURL(task.objectUrl);
+    mediaUploadFiles.delete(uploadId);
+    const blockStillExists = updateMediaBlockAttrs(editor, uploadId, {
+      uploadStatus: 'success',
+      uploadProgress: 100,
+      fileId: uploadId,
+      url: result.url,
+      previewUrl: result.url,
+      localObjectUrl: '',
+      name: result.name,
+      size: result.size,
+      mime: result.type,
+      extension: getFileExtension(result.name),
+      mediaKind: classifyMediaFile({ name: result.name, type: result.type } as File),
+      errorMessage: '',
+    });
+    if (!blockStillExists) mediaUploadFiles.delete(uploadId);
+  }).catch(error => {
+    if (controller.signal.aborted) {
+      updateMediaBlockAttrs(editor, uploadId, { uploadStatus: 'canceled', errorMessage: '已取消上传' });
+      return;
+    }
+    updateMediaBlockAttrs(editor, uploadId, {
+      uploadStatus: 'failed',
+      errorMessage: error instanceof Error ? error.message : '上传失败',
+    });
+  });
+}
+
+function insertMediaFiles(editor: TipTapEditor, files: File[], insertPos?: number) {
+  const valid = files.filter(file => file && !validateDroppedFile(file));
+  const invalid = files.find(file => validateDroppedFile(file));
+  const failedNodes = invalid
+    ? [{
+        type: 'localFileBlock',
+        attrs: {
+          id: createMediaId('media'),
+          uploadId: createMediaId('upload'),
+          name: invalid.name,
+          size: invalid.size,
+          mime: invalid.type,
+          extension: getFileExtension(invalid.name),
+          mediaKind: classifyMediaFile(invalid),
+          viewMode: 'card',
+          uploadStatus: 'failed',
+          uploadProgress: 0,
+          errorMessage: validateDroppedFile(invalid),
+        },
+      }]
+    : [];
+  const pending = valid.map(createPendingMediaNode);
+  const nodes = [...pending.map(item => item.node), ...failedNodes];
+  if (nodes.length === 0) return false;
+  const pos = typeof insertPos === 'number' ? insertPos : editor.state.selection.from;
+  editor.chain().focus().insertContentAt(pos, nodes).run();
+  pending.forEach(item => startMediaUpload(editor, item.uploadId));
+  return true;
+}
 
 /** 为段落/标题等块挂稳定 id，便于评论锚点写入 HTML 并可滚动定位。 */
 const CommentAnchorAttributes = Extension.create({
@@ -85,6 +315,48 @@ const CommentAnchorAttributes = Extension.create({
 
 const normalizeTitle = (value: string) => value === '未命名文档' ? '' : value;
 
+const CommentHighlightMark = Mark.create({
+  name: 'commentHighlight',
+  inclusive: false,
+  addAttributes() {
+    return {
+      threadId: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-comment-thread-id'),
+        renderHTML: attributes => attributes.threadId ? { 'data-comment-thread-id': attributes.threadId } : {},
+      },
+      blockId: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-block-id') || element.getAttribute('id'),
+        renderHTML: attributes => attributes.blockId ? { id: attributes.blockId, 'data-block-id': attributes.blockId } : {},
+      },
+      status: {
+        default: 'open',
+        parseHTML: element => element.getAttribute('data-comment-status') || 'open',
+        renderHTML: attributes => ({ 'data-comment-status': attributes.status || 'open' }),
+      },
+      quote: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-comment-quote') || '',
+        renderHTML: attributes => attributes.quote ? { 'data-comment-quote': attributes.quote } : {},
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-comment-thread-id]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return [
+      'span',
+      {
+        ...HTMLAttributes,
+        class: `feishu-comment-highlight${HTMLAttributes.class ? ` ${HTMLAttributes.class}` : ''}`,
+      },
+      0,
+    ];
+  },
+});
+
 function getRelatedNode(target: EventTarget | null): Node | null {
   return target instanceof Node ? target : null;
 }
@@ -92,8 +364,16 @@ function getRelatedNode(target: EventTarget | null): Node | null {
 const BLOCK_TOOLS_OVERLAY_SELECTOR =
   '.block-inline-tools, .block-plus-menu-shell, .selection-bubble, .slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .feishu-table-chrome, .feishu-table-chrome-mount, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .feishu-columns-block__plus-menu-shell, .feishu-columns-block__col-wrap, .feishu-columns-block__add-hover-wrap, .feishu-columns-block__add-btn';
 
+const PLUS_MENU_HOVER_BRIDGE_SELECTOR =
+  '.block-inline-tools, .block-add-hover-wrap, .block-add-btn, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .slash-tooltip';
+
 function isBlockToolsOverlayElement(element: Element | null): boolean {
   return Boolean(element?.closest(BLOCK_TOOLS_OVERLAY_SELECTOR));
+}
+
+/** 加号插入菜单：仅在与加号按钮/子菜单/tooltip 之间移动时保持打开，移入正文应关闭 */
+function isPlusMenuHoverBridgeTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(PLUS_MENU_HOVER_BRIDGE_SELECTOR));
 }
 
 const CONTEXT_MENU_SHELL_SELECTOR =
@@ -220,29 +500,144 @@ const FeishuHorizontalRule = HorizontalRule.extend({
   },
 });
 
+function MediaFileBlockView({ node, updateAttributes, deleteNode, editor, getPos, selected }: NodeViewProps) {
+  const attrs = node.attrs;
+  const status = String(attrs.uploadStatus || 'success');
+  const kind = String(attrs.mediaKind || classifyMediaFile({ name: attrs.name || '', type: attrs.mime || '' } as File));
+  const extension = String(attrs.extension || getFileExtension(attrs.name || ''));
+  const src = String(attrs.url || attrs.previewUrl || attrs.localObjectUrl || '');
+  const progress = Math.max(0, Math.min(100, Number(attrs.uploadProgress || 0)));
+  const viewMode = String(attrs.viewMode || (kind === 'image' ? 'preview' : 'card'));
+  const isUploading = status === 'local' || status === 'uploading' || status === 'processing';
+  const isFailed = status === 'failed' || status === 'canceled';
+  const canPreview = Boolean(src && canPreviewMedia(kind, attrs.mime));
+
+  const setNodeSelection = () => {
+    const pos = typeof getPos === 'function' ? getPos() : null;
+    if (typeof pos === 'number') editor.commands.setNodeSelection(pos);
+  };
+  const retryUpload = () => {
+    window.dispatchEvent(new CustomEvent(MEDIA_UPLOAD_EVENT, { detail: { action: 'retry', uploadId: attrs.uploadId } }));
+  };
+  const cancelUpload = () => {
+    window.dispatchEvent(new CustomEvent(MEDIA_UPLOAD_EVENT, { detail: { action: 'cancel', uploadId: attrs.uploadId } }));
+    updateAttributes({ uploadStatus: 'canceled', errorMessage: '已取消上传' });
+  };
+  const copyLink = () => {
+    if (attrs.url) void navigator.clipboard?.writeText(String(attrs.url));
+  };
+  const toggleViewMode = () => {
+    const next = viewMode === 'preview' ? 'card' : canPreview ? 'preview' : 'text';
+    updateAttributes({ viewMode: next });
+  };
+
+  return (
+    <NodeViewWrapper
+      as="div"
+      className={`feishu-file-block feishu-file-block--${kind} feishu-file-block--${viewMode}${selected ? ' is-selected' : ''}`}
+      data-local-block="file"
+      data-upload-id={attrs.uploadId}
+      data-upload-status={status}
+      contentEditable={false}
+      onClick={setNodeSelection}
+    >
+      {viewMode === 'preview' && canPreview && (
+        <div className="feishu-media-preview" data-no-marquee-selection="true">
+          {kind === 'image' && <img className="feishu-media-preview__image" src={src} alt={attrs.name || 'image'} draggable={false} />}
+          {kind === 'video' && <video className="feishu-media-preview__video" src={src} controls preload="metadata" data-no-marquee-selection="true" />}
+          {kind === 'audio' && <audio className="feishu-media-preview__audio" src={src} controls preload="metadata" data-no-marquee-selection="true" />}
+          {extension === 'pdf' && <iframe className="feishu-media-preview__pdf" src={src} title={attrs.name || 'PDF'} sandbox="allow-same-origin allow-scripts" />}
+        </div>
+      )}
+
+      {viewMode === 'text' ? (
+        <div className="feishu-file-text" title={attrs.name}>
+          <span className="feishu-file-text__icon">{mediaIcon(kind, extension)}</span>
+          <span className="feishu-file-text__name">{attrs.name || '文件'}</span>
+        </div>
+      ) : (
+        <div className={`feishu-local-card feishu-local-card--file feishu-local-card--${kind}`}>
+          <div className="feishu-local-card__icon">{mediaIcon(kind, extension)}</div>
+          <div className="feishu-local-card__body">
+            <div className="feishu-local-card__title" title={attrs.name}>{attrs.name || '文件'}</div>
+            <div className="feishu-local-card__desc">
+              {isUploading ? `上传中 ${progress}%` : isFailed ? (attrs.errorMessage || '上传失败') : `${formatFileSize(Number(attrs.size || 0))} · ${extension || attrs.mime || '文件'}`}
+            </div>
+            {isUploading && (
+              <div className="feishu-media-progress" aria-label={`上传进度 ${progress}%`}>
+                <span style={{ width: `${progress}%` }} />
+              </div>
+            )}
+          </div>
+          <div className="feishu-file-actions" data-no-marquee-selection="true">
+            {isFailed && <button type="button" onMouseDown={e => e.preventDefault()} onClick={retryUpload}>重试</button>}
+            {isUploading && <button type="button" onMouseDown={e => e.preventDefault()} onClick={cancelUpload}>取消</button>}
+            {attrs.url && <button type="button" onMouseDown={e => e.preventDefault()} onClick={copyLink}>复制链接</button>}
+            {attrs.url && <a href={attrs.url} download={attrs.name || 'file'} onMouseDown={e => e.stopPropagation()}>下载</a>}
+            <button type="button" onMouseDown={e => e.preventDefault()} onClick={toggleViewMode}>切换视图</button>
+            <button type="button" className="is-danger" onMouseDown={e => e.preventDefault()} onClick={deleteNode}>删除</button>
+          </div>
+        </div>
+      )}
+      {kind === 'image' && (
+        <input
+          className="feishu-media-caption"
+          placeholder="添加描述"
+          value={attrs.caption || ''}
+          onChange={e => updateAttributes({ caption: e.target.value })}
+          onMouseDown={e => e.stopPropagation()}
+          data-no-marquee-selection="true"
+        />
+      )}
+    </NodeViewWrapper>
+  );
+}
+
 const LocalFileBlock = TiptapNode.create({
   name: 'localFileBlock',
   group: 'block',
   atom: true,
   addAttributes() {
-    return { name: { default: '视频或文件' }, url: { default: '' }, size: { default: 0 }, mime: { default: '' } };
+    return {
+      id: { default: null },
+      uploadId: { default: null },
+      fileId: { default: '' },
+      name: { default: '文件' },
+      url: { default: '' },
+      previewUrl: { default: '' },
+      thumbnailUrl: { default: '' },
+      localObjectUrl: { default: '' },
+      size: { default: 0 },
+      mime: { default: '' },
+      extension: { default: '' },
+      mediaKind: { default: 'file' },
+      viewMode: { default: 'card' },
+      uploadStatus: { default: 'success' },
+      uploadProgress: { default: 100 },
+      errorMessage: { default: '' },
+      displayWidth: { default: null },
+      displayHeight: { default: null },
+      caption: { default: '' },
+    };
   },
   parseHTML() {
     return [{ tag: 'div[data-local-block="file"]' }];
   },
   renderHTML({ HTMLAttributes }) {
-    const size = Number(HTMLAttributes.size || 0);
-    const sizeText = size > 0 ? `${(size / 1024 / 1024).toFixed(2)} MB` : '文件';
-    const mime = String(HTMLAttributes.mime || '');
-    const isVideo = mime.startsWith('video/');
-    const isAudio = mime.startsWith('audio/');
-    const preview = HTMLAttributes.url && isVideo
-      ? ['video', { class: 'feishu-file-preview', src: HTMLAttributes.url, controls: 'true', preload: 'metadata' }]
-      : HTMLAttributes.url && isAudio
-        ? ['audio', { class: 'feishu-file-preview feishu-file-preview--audio', src: HTMLAttributes.url, controls: 'true', preload: 'metadata' }]
-        : null;
-    const card = ['div', { class: `feishu-local-card feishu-local-card--file${preview ? ' feishu-local-card--media' : ''}` }, ['div', { class: 'feishu-local-card__icon' }, isVideo ? '▶' : isAudio ? '♪' : '🔗'], ['div', { class: 'feishu-local-card__body' }, ['div', { class: 'feishu-local-card__title' }, HTMLAttributes.name || '视频或文件'], ['div', { class: 'feishu-local-card__desc' }, sizeText]], HTMLAttributes.url ? ['a', { class: 'feishu-local-card__action', href: HTMLAttributes.url, download: HTMLAttributes.name || 'file' }, '下载'] : ['span', { class: 'feishu-local-card__action' }, '文件']];
-    return ['div', { ...HTMLAttributes, 'data-local-block': 'file', class: 'feishu-file-block' }, ...(preview ? [preview] : []), card];
+    return [
+      'div',
+      {
+        ...HTMLAttributes,
+        'data-local-block': 'file',
+        'data-upload-id': HTMLAttributes.uploadId,
+        'data-upload-status': HTMLAttributes.uploadStatus,
+        class: `feishu-file-block feishu-file-block--${HTMLAttributes.mediaKind || 'file'}`,
+      },
+      HTMLAttributes.name || '文件',
+    ];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(MediaFileBlockView);
   },
 });
 
@@ -725,6 +1120,7 @@ const editorExtensions = [
   }),
   FeishuHeading.configure({ levels: [1, 2, 3, 4, 5, 6] }),
   CommentAnchorAttributes,
+  CommentHighlightMark,
   FeishuHorizontalRule,
   FeishuCodeBlock.configure({ lowlight }),
   Underline,
@@ -985,6 +1381,14 @@ export default function Editor({
   const [pageLinkPopPos, setPageLinkPopPos] = useState({ top: 0, left: 0 });
   const [pageLinkText, setPageLinkText] = useState('');
   const [pageLinkUrl, setPageLinkUrl] = useState('');
+  const [fileDropState, setFileDropState] = useState<{
+    visible: boolean;
+    top: number;
+    left: number;
+    width: number;
+    count: number;
+    disabled?: boolean;
+  } | null>(null);
   const [blockTools, setBlockTools] = useState({
     visible: false,
     top: 0,
@@ -1180,8 +1584,8 @@ export default function Editor({
   }, [setBlockGutterHoveredState, setPlusHoveredState]);
 
   const closeBlockHoverFloatingGroup = useCallback(() => {
-    if (editorRefForCatalogue.current?.state.selection instanceof CellSelection) return;
     closeSlashMenu();
+    if (editorRefForCatalogue.current?.state.selection instanceof CellSelection) return;
     setContextMenu(null);
     setTableHandleHovered(false);
     setPlusHoveredState(false);
@@ -1201,6 +1605,36 @@ export default function Editor({
     closeDelay: 160,
     onClose: closeBlockHoverFloatingGroup,
   });
+
+  const schedulePlusMenuClose = useCallback(
+    (target: EventTarget | null) => {
+      if (isPlusMenuHoverBridgeTarget(target)) return;
+      blockHoverFloatingGroup.scheduleClose(null);
+    },
+    [blockHoverFloatingGroup],
+  );
+
+  const schedulePlusMenuOnlyClose = useCallback(
+    (target: EventTarget | null) => {
+      if (
+        target instanceof Element
+        && target.closest(
+          '.block-add-hover-wrap, .block-add-btn, .block-plus-menu-shell, .slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout',
+        )
+      ) {
+        return;
+      }
+      window.setTimeout(() => {
+        const hovered = document.querySelector(
+          '.block-add-hover-wrap:hover, .block-add-btn:hover, .block-plus-menu-shell:hover, .slash-menu:hover, .slash-submenu-portal:hover, .slash-table-grid-flyout:hover, .slash-columns-count-flyout:hover',
+        );
+        if (hovered) return;
+        closeSlashMenu();
+        setPlusHoveredState(false);
+      }, 140);
+    },
+    [closeSlashMenu, setPlusHoveredState],
+  );
 
   const resolveHoveredBlockInfo = useCallback(
     (target: EventTarget | null): NonNullable<ReturnType<typeof getElementBlockInfo>> | 'keep' | null => {
@@ -1356,22 +1790,41 @@ export default function Editor({
     if (next instanceof Element && next.closest('.context-menu')) return;
     if (editorRefForCatalogue.current?.state.selection instanceof CellSelection) return;
     if (slashMenuVisible && slashMenuFromPlus) {
-      blockHoverFloatingGroup.scheduleClose(next);
+      schedulePlusMenuClose(next);
       return;
     }
     if (contextMenu) return;
     blockHoverFloatingGroup.scheduleClose(next);
-  }, [blockHoverFloatingGroup, contextMenu, slashMenuFromPlus, slashMenuVisible]);
+  }, [blockHoverFloatingGroup, contextMenu, schedulePlusMenuClose, slashMenuFromPlus, slashMenuVisible]);
 
   const editor = useEditor({
     extensions: editorExtensions,
     content: content || '<p></p>',
     editable: !readOnly,
     editorProps: {
-      handlePaste: (_view, event) => {
+      handleClick: (_view, _pos, event) => {
+        const target = event.target instanceof Element
+          ? event.target.closest('[data-comment-thread-id]')
+          : null;
+        const threadId = target?.getAttribute('data-comment-thread-id');
+        const blockId = target?.getAttribute('data-block-id') || target?.getAttribute('id') || threadId;
+        if (!threadId || !blockId) return false;
+        window.dispatchEvent(
+          new CustomEvent('feishu-open-comment-sidebar', {
+            detail: { documentId, blockId, threadId, anchorType: 'text-range' },
+          }),
+        );
+        return false;
+      },
+      handlePaste: (view, event) => {
         if (readOnly) return false;
         const activeEditor = editorRefForCatalogue.current;
         if (!activeEditor) return false;
+        const files = Array.from(event.clipboardData?.files ?? []);
+        if (files.length > 0) {
+          event.preventDefault();
+          return insertMediaFiles(activeEditor, files, view.state.selection.from);
+        }
         return insertTableFromClipboardData(activeEditor, event.clipboardData);
       },
     },
@@ -1381,7 +1834,7 @@ export default function Editor({
     onUpdate: ({ editor }) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
-        onSave({ content: editor.getHTML() });
+        onSave({ content: sanitizeEditorHtmlForSave(editor.getHTML()) });
       }, 1000);
       extractHeadings(editor);
 
@@ -1527,13 +1980,13 @@ export default function Editor({
       if (resolved) return;
 
       if (slashMenuFromPlus) {
-        blockHoverFloatingGroup.scheduleClose(next);
+        schedulePlusMenuClose(next);
         return;
       }
       setPlusHoveredState(false);
       blockHoverFloatingGroup.scheduleClose(next);
     },
-    [blockHoverFloatingGroup, resolveHoveredBlockInfo, scheduleContextMenuClose, setPlusHoveredState, slashMenuFromPlus],
+    [blockHoverFloatingGroup, resolveHoveredBlockInfo, scheduleContextMenuClose, schedulePlusMenuClose, setPlusHoveredState, slashMenuFromPlus],
   );
 
   const handleEditorBlankClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1574,6 +2027,69 @@ export default function Editor({
     editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, docEnd - 1)));
     editor.view.focus();
   }, [contextMenu, editor, readOnly, slashMenuVisible]);
+
+  const hasDraggedFiles = (event: React.DragEvent<HTMLDivElement>) =>
+    Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+  const resolveDropPosition = useCallback((clientX: number, clientY: number) => {
+    if (!editor || !editorAreaRef.current) return null;
+    const coords = editor.view.posAtCoords({ left: clientX, top: clientY });
+    const areaRect = editorAreaRef.current.getBoundingClientRect();
+    const pos = coords?.pos ?? Math.max(0, editor.state.doc.content.size - 1);
+    const dom = document.elementFromPoint(clientX, clientY);
+    const targetBlock = dom instanceof Element
+      ? (dom.closest('[data-local-block], h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,.tableWrapper,.feishu-table-host') as HTMLElement | null)
+      : null;
+    const rect = targetBlock?.getBoundingClientRect();
+    const top = rect
+      ? (clientY < rect.top + rect.height / 2 ? rect.top : rect.bottom)
+      : Math.max(areaRect.top + 20, Math.min(clientY, areaRect.bottom - 20));
+    return {
+      pos,
+      indicator: {
+        top: top - areaRect.top,
+        left: 0,
+        width: areaRect.width,
+      },
+    };
+  }, [editor]);
+
+  const handleFileDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (readOnly || !editor || !hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+    const target = event.target;
+    const disabled = target instanceof Element && Boolean(target.closest(BLOCK_TOOLS_OVERLAY_SELECTOR));
+    const resolved = resolveDropPosition(event.clientX, event.clientY);
+    if (!resolved) return;
+    setFileDropState({
+      visible: true,
+      top: resolved.indicator.top,
+      left: resolved.indicator.left,
+      width: resolved.indicator.width,
+      count: event.dataTransfer.items?.length || event.dataTransfer.files?.length || 1,
+      disabled,
+    });
+  }, [editor, readOnly, resolveDropPosition]);
+
+  const clearFileDropState = useCallback(() => setFileDropState(null), []);
+
+  const handleFileDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (readOnly || !editor || !hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const target = event.target;
+    if (target instanceof Element && target.closest(BLOCK_TOOLS_OVERLAY_SELECTOR)) {
+      clearFileDropState();
+      return;
+    }
+    const files = Array.from(event.dataTransfer.files ?? []);
+    const resolved = resolveDropPosition(event.clientX, event.clientY);
+    clearFileDropState();
+    if (files.length === 0) return;
+    insertMediaFiles(editor, files, resolved?.pos);
+  }, [clearFileDropState, editor, readOnly, resolveDropPosition]);
 
   const extractHeadings = useCallback((editorInstance: any) => {
     if (!onHeadingsChange || !editorInstance) return;
@@ -1638,6 +2154,28 @@ export default function Editor({
     window.addEventListener('hashchange', scroll);
     return () => window.removeEventListener('hashchange', scroll);
   }, [content, editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const onMediaAction = (event: Event) => {
+      const detail = (event as CustomEvent<{ action?: string; uploadId?: string }>).detail;
+      if (!detail?.uploadId) return;
+      if (detail.action === 'retry') {
+        startMediaUpload(editor, detail.uploadId);
+      } else if (detail.action === 'cancel') {
+        mediaUploadFiles.get(detail.uploadId)?.controller?.abort();
+      }
+    };
+    window.addEventListener(MEDIA_UPLOAD_EVENT, onMediaAction as EventListener);
+    return () => {
+      window.removeEventListener(MEDIA_UPLOAD_EVENT, onMediaAction as EventListener);
+      mediaUploadFiles.forEach(task => {
+        task.controller?.abort();
+        if (task.objectUrl) URL.revokeObjectURL(task.objectUrl);
+      });
+      mediaUploadFiles.clear();
+    };
+  }, [editor]);
 
   useLayoutEffect(() => {
     if (editor) (editor as any).__documentId = documentId;
@@ -2118,8 +2656,25 @@ export default function Editor({
             onPointerMove={handleEditorPointerMove}
             onMouseLeave={handleEditorMouseLeave}
             onClick={handleEditorBlankClick}
+            onDragEnter={handleFileDragOver}
+            onDragOver={handleFileDragOver}
+            onDragLeave={event => {
+              const next = getRelatedNode(event.relatedTarget);
+              if (next && event.currentTarget.contains(next)) return;
+              clearFileDropState();
+            }}
+            onDrop={handleFileDrop}
           >
             <EditorContent editor={editor} />
+            {fileDropState?.visible && (
+              <div
+                className={`editor-file-drop-indicator${fileDropState.disabled ? ' is-disabled' : ''}`}
+                style={{ top: fileDropState.top, left: fileDropState.left, width: fileDropState.width }}
+                data-no-marquee-selection="true"
+              >
+                <span>{fileDropState.disabled ? '此处不能插入文件' : `释放以上传 ${fileDropState.count} 个文件`}</span>
+              </div>
+            )}
             {!readOnly && (
               <BoxBlockSelectionLayer editor={editor} editorAreaRef={editorAreaRef} readOnly={readOnly} />
             )}
@@ -2142,8 +2697,12 @@ export default function Editor({
                     }}
                     onMouseLeave={(e) => {
                       const next = getRelatedNode(e.relatedTarget);
+                      if (slashMenuFromPlus) {
+                        schedulePlusMenuOnlyClose(next);
+                        return;
+                      }
                       if (blockHoverFloatingGroup.containsTarget(next)) return;
-                      if (!slashMenuFromPlus) setPlusHoveredState(false);
+                      setPlusHoveredState(false);
                     }}
                   >
                     <button
@@ -2356,9 +2915,7 @@ export default function Editor({
           className="block-plus-menu-shell"
           onPointerEnter={() => blockHoverFloatingGroup.cancelClose()}
           onPointerLeave={(e) => {
-            const next = getRelatedNode(e.relatedTarget);
-            if (blockHoverFloatingGroup.containsTarget(next)) return;
-            blockHoverFloatingGroup.scheduleClose(next);
+            schedulePlusMenuOnlyClose(getRelatedNode(e.relatedTarget));
           }}
         >
           <SlashMenu
@@ -2371,7 +2928,7 @@ export default function Editor({
               blockHoverFloatingGroup.cancelClose();
               setPlusHoveredState(true);
             }}
-            onMouseLeave={() => blockHoverFloatingGroup.scheduleClose(null)}
+            onMouseLeave={schedulePlusMenuOnlyClose}
             anchorRef={blockAddButtonRef}
           />
         </div>
