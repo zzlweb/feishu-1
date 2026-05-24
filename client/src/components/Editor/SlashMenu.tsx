@@ -3,9 +3,11 @@ import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
 import { IconChevronMenuEnd } from '../../icons/feishuDoc';
 import type { SlashMenuItem } from './slashMenuConfig';
-import { SLASH_SECTIONS, itemMatchesQuery } from './slashMenuConfig';
+import { insertTemplateContent, SLASH_SECTIONS, itemMatchesQuery } from './slashMenuConfig';
 import TableGridPicker from './TableGridPicker';
 import ColumnsCountPicker from './ColumnsCountPicker';
+import TemplatePicker from './TemplatePicker';
+import ButtonTypePicker from './ButtonTypePicker';
 import { insertFeishuTable } from './tableInsert';
 import { insertFeishuColumns } from './columnsInsert';
 import { computeSubmenuFlyoutPosition } from './contextSubmenuFlyout';
@@ -29,7 +31,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const [renderPos, setRenderPos] = useState(position);
   const [tooltipItem, setTooltipItem] = useState<{ item: SlashMenuItem; rect: DOMRect } | null>(null);
   const [activeSubmenu, setActiveSubmenu] = useState<{
-    kind: 'tableGrid' | 'columnsCount';
+    kind: 'tableGrid' | 'columnsCount' | 'templateList' | 'buttonType';
     rect: DOMRect;
   } | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -115,7 +117,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const listStroke = 1.55;
 
   const showTooltip = (item: SlashMenuItem, el: HTMLElement) => {
-    if (item.submenu === 'tableGrid' || item.submenu === 'columnsCount') return;
+    if (item.submenu === 'tableGrid' || item.submenu === 'columnsCount' || item.submenu === 'templateList' || item.submenu === 'buttonType') return;
     clearTimeout(tooltipTimerRef.current);
     tooltipTimerRef.current = setTimeout(() => {
       setTooltipItem({ item, rect: el.getBoundingClientRect() });
@@ -136,7 +138,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     );
   };
 
-  const openSubmenu = (kind: 'tableGrid' | 'columnsCount', el: HTMLElement) => {
+  const openSubmenu = (kind: 'tableGrid' | 'columnsCount' | 'templateList' | 'buttonType', el: HTMLElement) => {
     hideTooltip();
     setActiveSubmenu({ kind, rect: el.getBoundingClientRect() });
   };
@@ -198,15 +200,15 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const submenuPosition = activeSubmenu
     ? computeSubmenuFlyoutPosition({
         trigger: activeSubmenu.rect,
-        panelWidth: activeSubmenu.kind === 'tableGrid' ? 304 : 184,
-        panelHeight: activeSubmenu.kind === 'tableGrid' ? 334 : 164,
+        panelWidth: activeSubmenu.kind === 'tableGrid' ? 304 : activeSubmenu.kind === 'columnsCount' ? 184 : activeSubmenu.kind === 'buttonType' ? 230 : 264,
+        panelHeight: activeSubmenu.kind === 'tableGrid' ? 334 : activeSubmenu.kind === 'columnsCount' ? 164 : activeSubmenu.kind === 'buttonType' ? 144 : 340,
         gap: 8,
         pad: 8,
       })
     : null;
 
   const submenuPortal = activeSubmenu && submenuPosition
-    ? createPortal(
+      ? createPortal(
         <div
           className="slash-submenu-portal"
           style={{
@@ -223,9 +225,30 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
             <div className="slash-table-grid-flyout is-portal">
               <TableGridPicker onPick={handleTablePick} />
             </div>
-          ) : (
+          ) : activeSubmenu.kind === 'columnsCount' ? (
             <div className="slash-columns-count-flyout is-portal">
               <ColumnsCountPicker onPick={handleColumnsPick} />
+            </div>
+          ) : activeSubmenu.kind === 'templateList' ? (
+            <div className="slash-template-flyout is-portal">
+              <TemplatePicker
+                onPick={template => {
+                  onBeforeSelect?.();
+                  insertTemplateContent(editor, template.content);
+                  (editor as any).__plusInsertRange = null;
+                  onClose();
+                }}
+              />
+            </div>
+          ) : (
+            <div className="slash-button-type-flyout is-portal">
+              <ButtonTypePicker
+                editor={editor}
+                onPick={() => {
+                  (editor as any).__plusInsertRange = null;
+                  onClose();
+                }}
+              />
             </div>
           )}
         </div>,
@@ -311,7 +334,9 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                 const tint = item.iconColor ?? '#1f2329';
                 const isTableGrid = item.submenu === 'tableGrid';
                 const isColumnsCount = item.submenu === 'columnsCount';
-                const hasSubmenu = isTableGrid || isColumnsCount;
+                const isTemplateList = item.submenu === 'templateList';
+                const isButtonType = item.submenu === 'buttonType';
+                const hasSubmenu = isTableGrid || isColumnsCount || isTemplateList || isButtonType;
                 return (
                   <div
                     key={`${section.title}-${item.label}`}
@@ -328,6 +353,8 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                       }
                       if (isTableGrid) openSubmenu('tableGrid', e.currentTarget);
                       else if (isColumnsCount) openSubmenu('columnsCount', e.currentTarget);
+                      else if (isTemplateList) openSubmenu('templateList', e.currentTarget);
+                      else if (isButtonType) openSubmenu('buttonType', e.currentTarget);
                       else setActiveSubmenu(null);
                     }}
                     onMouseLeave={() => {

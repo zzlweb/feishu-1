@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Loading } from 'tdesign-react';
 import { addComment, deleteComment, getComments, getDocument, updateComment, updateDocument } from '../../api/documents';
@@ -8,6 +8,13 @@ import Editor from '../Editor/Editor';
 import Sidebar from './Sidebar';
 import DocumentHeader from './DocumentHeader';
 import CommentSidebar from './CommentSidebar';
+import {
+  dispatchRemoveCommentHighlights,
+  findOrphanedComments,
+  getCommentThreadKey,
+  hasOpenCommentSidebarContent,
+} from '../Editor/commentDocumentSync';
+import { resolveBlockElement } from '../Editor/blockDom';
 import './Layout.less';
 
 export default function DocumentPage() {
@@ -35,9 +42,15 @@ export default function DocumentPage() {
   const outlineWasVisibleRef = useRef(false);
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const collapsedPersistReadyRef = useRef(false);
+  const collapsedPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [titleInputSnapshot, setTitleInputSnapshot] = useState('');
   const [catalogueActiveId, setCatalogueActiveId] = useState<string | null>(null);
   const [collapsedHeadingIds, setCollapsedHeadingIds] = useState<Set<string>>(() => new Set());
+  const collapsedHeadingIdList = useMemo(
+    () => Array.from(collapsedHeadingIds).sort(),
+    [collapsedHeadingIds],
+  );
 
   const catalogueTitleDisplay = titleInputSnapshot.trim();
   const showOutlineSidebar = headings.length > 0 || catalogueTitleDisplay.length > 0;
@@ -54,8 +67,9 @@ export default function DocumentPage() {
   useEffect(() => {
     outlineWasVisibleRef.current = false;
     setCatalogueActiveId(null);
-    setCollapsedHeadingIds(new Set());
-  }, [doc?.id]);
+    collapsedPersistReadyRef.current = false;
+    setCollapsedHeadingIds(new Set(doc?.collapsed_heading_ids ?? []));
+  }, [doc?.id, doc?.collapsed_heading_ids]);
 
   const handleToggleHeadingCollapse = useCallback((headingId: string) => {
     setCollapsedHeadingIds(prev => {
@@ -149,15 +163,44 @@ export default function DocumentPage() {
       }
       setCommentSidebarVisible(true);
       window.setTimeout(() => {
-        mainScrollRef.current?.querySelector(`#${CSS.escape(blockId)}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        resolveBlockElement(mainScrollRef.current, blockId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       }, 0);
     };
     window.addEventListener('feishu-open-comment-sidebar', handleOpenCommentSidebar);
     return () => window.removeEventListener('feishu-open-comment-sidebar', handleOpenCommentSidebar);
   }, [comments, id]);
 
-  const handleSave = async (data: { title?: string; content?: string; icon?: string; cover_url?: string }) => {
+  const closeCommentSidebar = useCallback(() => {
+    setCommentSidebarVisible(false);
+    setActiveCommentBlockId('');
+    setCommentInput('');
+    setPendingCommentAnchor(null);
+  }, []);
+
+  useEffect(() => {
+    if (!commentSidebarVisible) return;
+    if (hasOpenCommentSidebarContent(comments, pendingCommentAnchor)) return;
+    closeCommentSidebar();
+  }, [closeCommentSidebar, commentSidebarVisible, comments, pendingCommentAnchor]);
+
+  const handleSave = useCallback(async (data: { title?: string; content?: string; icon?: string; cover_url?: string }) => {
     if (!id) return;
+
+    let nextComments = comments;
+    if (data.content !== undefined) {
+      const orphaned = findOrphanedComments(data.content, comments);
+      if (orphaned.length > 0) {
+        const results = await Promise.all(orphaned.map(comment => deleteComment(id, comment.id)));
+        const deletedIds = new Set(
+          orphaned.filter((_, index) => results[index]?.code === 0).map(comment => comment.id),
+        );
+        if (deletedIds.size > 0) {
+          nextComments = comments.filter(comment => !deletedIds.has(comment.id));
+          setComments(nextComments);
+        }
+      }
+    }
+
     setSaveStatus('saving');
     const res = await updateDocument(id, data);
     if (res.code === 0 && res.data) {
@@ -165,7 +208,34 @@ export default function DocumentPage() {
     }
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 2000);
-  };
+  }, [comments, id]);
+
+  useEffect(() => {
+    if (!id || !doc?.id) return;
+    if (!collapsedPersistReadyRef.current) {
+      collapsedPersistReadyRef.current = true;
+      return;
+    }
+
+    if (collapsedPersistTimerRef.current) window.clearTimeout(collapsedPersistTimerRef.current);
+    setSaveStatus('saving');
+    collapsedPersistTimerRef.current = window.setTimeout(async () => {
+      const res = await updateDocument(id, { collapsed_heading_ids: collapsedHeadingIdList });
+      if (res.code === 0 && res.data) {
+        setDoc(prev => (prev ? {
+          ...prev,
+          collapsed_heading_ids: res.data!.collapsed_heading_ids ?? collapsedHeadingIdList,
+          updated_at: res.data!.updated_at,
+        } : null));
+      }
+      setSaveStatus('saved');
+      window.setTimeout(() => setSaveStatus('idle'), 2000);
+    }, 350);
+
+    return () => {
+      if (collapsedPersistTimerRef.current) window.clearTimeout(collapsedPersistTimerRef.current);
+    };
+  }, [collapsedHeadingIdList, doc?.id, id]);
 
   const handleRemoveCover = useCallback(async () => {
     if (!id) return;
@@ -232,20 +302,26 @@ export default function DocumentPage() {
 
   const handleDeleteComment = useCallback(async (comment: Comment): Promise<boolean> => {
     if (!id) return false;
+    const threadKey = getCommentThreadKey(comment);
     const res = await deleteComment(id, comment.id);
     if (res.code === 0) {
-      setComments(prev => prev.filter(item => item.id !== comment.id));
+      const remaining = comments.filter(item => item.id !== comment.id);
+      setComments(remaining);
+      const threadStillExists = remaining.some(item => getCommentThreadKey(item) === threadKey);
+      if (!threadStillExists) {
+        dispatchRemoveCommentHighlights([threadKey]);
+      }
       return true;
     }
     return false;
-  }, [id]);
+  }, [comments, id]);
 
   const handleJumpToCommentBlock = useCallback((blockId: string) => {
     setActiveCommentBlockId(blockId);
     const root = mainScrollRef.current;
     if (!root) return;
     root.querySelectorAll('.feishu-comment-highlight--active').forEach(el => el.classList.remove('feishu-comment-highlight--active'));
-    const target = root.querySelector(`#${CSS.escape(blockId)}`) || root.querySelector(`[data-comment-thread-id="${CSS.escape(blockId)}"]`);
+    const target = resolveBlockElement(root, blockId);
     target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     if (target instanceof HTMLElement) target.classList.add('feishu-comment-highlight--active');
   }, []);
@@ -255,7 +331,7 @@ export default function DocumentPage() {
     if (!root) return;
     root.querySelectorAll('.feishu-comment-highlight--active').forEach(el => el.classList.remove('feishu-comment-highlight--active'));
     if (!activeCommentBlockId) return;
-    const target = root.querySelector(`#${CSS.escape(activeCommentBlockId)}`) || root.querySelector(`[data-comment-thread-id="${CSS.escape(activeCommentBlockId)}"]`);
+    const target = resolveBlockElement(root, activeCommentBlockId);
     if (target instanceof HTMLElement) target.classList.add('feishu-comment-highlight--active');
   }, [activeCommentBlockId, comments]);
 
@@ -371,7 +447,7 @@ export default function DocumentPage() {
                 onUpdateComment={handleUpdateComment}
                 onDeleteComment={handleDeleteComment}
                 currentUserName={doc.author}
-                onClose={() => setCommentSidebarVisible(false)}
+                onClose={closeCommentSidebar}
                 onJumpToBlock={handleJumpToCommentBlock}
                 mainScrollRef={mainScrollRef}
               />

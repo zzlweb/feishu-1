@@ -30,12 +30,10 @@ import {
 import {
   SlashGlyphBulletList,
   SlashGlyphCode,
-  SlashGlyphDivider,
   SlashGlyphHeading1,
   SlashGlyphHeading2,
   SlashGlyphHeading3,
-  SlashGlyphHeading4,
-  SlashGlyphHeading5,
+  SlashGlyphImage,
   SlashGlyphLink,
   SlashGlyphOrderedList,
   SlashGlyphQuote,
@@ -50,12 +48,12 @@ import {
   COLOR_FLYOUT_WIDTH,
   computeSubmenuFlyoutPosition,
 } from './contextSubmenuFlyout';
-import { getInsertBelowPosition, insertBelowSlashItem } from './insertBelowBlocks';
+import { getInsertBelowPosition, insertButtonBlockAt, insertSlashItemAt } from './insertBelowBlocks';
 import { insertFeishuColumnsAt } from './columnsInsert';
 import { insertFeishuTableAt } from './tableInsert';
 import AddBelowSlashSections from './AddBelowSlashSections';
 import FeishuColorPickerPanel from './FeishuColorPickerPanel';
-import { syncEditorSelectionToAnchoredBlock } from './blockAnchorSelection';
+import { prepareEditorForInlineColor, syncEditorSelectionToAnchoredBlock } from './blockAnchorSelection';
 import { copyCurrentBlockLink } from './blockLink';
 import {
   applyEditorIndentDecrease,
@@ -85,7 +83,7 @@ interface ContextMenuProps {
   onMouseEnterCancel?: () => void;
 }
 
-type RowKind = 'heading' | 'block' | 'insertLink';
+type RowKind = 'heading' | 'block' | 'insertLink' | 'insertImage';
 
 type DocIcon = ComponentType<{
   theme?: string;
@@ -113,14 +111,12 @@ const BLOCK_TYPE_ICON_GRID: GridRowDef[] = [
   { label: '一级标题', value: 1, type: 'heading', Icon: SlashGlyphHeading1, tint: TBOX.b500, tooltip: { shortcut: 'Ctrl + Alt + 1', markdown: '# 空格' } },
   { label: '二级标题', value: 2, type: 'heading', Icon: SlashGlyphHeading2, tint: TBOX.b500, tooltip: { shortcut: 'Ctrl + Alt + 2', markdown: '## 空格' } },
   { label: '三级标题', value: 3, type: 'heading', Icon: SlashGlyphHeading3, tint: TBOX.b500, tooltip: { shortcut: 'Ctrl + Alt + 3', markdown: '### 空格' } },
-  { label: '四级标题', value: 4, type: 'heading', Icon: SlashGlyphHeading4, tint: TBOX.b500, tooltip: { shortcut: 'Ctrl + Alt + 4', markdown: '#### 空格' } },
-  { label: '五级标题', value: 5, type: 'heading', Icon: SlashGlyphHeading5, tint: TBOX.b500, tooltip: { shortcut: 'Ctrl + Alt + 5', markdown: '##### 空格' } },
   { label: '有序列表', value: 'orderedList', type: 'block', Icon: SlashGlyphOrderedList, tint: TBOX.i500, tooltip: { shortcut: 'Ctrl + Shift + 7', markdown: '1. 空格' } },
   { label: '无序列表', value: 'bulletList', type: 'block', Icon: SlashGlyphBulletList, tint: TBOX.i500, tooltip: { shortcut: 'Ctrl + Shift + 8', markdown: '- 空格' } },
   { label: '待办事项', value: 'taskList', type: 'block', Icon: SlashGlyphTaskList, tint: TBOX.i500, tooltip: { shortcut: 'Ctrl + Shift + 9', markdown: '[] 空格' } },
   { label: '代码块', value: 'codeBlock', type: 'block', Icon: SlashGlyphCode, tint: TBOX.g500, tooltip: { markdown: '``` 空格' } },
   { label: '引用', value: 'blockquote', type: 'block', Icon: SlashGlyphQuote, tint: TBOX.b500, tooltip: { markdown: '> 空格' } },
-  { label: '分割线', value: 'horizontalRule', type: 'block', Icon: SlashGlyphDivider, tint: TBOX.i500, tooltip: { markdown: '--- 回车' } },
+  { label: '图片', value: 'insertImage', type: 'insertImage', Icon: SlashGlyphImage, tint: TBOX.o500 },
   { label: '链接', value: 'insertLink', type: 'insertLink', Icon: SlashGlyphLink, tint: TBOX.b500, tooltip: { shortcut: 'Ctrl + K' } },
 ];
 
@@ -137,6 +133,7 @@ function isGridActive(editor: Editor, item: GridRowDef): boolean {
   }
   if (item.type === 'block') return editor.isActive(item.value as string);
   if (item.type === 'insertLink') return editor.isActive('link');
+  if (item.type === 'insertImage') return editor.isActive('image');
   return false;
 }
 
@@ -168,6 +165,26 @@ function serializeRangeToHtml(editor: Editor, from: number, to: number) {
   return container.innerHTML || '<p></p>';
 }
 
+function pickImageFile(onPick: (file: File) => void) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (file) onPick(file);
+  };
+  input.click();
+}
+
+async function uploadImageFile(file: File) {
+  const body = new FormData();
+  body.append('file', file);
+  const res = await fetch('/api/uploads', { method: 'POST', body });
+  const json = await res.json();
+  if (!res.ok || json.code !== 0) throw new Error(json.message || '上传失败');
+  return json.data as { name: string; url: string };
+}
+
 export default function ContextMenu({
   editor,
   x,
@@ -194,10 +211,21 @@ export default function ContextMenu({
   const gridTooltipTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
+    const isWithinContextMenuShell = (target: Node) => {
+      if (menuRef.current?.contains(target)) return true;
+      if (colorFlyoutRef.current?.contains(target)) return true;
+      if (addBelowFlyoutRef.current?.contains(target)) return true;
+      if (target instanceof Element && target.closest('.context-submenu-flyout, .context-add-below-flyout')) {
+        return true;
+      }
+      return false;
+    };
+
     const handleClick = (e: MouseEvent) => {
       if (e.button !== 0) return;
       const t = e.target as Node;
-      if (menuRef.current?.contains(t)) return;
+      if (isWithinContextMenuShell(t)) return;
+      if (anchorRef?.current?.contains(t)) return;
       onClose();
     };
     const handleEscape = (e: KeyboardEvent) => {
@@ -356,17 +384,32 @@ export default function ContextMenu({
       case 'taskList':
         toggleBlockStyle(editor, type as 'bulletList' | 'orderedList' | 'paragraph' | 'codeBlock' | 'blockquote' | 'taskList');
         break;
-      case 'horizontalRule':
-        editor.chain().focus().setHorizontalRule().run();
-        break;
     }
     onClose();
+  };
+
+  const handleInsertImage = () => {
+    alignSelectionToBlockAnchor();
+    const { from, to } = getCurrentBlockRange(editor);
+    pickImageFile(file => {
+      void uploadImageFile(file).then(uploaded => {
+        editor.chain().focus().deleteRange({ from, to }).insertContentAt(from, {
+          type: 'image',
+          attrs: { src: uploaded.url, alt: uploaded.name },
+        }).run();
+        onClose();
+      }).catch(err => {
+        void MessagePlugin.error(err instanceof Error ? err.message : '图片上传失败');
+        onClose();
+      });
+    });
   };
 
   const handleGridClick = (item: GridRowDef) => {
     alignSelectionToBlockAnchor();
     if (item.type === 'heading') setHeading(item.value as number);
     else if (item.type === 'block') toggleBlock(item.value as string);
+    else if (item.type === 'insertImage') handleInsertImage();
     else if (item.type === 'insertLink') {
       window.dispatchEvent(new CustomEvent('feishu-open-page-link-dialog'));
       onClose();
@@ -388,14 +431,6 @@ export default function ContextMenu({
   const handleCopy = () => {
     alignSelectionToBlockAnchor();
     document.execCommand('copy');
-    onClose();
-  };
-
-  const handleComment = () => {
-    const blockId = blockAnchorRef?.current?.id || blockAnchorRef?.current?.dataset.blockId || '';
-    window.dispatchEvent(new CustomEvent('feishu-open-comment-sidebar', {
-      detail: { documentId: (editor as any).__documentId, blockId },
-    }));
     onClose();
   };
 
@@ -427,13 +462,19 @@ export default function ContextMenu({
   };
 
   const handleSaveTemplate = async () => {
-    const documentId = (editor as any).__documentId as string | undefined;
-    if (!documentId) {
-      void MessagePlugin.error('无法识别当前文档');
-      onClose();
-      return;
-    }
-    const res = await fetch(`/api/documents/${documentId}/save-as-template`, { method: 'POST' });
+    alignSelectionToBlockAnchor();
+    const { from, to } = getCurrentBlockRange(editor);
+    const html = serializeRangeToHtml(editor, from, to);
+    const title = editor.state.doc.textBetween(from, to, ' ').trim().slice(0, 30) || '块模板';
+    const res = await fetch('/api/documents/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        content: html,
+        author: (editor as any).__author || '张正亮',
+      }),
+    });
     const json = await res.json();
     if (res.ok && json.code === 0) void MessagePlugin.success('已保存为模板');
     else void MessagePlugin.error(json.message || '保存模板失败');
@@ -443,13 +484,18 @@ export default function ContextMenu({
   const handleConvertToChild = async () => {
     alignSelectionToBlockAnchor();
     const parentId = (editor as any).__documentId as string | undefined;
+    if (!parentId) {
+      void MessagePlugin.error('无法识别当前文档');
+      onClose();
+      return;
+    }
     const { from, to } = getCurrentBlockRange(editor);
     const html = serializeRangeToHtml(editor, from, to);
     const title = editor.state.doc.textBetween(from, to, ' ').trim().slice(0, 30) || '未命名子文档';
-    const res = await fetch('/api/documents', {
+    const res = await fetch(`/api/documents/${parentId}/children`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, parent_id: parentId || null, content: html }),
+      body: JSON.stringify({ title, content: html, author: (editor as any).__author || '张正亮' }),
     });
     const json = await res.json();
     const doc = json.data;
@@ -596,11 +642,15 @@ export default function ContextMenu({
       onMouseLeave={handleFlyoutMouseLeave}
       onMouseDown={e => e.preventDefault()}
     >
-      <FeishuColorPickerPanel editor={editor} onBeforeApply={alignSelectionToBlockAnchor} onAfterPick={onClose} />
+      <FeishuColorPickerPanel
+        editor={editor}
+        onBeforeApply={() => prepareEditorForInlineColor(editor, blockAnchorRef?.current ?? null)}
+        onAfterPick={onClose}
+      />
     </div>
   );
 
-  const addBelowFlyoutPanel = (
+  const renderAddBelowFlyoutPanel = () => (
     <div
       ref={addBelowFlyoutRef}
       className="slash-menu slash-menu-feishu context-add-below-flyout"
@@ -616,7 +666,7 @@ export default function ContextMenu({
       <AddBelowSlashSections
         onPickItem={(sectionTitle, item) => {
           alignSelectionToBlockAnchor();
-          insertBelowSlashItem(editor, sectionTitle, item);
+          insertSlashItemAt(editor, sectionTitle, item, getInsertBelowPosition(editor));
           onClose();
         }}
         onPickTable={(rows, cols) => {
@@ -627,6 +677,16 @@ export default function ContextMenu({
         onPickColumns={columnCount => {
           alignSelectionToBlockAnchor();
           insertFeishuColumnsAt(editor, getInsertBelowPosition(editor), columnCount);
+          onClose();
+        }}
+        onPickTemplate={template => {
+          alignSelectionToBlockAnchor();
+          editor.chain().focus().insertContentAt(getInsertBelowPosition(editor), template.content || '<p></p>').run();
+          onClose();
+        }}
+        onPickButton={type => {
+          alignSelectionToBlockAnchor();
+          insertButtonBlockAt(editor, getInsertBelowPosition(editor), type);
           onClose();
         }}
       />
@@ -701,10 +761,6 @@ export default function ContextMenu({
 
           <div className="context-menu-divider" />
 
-          <button type="button" className="context-menu-item" onClick={handleComment}>
-            <span className="context-menu-icon"><ContextGlyphShare size={18} fill={ICON_MUTED} /></span>
-            <span style={{ flex: 1 }}>评论</span>
-          </button>
           <button type="button" className="context-menu-item" onClick={handleCut}>
             <span className="context-menu-icon"><ContextGlyphCut size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>剪切</span>
@@ -731,6 +787,10 @@ export default function ContextMenu({
             <span className="context-menu-icon"><ContextGlyphShare size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>分享</span>
           </button>
+          <button type="button" className="context-menu-item" onClick={() => void handleConvertToChild()}>
+            <span className="context-menu-icon context-menu-icon--subdoc"><SlashGlyphSubDoc size={18} fill={ICON_MUTED} /></span>
+            <span style={{ flex: 1 }}>转换为子文档</span>
+          </button>
           <button type="button" className="context-menu-item" onClick={() => void handleSaveTemplate()}>
             <span className="context-menu-icon"><ContextGlyphTemplate size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>保存为模板</span>
@@ -738,10 +798,6 @@ export default function ContextMenu({
           <button type="button" className="context-menu-item" onClick={() => void handleCopyBlockLink()}>
             <span className="context-menu-icon"><ContextGlyphBlockLink size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>复制链接</span>
-          </button>
-          <button type="button" className="context-menu-item" onClick={() => void handleConvertToChild()}>
-            <span className="context-menu-icon context-menu-icon--subdoc"><SlashGlyphSubDoc size={18} fill={ICON_MUTED} /></span>
-            <span style={{ flex: 1 }}>转换为子文档</span>
           </button>
 
           <div className="context-menu-divider" />
@@ -768,7 +824,7 @@ export default function ContextMenu({
 
       {activeFlyout?.kind === 'align' && flyoutPosition && alignFlyoutPanel}
       {activeFlyout?.kind === 'color' && flyoutPosition && colorFlyoutPanel}
-      {activeFlyout?.kind === 'below' && flyoutPosition && addBelowFlyoutPanel}
+      {activeFlyout?.kind === 'below' && flyoutPosition && renderAddBelowFlyoutPanel()}
 
       {gridTooltip && hasGridTooltip(gridTooltip.item) && (
         <div

@@ -28,9 +28,6 @@ import {
   SlashGlyphFormula,
   SlashGlyphTemplate,
   SlashGlyphSubDoc,
-  SlashGlyphKanban,
-  SlashGlyphGantt,
-  SlashGlyphGallery,
   SlashGlyphBitableGrid,
 } from '../../icons/slashMenuGlyphs';
 
@@ -49,7 +46,7 @@ export interface SlashMenuItem {
   matchText?: string;
   desc?: string;
   hasArrow?: boolean;
-  submenu?: 'tableGrid' | 'columnsCount';
+  submenu?: 'tableGrid' | 'columnsCount' | 'templateList' | 'buttonType';
   tooltip?: { shortcut?: string; markdown?: string };
   action: (editor: Editor) => void;
 }
@@ -97,6 +94,33 @@ function replacePlusOrSlash(editor: Editor, content: any) {
   editor.chain().focus().deleteRange(getSlashRange(editor)).insertContent(content).run();
 }
 
+const BUTTON_TYPE_LABELS: Record<ButtonActionType, string> = {
+  link: '打开超链接',
+  duplicate: '创建副本',
+  follow: '关注文档更新',
+};
+
+export function insertButtonBlockFromSlash(editor: Editor, actionType: ButtonActionType = 'link') {
+  replacePlusOrSlash(editor, {
+    type: 'localButtonBlock',
+    attrs: {
+      actionType,
+      text: BUTTON_TYPE_LABELS[actionType],
+      color: 'blue',
+    },
+  });
+}
+
+export type ButtonActionType = 'link' | 'duplicate' | 'follow';
+
+function createSyncBlockNode() {
+  return {
+    type: 'localSyncBlock',
+    attrs: { syncId: `sync-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` },
+    content: [{ type: 'paragraph' }],
+  };
+}
+
 function runTextCommand(editor: Editor, run: (editor: Editor) => void) {
   const plusRange = consumePlusInsertRange(editor);
   if (plusRange) {
@@ -116,6 +140,12 @@ function pickFile(accept: string, onPick: (file: File) => void) {
     if (file) onPick(file);
   };
   input.click();
+}
+
+function dispatchMediaInsert(files: File[], insertAt: number) {
+  window.dispatchEvent(new CustomEvent('feishu-insert-media-files', {
+    detail: { files, insertAt },
+  }));
 }
 
 async function uploadFile(file: File) {
@@ -150,31 +180,20 @@ function insertImageFromPicker(editor: Editor) {
 
 function insertFileFromPicker(editor: Editor) {
   const plusRange = consumePlusInsertRange(editor);
+  const slashRange = getSlashRange(editor);
+  const insertAt = plusRange?.from ?? slashRange.from;
   if (plusRange) editor.chain().focus().deleteRange(plusRange).run();
-  else editor.chain().focus().deleteRange(getSlashRange(editor)).run();
+  else editor.chain().focus().deleteRange(slashRange).run();
 
   pickFile('video/*,application/*,*/*', file => {
-    void uploadFile(file).then(uploaded => {
-      const fileNode = {
-        type: 'localFileBlock',
-        attrs: { name: uploaded.name, url: uploaded.url, size: uploaded.size, mime: uploaded.type },
-      };
-      if (plusRange) editor.chain().focus().insertContentAt(plusRange.from, fileNode).run();
-      else editor.chain().focus().insertContent(fileNode).run();
-    }).catch(err => {
-      const fallback = {
-        type: 'localEmbedBlock',
-        attrs: { title: '上传失败', desc: err instanceof Error ? err.message : '文件上传失败', kind: 'file' },
-      };
-      if (plusRange) editor.chain().focus().insertContentAt(plusRange.from, fallback).run();
-      else editor.chain().focus().insertContent(fallback).run();
-    });
+    dispatchMediaInsert([file], insertAt);
   });
 }
 
 async function createChildDocument(editor: Editor) {
   const parentId = (editor as any).__documentId as string | undefined;
-  const res = await fetch('/api/documents', {
+  const url = parentId ? `/api/documents/${parentId}/children` : '/api/documents';
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title: '未命名子文档', parent_id: parentId || null, content: '<p></p>' }),
@@ -188,25 +207,13 @@ async function createChildDocument(editor: Editor) {
   });
 }
 
-async function insertFirstTemplate(editor: Editor) {
+export function insertTemplateContent(editor: Editor, content: string) {
   const plusRange = consumePlusInsertRange(editor);
-  if (plusRange) editor.chain().focus().deleteRange(plusRange).run();
-  else editor.chain().focus().deleteRange(getSlashRange(editor)).run();
-
-  const res = await fetch('/api/documents/templates/list');
-  const json = await res.json();
-  const template = json.data?.[0];
-  if (template?.content) {
-    if (plusRange) editor.chain().focus().insertContentAt(plusRange.from, template.content).run();
-    else editor.chain().focus().insertContent(template.content).run();
-    return;
+  if (plusRange) {
+    editor.chain().focus().deleteRange(plusRange).insertContentAt(plusRange.from, content || '<p></p>').run();
+  } else {
+    editor.chain().focus().deleteRange(getSlashRange(editor)).insertContent(content || '<p></p>').run();
   }
-  const fallback = {
-    type: 'localEmbedBlock',
-    attrs: { title: '模板库为空', desc: '请先在更多菜单中保存模板', kind: 'template' },
-  };
-  if (plusRange) editor.chain().focus().insertContentAt(plusRange.from, fallback).run();
-  else editor.chain().focus().insertContent(fallback).run();
 }
 
 function insertHighlightBlockFromSlash(editor: Editor) {
@@ -257,7 +264,7 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
       { Icon: SlashGlyphCode, iconColor: '#646a73', label: '代码块', matchText: 'code 代码', tooltip: { markdown: '``` 空格' }, action: e => runTextCommand(e, ed => ed.chain().focus().setCodeBlock({ language: 'plaintext' }).run()) },
       { Icon: SlashGlyphQuote, iconColor: '#646a73', label: '引用', matchText: 'blockquote quote 引用', tooltip: { markdown: '> 空格' }, action: e => runTextCommand(e, ed => ed.chain().focus().toggleBlockquote().run()) },
       { Icon: SlashGlyphDivider, iconColor: '#646a73', label: '分割线', matchText: '分隔 横线 divider hr', tooltip: { markdown: '--- 回车' }, action: e => runTextCommand(e, ed => ed.chain().focus().setHorizontalRule().run()) },
-      { Icon: SlashGlyphSyncMuted, iconColor: '#646a73', label: '同步块', matchText: '同步 synced sync', tooltip: { markdown: '' }, action: e => replacePlusOrSlash(e, { type: 'localSyncBlock', content: [{ type: 'paragraph' }] }) },
+      { Icon: SlashGlyphSyncMuted, iconColor: '#646a73', label: '同步块', matchText: '同步 synced sync', tooltip: { markdown: '' }, action: e => replacePlusOrSlash(e, createSyncBlockNode()) },
       {
         Icon: SlashGlyphLink,
         iconColor: '#646a73',
@@ -282,14 +289,14 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
     items: [
       { Icon: SlashGlyphTaskList, iconColor: '#3370ff', label: '任务', matchText: '任务 待办 todo', tooltip: { shortcut: 'Ctrl + Shift + 9', markdown: '[] 空格' }, action: e => runTextCommand(e, ed => ed.chain().focus().toggleTaskList().run()) },
       { Icon: SlashGlyphImage, iconColor: '#faad14', label: '图片', matchText: 'image img 图片', action: insertImageFromPicker },
-      { Icon: SlashGlyphFolder, iconColor: '#3370ff', label: '视频或文件', matchText: '视频 文件 video file upload', action: insertFileFromPicker },
+      { Icon: SlashGlyphFolder, iconColor: '#3370ff', label: '视频或文件', matchText: '视频 文件 wj video file upload', action: insertFileFromPicker },
       { Icon: SlashGlyphTable, iconColor: '#00b96b', label: '表格', matchText: 'table 表格', hasArrow: true, submenu: 'tableGrid', tooltip: { markdown: '| 空格' }, action: e => insertFeishuTable(e, 3, 3) },
       { Icon: SlashGlyphColumns, iconColor: '#3370ff', label: '分栏', matchText: 'columns 分栏 布局', hasArrow: true, submenu: 'columnsCount', action: e => insertFeishuColumns(e, 2) },
       { Icon: SlashGlyphHighlight, iconColor: '#fa8c16', label: '高亮块', matchText: 'highlight callout 高亮', action: insertHighlightBlockFromSlash },
-      { Icon: SlashGlyphSync, iconColor: '#3370ff', label: '同步块', matchText: '同步 synced sync', action: e => replacePlusOrSlash(e, { type: 'localSyncBlock', content: [{ type: 'paragraph' }] }) },
-      { Icon: SlashGlyphButton, iconColor: '#597ef7', label: '按钮', matchText: 'button 按钮', hasArrow: true, action: e => replacePlusOrSlash(e, { type: 'localButtonBlock' }) },
+      { Icon: SlashGlyphSync, iconColor: '#3370ff', label: '同步块', matchText: '同步 synced sync', action: e => replacePlusOrSlash(e, createSyncBlockNode()) },
+      { Icon: SlashGlyphButton, iconColor: '#597ef7', label: '按钮', matchText: 'button 按钮', hasArrow: true, submenu: 'buttonType', action: e => insertButtonBlockFromSlash(e, 'link') },
       { Icon: SlashGlyphFormula, iconColor: '#8f959e', label: '公式', matchText: 'formula latex math 公式', action: e => replacePlusOrSlash(e, { type: 'localFormulaBlock' }) },
-      { Icon: SlashGlyphTemplate, iconColor: '#f5222d', label: '模板', matchText: '模板 template', hasArrow: true, action: e => void insertFirstTemplate(e) },
+      { Icon: SlashGlyphTemplate, iconColor: '#f5222d', label: '模板', matchText: '模板 template', hasArrow: true, submenu: 'templateList', action: noopSlash },
       { Icon: SlashGlyphSubDoc, iconColor: '#3370ff', label: '子文档', matchText: '子文档 subdoc page', action: e => void createChildDocument(e) },
     ],
   },
@@ -298,26 +305,6 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
     layout: 'list',
     items: [
       { Icon: SlashGlyphBitableGrid, iconColor: '#3370ff', label: '表格', matchText: '多维表格 bitable grid', action: e => replacePlusOrSlash(e, { type: 'localBitableBlock' }) },
-      { Icon: SlashGlyphKanban, iconColor: '#52c41a', label: '看板', matchText: '看板 kanban', action: e => replacePlusOrSlash(e, { type: 'localEmbedBlock', attrs: { title: '看板', desc: '多维表格看板视图占位块', kind: 'kanban' } }) },
-      { Icon: SlashGlyphGantt, iconColor: '#eb2f96', label: '甘特图', matchText: '甘特 gantt', action: e => replacePlusOrSlash(e, { type: 'localEmbedBlock', attrs: { title: '甘特图', desc: '多维表格甘特视图占位块', kind: 'gantt' } }) },
-      { Icon: SlashGlyphGallery, iconColor: '#9254de', label: '画册', matchText: '画册 gallery', action: e => replacePlusOrSlash(e, { type: 'localEmbedBlock', attrs: { title: '画册', desc: '多维表格画册视图占位块', kind: 'gallery' } }) },
-    ],
-  },
-  {
-    title: '绘图',
-    layout: 'list',
-    items: [
-      { Icon: SlashGlyphKanban, iconColor: '#34c724', label: '画板', matchText: '白板 board canvas 画板', action: e => replacePlusOrSlash(e, { type: 'localEmbedBlock', attrs: { title: '画板', desc: '飞书画板占位块', kind: 'board' } }) },
-      { Icon: SlashGlyphGantt, iconColor: '#13c2c2', label: '思维导图', matchText: 'mindmap 脑图 思维导图', action: e => replacePlusOrSlash(e, { type: 'localEmbedBlock', attrs: { title: '思维导图', desc: '思维导图占位块', kind: 'mindmap' } }) },
-      { Icon: SlashGlyphGallery, iconColor: '#fa8c16', label: '流程图', matchText: 'flowchart 流程图', action: e => replacePlusOrSlash(e, { type: 'localEmbedBlock', attrs: { title: '流程图', desc: '流程图占位块', kind: 'flowchart' } }) },
-      { Icon: SlashGlyphFormula, iconColor: '#597ef7', label: 'UML 图', matchText: 'uml', action: e => replacePlusOrSlash(e, { type: 'localEmbedBlock', attrs: { title: 'UML 图', desc: 'UML 图占位块', kind: 'uml' } }) },
-    ],
-  },
-  {
-    title: '团队协作',
-    layout: 'list',
-    items: [
-      { Icon: SlashGlyphSubDoc, iconColor: '#3370ff', label: '人员', matchText: 'mention user at 成员 人员', action: e => replacePlusOrSlash(e, { type: 'localEmbedBlock', attrs: { title: '人员', desc: '@成员占位块', kind: 'mention' } }) },
     ],
   },
 ];

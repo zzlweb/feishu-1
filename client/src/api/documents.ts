@@ -66,8 +66,20 @@ export const convertToChild = (id: string, parentId: string) =>
     body: JSON.stringify({ parent_id: parentId }),
   });
 
+export const createChildDocument = (parentId: string, data?: Partial<Document>) =>
+  request<Document>(`/documents/${parentId}/children`, {
+    method: 'POST',
+    body: JSON.stringify(data || {}),
+  });
+
 export const saveAsTemplate = (id: string) =>
   request<Template>(`/documents/${id}/save-as-template`, { method: 'POST' });
+
+export const createTemplate = (data: Pick<Template, 'title' | 'content'> & Partial<Pick<Template, 'author'>>) =>
+  request<Template>('/documents/templates', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 
 // Comments
 export const getComments = (docId: string, blockId?: string) =>

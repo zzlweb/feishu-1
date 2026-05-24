@@ -9,6 +9,7 @@ export interface Document {
   parent_id: string | null;
   cover_url: string;
   icon: string;
+  collapsed_heading_ids?: string[];
 }
 
 export interface Comment {

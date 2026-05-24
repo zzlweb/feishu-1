@@ -36,6 +36,24 @@ router.get('/templates/list', (_req: Request, res: Response) => {
   }
 });
 
+// POST /api/documents/templates - 创建模板
+router.post('/templates', (req: Request, res: Response) => {
+  try {
+    const { title = '未命名模板', content = '<p></p>', author = '张正亮' } = req.body;
+    const trimmedTitle = String(title).trim() || '未命名模板';
+    const template = createTemplateRecord({
+      id: uuidv4(),
+      title: trimmedTitle,
+      content: String(content || '<p></p>'),
+      author: String(author || '张正亮'),
+      created_at: new Date().toISOString(),
+    });
+    res.status(201).json({ code: 0, data: template });
+  } catch (err: any) {
+    res.status(500).json({ code: -1, message: err.message });
+  }
+});
+
 // GET /api/documents/:id - 获取单个文档
 router.get('/:id', (req: Request, res: Response) => {
   try {
@@ -102,6 +120,31 @@ router.post('/:id/duplicate', (req: Request, res: Response) => {
       author: original.author,
       parent_id: original.parent_id,
       icon: original.icon,
+      cover_url: original.cover_url,
+      collapsed_heading_ids: original.collapsed_heading_ids,
+    });
+    res.status(201).json({ code: 0, data: doc });
+  } catch (err: any) {
+    res.status(500).json({ code: -1, message: err.message });
+  }
+});
+
+// POST /api/documents/:id/children - 在当前文档下创建子文档
+router.post('/:id/children', (req: Request, res: Response) => {
+  try {
+    const parent = getDocumentById(req.params.id);
+    if (!parent) {
+      return res.status(404).json({ code: -1, message: '父文档不存在' });
+    }
+    const id = uuidv4();
+    const { title = '未命名子文档', content = '<p></p>', author = parent.author, icon = '📄' } = req.body;
+    const doc = createDocumentRecord({
+      id,
+      title: String(title).trim() || '未命名子文档',
+      content: String(content || '<p></p>'),
+      author: String(author || parent.author || '张正亮'),
+      parent_id: parent.id,
+      icon: String(icon || '📄'),
     });
     res.status(201).json({ code: 0, data: doc });
   } catch (err: any) {

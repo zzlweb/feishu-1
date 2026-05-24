@@ -4,7 +4,7 @@ import { withPausedDomObserver } from './domObserver';
 
 export function getHeadingIdFromBlockEl(editor: Editor, blockEl: HTMLElement): string | null {
   if (/^h[1-6]$/.test(blockEl.tagName.toLowerCase())) {
-    const domId = blockEl.id || blockEl.getAttribute('data-heading-id');
+    const domId = blockEl.getAttribute('data-heading-id') || blockEl.id || blockEl.getAttribute('data-block-id');
     if (domId) return domId;
   }
   try {
@@ -77,7 +77,7 @@ export function syncAllHeadingCollapseStates(
       const m = /^h([1-6])$/.exec(headingEl.tagName.toLowerCase());
       if (!m) return;
       const level = Number(m[1]);
-      const id = headingEl.id || headingEl.getAttribute('data-heading-id') || '';
+      const id = headingEl.getAttribute('data-heading-id') || headingEl.id || headingEl.getAttribute('data-block-id') || '';
       const isCollapsed = Boolean(id && collapsedIds.has(id));
       applyHeadingCollapseToDom(headingEl, level, isCollapsed);
     });

@@ -74,6 +74,9 @@
 }
 
 .context-menu-feishu .context-block-types--icon-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 27px);
+  gap: 6px 7px;
   margin-bottom: 0;
 }
 
@@ -397,4 +400,124 @@
     width: min(252px, calc(100vw - 16px));
     max-width: calc(100vw - 16px);
   }
+}
+
+/* 图片块左侧块菜单 — 飞书 docx-menu-wrapper 结构 */
+.docx-menu-wrapper.image-context-menu {
+  --icon-n1: #646a73;
+  --border-color: #e8e9eb;
+  --text-primary: #1f2329;
+  --bg-white: #ffffff;
+  --bg-hover: #f5f6f7;
+  --primary-color: #3370ff;
+  --shadow-lg: 0 12px 32px rgba(31, 35, 41, 0.1), 0 2px 8px rgba(31, 35, 41, 0.06);
+
+  box-sizing: border-box;
+  width: min(236px, calc(100vw - 24px));
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-white);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.docx-menu-wrapper.image-context-menu .docx-menu-container--vertical {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.docx-menu-wrapper.image-context-menu .panel-menu-item {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  cursor: pointer;
+  color: var(--text-primary);
+  user-select: none;
+
+  &:hover,
+  &.is-submenu-open {
+    background: var(--bg-hover);
+  }
+
+  .menu-item-content {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 11px;
+  }
+
+  .menu-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .menu-item-main-box-wrapper {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .menu-item-main-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+  }
+
+  .menu-text {
+    flex: 1;
+    font-size: 14px;
+    line-height: 34px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .item-arrow {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    color: #8f959e;
+  }
+
+  .universe-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+    line-height: 0;
+
+    svg {
+      width: 18px;
+      height: 18px;
+      display: block;
+    }
+  }
+
+  .color-b-500 {
+    color: var(--primary-color);
+  }
+
+  .color-g-500 {
+    color: #34a853;
+  }
+
+  .color-r-500 {
+    color: #f54a45;
+  }
+}
+
+.docx-menu-wrapper.image-context-menu .menu-divider-item {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border-color);
+  flex-shrink: 0;
 }

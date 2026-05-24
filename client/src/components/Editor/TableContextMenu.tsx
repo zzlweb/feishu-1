@@ -21,7 +21,7 @@ import {
 } from '../../icons/contextMenuGlyphs';
 import { SlashGlyphSync } from '../../icons/slashMenuGlyphs';
 import { IconChevronMenuEnd } from '../../icons/feishuDoc';
-import { getInsertBelowPosition, insertBelowSlashItem } from './insertBelowBlocks';
+import { getInsertBelowPosition, insertBelowSlashItem, insertButtonBlockAt } from './insertBelowBlocks';
 import { getActiveTableContext, insertFeishuTableAt } from './tableInsert';
 import { insertFeishuColumnsAt } from './columnsInsert';
 import AddBelowSlashSections from './AddBelowSlashSections';
@@ -350,8 +350,8 @@ export default function TableContextMenu({
         onMouseLeave={handleFlyoutMouseLeave}
         onMouseDown={e => e.preventDefault()}
       >
-        <AddBelowSlashSections
-          onPickItem={(sectionTitle, item) => {
+      <AddBelowSlashSections
+        onPickItem={(sectionTitle, item) => {
             alignSelectionToBlockAnchor();
             insertBelowSlashItem(editor, sectionTitle, item);
             onClose();
@@ -364,6 +364,16 @@ export default function TableContextMenu({
           onPickColumns={columnCount => {
             alignSelectionToBlockAnchor();
             insertFeishuColumnsAt(editor, getInsertBelowPosition(editor), columnCount);
+            onClose();
+          }}
+          onPickTemplate={template => {
+            alignSelectionToBlockAnchor();
+            editor.chain().focus().insertContentAt(getInsertBelowPosition(editor), template.content || '<p></p>').run();
+            onClose();
+          }}
+          onPickButton={type => {
+            alignSelectionToBlockAnchor();
+            insertButtonBlockAt(editor, getInsertBelowPosition(editor), type);
             onClose();
           }}
         />

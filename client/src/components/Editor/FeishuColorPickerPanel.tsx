@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/react';
+import { selectTextblockContentRange } from './blockAnchorSelection';
 import { FONT_COLORS, BG_COLORS_LIGHT, BG_COLORS_DEEP } from './colorPickerConstants';
 import './FeishuColorPickerPanel.less';
 
@@ -20,8 +21,15 @@ export default function FeishuColorPickerPanel({ editor, onAfterPick, onBeforeAp
     onAfterPick?.();
   };
 
-  const pickFontColor = (value: string) => {
+  const prepareSelection = () => {
     onBeforeApply?.();
+    if (editor.state.selection.empty) {
+      selectTextblockContentRange(editor);
+    }
+  };
+
+  const pickFontColor = (value: string) => {
+    prepareSelection();
     if (value) {
       editor.chain().focus().setColor(value).run();
     } else {
@@ -31,7 +39,7 @@ export default function FeishuColorPickerPanel({ editor, onAfterPick, onBeforeAp
   };
 
   const pickBg = (value: string | undefined, clear: boolean) => {
-    onBeforeApply?.();
+    prepareSelection();
     if (clear || !value) {
       editor.chain().focus().unsetHighlight().run();
     } else {
@@ -41,7 +49,7 @@ export default function FeishuColorPickerPanel({ editor, onAfterPick, onBeforeAp
   };
 
   const restoreDefault = () => {
-    onBeforeApply?.();
+    prepareSelection();
     editor.chain().focus().unsetColor().unsetHighlight().run();
     notify();
   };

@@ -31,6 +31,11 @@ function getRelatedNode(target: EventTarget | null): Node | null {
   return null;
 }
 
+function blockDomAttrs(attrs: Record<string, unknown> | null | undefined) {
+  const blockId = typeof attrs?.blockId === 'string' && attrs.blockId ? attrs.blockId : '';
+  return blockId ? { id: blockId, 'data-block-id': blockId } : {};
+}
+
 export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
   const plusRef = useRef<HTMLButtonElement>(null);
   const columnPosRef = useRef<number | null>(null);
@@ -152,6 +157,7 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
   return (
     <NodeViewWrapper
       className={`feishu-columns-block__col-wrap${menuOpen ? ' is-menu-open' : ''}${isColumnEmpty ? ' is-column-empty' : ''}`}
+      {...blockDomAttrs(node.attrs)}
       onMouseLeave={handleColWrapMouseLeave}
     >
       {editor.isEditable && isColumnEmpty && (
@@ -233,6 +239,7 @@ export function ColumnsNodeView({ editor, node, getPos, selected }: NodeViewProp
     <NodeViewWrapper
       className={`feishu-columns-node${selected ? ' is-selected' : ''}${isResizing ? ' is-resizing' : ''}`}
       data-columns-count={columnCount}
+      {...blockDomAttrs(node.attrs)}
       style={{
         ['--feishu-columns-template' as string]: gridTemplate,
         ['--feishu-columns-count' as string]: String(columnCount),

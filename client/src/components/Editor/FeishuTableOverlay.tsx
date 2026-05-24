@@ -4,6 +4,8 @@ import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent as Re
 import { createPortal } from 'react-dom';
 import { SlashGlyphTable } from '../../icons/slashMenuGlyphs';
 import { IconAddOutlined, IconDragOutlined } from '../../icons/feishuDoc';
+import BlockGutterGlyph from './BlockGutterGlyph';
+import { resolveTableCellHandle, type TableCellHandleState } from './tableCellHandle';
 import {
   getTableChromeMountFromHost,
   getTableElementFromHost,
@@ -195,7 +197,7 @@ type SelectedRail = 'col' | 'row' | null;
 type RailDragPreview = { kind: 'col' | 'row'; from: number; target: number; active: boolean } | null;
 type ColumnResizePreview = { colIndex: number; x: number; active: boolean } | null;
 type RowResizePreview = { rowIndex: number; y: number; active: boolean } | null;
-type CellPlusState = { left: number; top: number; row: number; col: number } | null;
+type CellHandleState = TableCellHandleState | null;
 
 interface ColumnResizeSession {
   colIndex: number;
@@ -242,7 +244,7 @@ function FeishuTableOverlay({
   const [railDragPreview, setRailDragPreview] = useState<RailDragPreview>(null);
   const [columnResizePreview, setColumnResizePreview] = useState<ColumnResizePreview>(null);
   const [rowResizePreview, setRowResizePreview] = useState<RowResizePreview>(null);
-  const [cellPlus, setCellPlus] = useState<CellPlusState>(null);
+  const [cellHandle, setCellHandle] = useState<CellHandleState>(null);
 
   const tableHoverRef = useRef(false);
   const handleHoverRef = useRef(false);
@@ -256,7 +258,8 @@ function FeishuTableOverlay({
   const remeasureFrameRef = useRef<number | null>(null);
   const columnResizeSessionRef = useRef<ColumnResizeSession | null>(null);
   const rowResizeSessionRef = useRef<RowResizeSession | null>(null);
-  const cellPlusOpenKeyRef = useRef<string | null>(null);
+  const cellHandleOpenKeyRef = useRef<string | null>(null);
+  const cellHandleRef = useRef<HTMLButtonElement>(null);
 
   tableSelectionPinnedRef.current = tableSelectionPinned;
   pinnedRailRef.current = pinnedRail;
@@ -269,20 +272,6 @@ function FeishuTableOverlay({
     setHoverCol(null);
     setHoverRow(null);
   }, []);
-
-  const openCellInsertMenu = useCallback(
-    (row: number, col: number, clientX: number, clientY: number) => {
-      const tablePos = getTablePosFromHost(editor, tableHost);
-      if (tablePos == null) return;
-      const cellPos = resolveTableCellPos(editor, tablePos, row, col);
-      if (cellPos == null) return;
-      editor.chain().focus().setTextSelection(cellPos + 1).run();
-      window.dispatchEvent(new CustomEvent('feishu-open-table-cell-slash-menu', {
-        detail: { x: clientX + 8, y: clientY + 8 },
-      }));
-    },
-    [editor, tableHost],
-  );
 
   const cancelHideChrome = useCallback(() => {
     if (hideChromeTimerRef.current != null) {
@@ -410,6 +399,63 @@ function FeishuTableOverlay({
     }
     syncTableScrollEdgeFade(tableHost, true);
   }, [cancelHideChrome, tableHost]);
+
+  const syncCellHandle = useCallback(() => {
+    if (
+      pinnedRailRef.current
+      || columnResizeSessionRef.current
+      || rowResizeSessionRef.current
+    ) {
+      setCellHandle(prev => (prev == null ? prev : null));
+      return;
+    }
+    const next = resolveTableCellHandle(editor, tableHost);
+    if (!next) {
+      setCellHandle(prev => (prev == null ? prev : null));
+      return;
+    }
+    activateTableChrome();
+    setCellHandle(prev =>
+      prev
+      && prev.row === next.row
+      && prev.col === next.col
+      && prev.mode === next.mode
+      && prev.blockType === next.blockType
+      && Math.abs(prev.left - next.left) < 0.5
+      && Math.abs(prev.top - next.top) < 0.5
+        ? prev
+        : next,
+    );
+  }, [activateTableChrome, editor, tableHost]);
+
+  const openCellInsertMenu = useCallback(
+    (handle: TableCellHandleState, clientX: number, clientY: number) => {
+      const tablePos = getTablePosFromHost(editor, tableHost);
+      if (tablePos == null) return;
+      const cellPos = resolveTableCellPos(editor, tablePos, handle.row, handle.col);
+      if (cellPos == null) return;
+      editor.chain().focus().setTextSelection(handle.cursorPos || cellPos + 1).run();
+      window.dispatchEvent(new CustomEvent('feishu-open-table-cell-slash-menu', {
+        detail: { x: clientX + 8, y: clientY + 8 },
+      }));
+    },
+    [editor, tableHost],
+  );
+
+  const openCellBlockMenu = useCallback(
+    (handle: TableCellHandleState, clientX: number, clientY: number) => {
+      editor.chain().focus().run();
+      window.dispatchEvent(new CustomEvent('feishu-open-table-cell-block-menu', {
+        detail: {
+          x: clientX,
+          y: clientY,
+          blockType: handle.blockType,
+          cursorPos: handle.cursorPos,
+        },
+      }));
+    },
+    [editor],
+  );
 
   const applyPinnedRail = useCallback(
     (pin: TableRailPin | null) => {
@@ -948,66 +994,25 @@ function FeishuTableOverlay({
   }, [editor, pinnedRail, tableHost]);
 
   useLayoutEffect(() => {
-    const table = getTableElementFromHost(tableHost);
-    if (!table) return undefined;
-
-    const syncFromCell = (cell: HTMLElement | null) => {
-      if (!cell || pinnedRailRef.current || columnResizeSessionRef.current || rowResizeSessionRef.current) {
-        setCellPlus(prev => (prev == null ? prev : null));
-        return;
-      }
-      const mountRect = getTableChromeMountFromHost(tableHost).getBoundingClientRect();
-      const cellRect = cell.getBoundingClientRect();
-      const row = Number(cell.getAttribute('data-row-index') ?? cell.dataset.rowIndex ?? 0);
-      const col = Number(cell.getAttribute('data-col-index') ?? cell.dataset.colIndex ?? 0);
-      const key = `${row}:${col}`;
-      if (cellPlusOpenKeyRef.current && cellPlusOpenKeyRef.current !== key) {
-        cellPlusOpenKeyRef.current = null;
-      }
-      const left = cellRect.left - mountRect.left + Math.min(38, Math.max(24, cellRect.width / 2));
-      const top = cellRect.top - mountRect.top + cellRect.height / 2;
-      setCellPlus(prev =>
-        prev
-        && prev.row === row
-        && prev.col === col
-        && Math.abs(prev.left - left) < 0.5
-        && Math.abs(prev.top - top) < 0.5
-          ? prev
-          : { left, top, row, col },
-      );
-    };
-
-    const onPointerMove = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (target.closest('.feishu-table-chrome__cell-plus, .selection-bubble, .context-menu, .slash-menu')) return;
-      const cell = target.closest('[data-table-cell="true"], td, th') as HTMLElement | null;
-      if (!cell || !table.contains(cell)) {
-        setCellPlus(prev => (prev == null ? prev : null));
-        return;
-      }
-      activateTableChrome();
-      syncFromCell(cell);
-    };
-
-    const onPointerLeave = (event: PointerEvent) => {
-      const next = event.relatedTarget;
-      if (next instanceof Element && next.closest('.feishu-table-chrome__cell-plus, .slash-menu')) return;
-      cellPlusOpenKeyRef.current = null;
-      setCellPlus(prev => (prev == null ? prev : null));
-    };
-
-    table.addEventListener('pointermove', onPointerMove);
-    table.addEventListener('pointerleave', onPointerLeave);
-    if (table.matches(':hover')) {
-      activateTableChrome();
-      syncFromCell(table.querySelector('[data-table-cell="true"]:hover, td:hover, th:hover') as HTMLElement | null);
-    }
+    syncCellHandle();
+    const onChange = () => syncCellHandle();
+    editor.on('selectionUpdate', onChange);
+    editor.on('update', onChange);
+    editor.on('focus', onChange);
+    editor.on('blur', onChange);
+    const mount = getTableChromeMountFromHost(tableHost);
+    const onScroll = () => syncCellHandle();
+    mount.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
     return () => {
-      table.removeEventListener('pointermove', onPointerMove);
-      table.removeEventListener('pointerleave', onPointerLeave);
+      editor.off('selectionUpdate', onChange);
+      editor.off('update', onChange);
+      editor.off('focus', onChange);
+      editor.off('blur', onChange);
+      mount.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
     };
-  }, [activateTableChrome, tableHost]);
+  }, [editor, syncCellHandle, tableHost]);
 
   // 同步 PM 选区到本地（本地 pinnedRail 为视觉主状态，不被 PM 失败误清）
   useLayoutEffect(() => {
@@ -1507,37 +1512,88 @@ function FeishuTableOverlay({
         </div>
       )}
 
-      {showChrome && !pinnedRail && !railDragPreview?.active && !columnResizePreview?.active && !rowResizePreview?.active && cellPlus && (
-        <button
-          type="button"
-          className="feishu-table-chrome__cell-plus"
-          data-no-marquee-selection="true"
-          data-floating-panel="true"
-          style={{ left: cellPlus.left, top: cellPlus.top }}
-          aria-label="插入内容"
-          onMouseDown={e => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onPointerEnter={activateTableChrome}
-          onMouseEnter={e => {
-            activateTableChrome();
-            const key = `${cellPlus.row}:${cellPlus.col}`;
-            if (cellPlusOpenKeyRef.current === key) return;
-            cellPlusOpenKeyRef.current = key;
-            openCellInsertMenu(cellPlus.row, cellPlus.col, e.clientX, e.clientY);
-          }}
-          onClick={e => {
-            e.preventDefault();
-            e.stopPropagation();
-            activateTableChrome();
-            openCellInsertMenu(cellPlus.row, cellPlus.col, e.clientX, e.clientY);
-          }}
-        >
-          <span className="feishu-table-chrome__cell-plus-box">
-            <IconAddOutlined size={14} color="currentColor" />
-          </span>
-        </button>
+      {cellHandle && !pinnedRail && !railDragPreview?.active && !columnResizePreview?.active && !rowResizePreview?.active && (
+        cellHandle.mode === 'insert' ? (
+          <button
+            type="button"
+            className="feishu-table-chrome__cell-handle feishu-table-chrome__cell-handle--insert"
+            data-no-marquee-selection="true"
+            data-floating-panel="true"
+            style={{ left: cellHandle.left, top: cellHandle.top }}
+            aria-label="插入内容"
+            onMouseDown={e => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onPointerEnter={() => {
+              activateTableChrome();
+              onCancelCloseBlockMenu();
+            }}
+            onMouseEnter={e => {
+              activateTableChrome();
+              onCancelCloseBlockMenu();
+              const key = `${cellHandle.row}:${cellHandle.col}:insert`;
+              if (cellHandleOpenKeyRef.current === key) return;
+              cellHandleOpenKeyRef.current = key;
+              openCellInsertMenu(cellHandle, e.clientX, e.clientY);
+            }}
+            onMouseLeave={e => {
+              const next = e.relatedTarget;
+              if (next instanceof Element && next.closest('.slash-menu, .slash-submenu-portal')) return;
+              cellHandleOpenKeyRef.current = null;
+            }}
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              activateTableChrome();
+              openCellInsertMenu(cellHandle, e.clientX, e.clientY);
+            }}
+          >
+            <span className="feishu-table-chrome__cell-handle-plus-box">
+              <IconAddOutlined size={14} color="currentColor" />
+            </span>
+          </button>
+        ) : (
+          <button
+            ref={cellHandleRef}
+            type="button"
+            className="feishu-table-chrome__cell-handle feishu-table-chrome__cell-handle--block"
+            data-no-marquee-selection="true"
+            data-floating-panel="true"
+            style={{ left: cellHandle.left, top: cellHandle.top }}
+            aria-label="块配置"
+            onMouseDown={e => e.preventDefault()}
+            onMouseEnter={e => {
+              activateTableChrome();
+              onCancelCloseBlockMenu();
+              const rect = e.currentTarget.getBoundingClientRect();
+              openCellBlockMenu(cellHandle, rect.left, rect.bottom);
+            }}
+            onMouseLeave={e => {
+              const next = e.relatedTarget;
+              if (next instanceof Element && next.closest('.context-menu, .context-submenu-flyout')) return;
+              onScheduleCloseBlockMenu();
+            }}
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              activateTableChrome();
+              const rect = e.currentTarget.getBoundingClientRect();
+              openCellBlockMenu(cellHandle, rect.left, rect.bottom);
+            }}
+          >
+            <div className="feishu-table-chrome__cell-handle-drag">
+              <div className="feishu-table-chrome__cell-handle-type">
+                <span className="menu_ud_icon color-b-500">
+                  <BlockGutterGlyph type={cellHandle.blockType} />
+                </span>
+              </div>
+              <span className="feishu-table-chrome__cell-handle-grip" aria-hidden>
+                <IconDragOutlined size={16} color="#8f959e" />
+              </span>
+            </div>
+          </button>
+        )
       )}
 
       {!suppressInsertChrome && hoverRow != null && (

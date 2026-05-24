@@ -1,25 +1,11 @@
 import type { Editor } from '@tiptap/react';
 import type { Node as ProseNode } from '@tiptap/pm/model';
-
-const BLOCK_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
-function makeGenericBlockId() {
-  return `block-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function makeHighlightBlockId() {
-  return `highlight-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
+import { NodeSelection } from '@tiptap/pm/state';
+import { FEISHU_BLOCK_ID_TYPES, makeFeishuBlockId, sanitizeFeishuBlockId } from './feishuBlockId';
+import { resolveBlockElement } from './blockDom';
 
 function readStoredBlockId(node: ProseNode): string | null {
-  const id = node.attrs?.blockId as string | undefined;
-  return typeof id === 'string' && id.length > 0 ? id : null;
-}
-
-function sanitizeBlockId(raw: string | null | undefined): string | null {
-  const id = String(raw || '').trim();
-  if (!id || !BLOCK_ID_PATTERN.test(id)) return null;
-  return id;
+  return sanitizeFeishuBlockId(node.attrs?.blockId);
 }
 
 function resolveHighlightBlockDomWrapper(editor: Editor, from: number): HTMLElement | null {
@@ -50,7 +36,11 @@ function resolveHighlightBlockDomWrapper(editor: Editor, from: number): HTMLElem
 
 function parseDomBlockAnchorId(wrapper: HTMLElement | null): string | null {
   if (!wrapper) return null;
-  return sanitizeBlockId(wrapper.id || wrapper.getAttribute('data-block-id'));
+  return sanitizeFeishuBlockId(wrapper.id || wrapper.getAttribute('data-block-id'));
+}
+
+function isBlockAnchorNode(node: ProseNode): boolean {
+  return FEISHU_BLOCK_ID_TYPES.includes(node.type.name);
 }
 
 export function resolveCurrentBlockAnchor(editor: Editor): {
@@ -60,6 +50,11 @@ export function resolveCurrentBlockAnchor(editor: Editor): {
 } | null {
   const $from = editor.state.selection.$from;
   const selectionFrom = editor.state.selection.from;
+  const selection = editor.state.selection;
+
+  if (selection instanceof NodeSelection && isBlockAnchorNode(selection.node)) {
+    return { pos: selection.from, node: selection.node, selectionFrom };
+  }
 
   for (let d = 1; d <= $from.depth; d++) {
     const node = $from.node(d);
@@ -70,7 +65,7 @@ export function resolveCurrentBlockAnchor(editor: Editor): {
 
   for (let d = $from.depth; d >= 1; d--) {
     const node = $from.node(d);
-    if (node.type.name === 'paragraph' || node.type.name === 'heading') {
+    if (isBlockAnchorNode(node)) {
       return { pos: $from.start(d), node, selectionFrom };
     }
   }
@@ -86,9 +81,9 @@ export function ensureCurrentBlockId(editor: Editor): string | null {
   const isHighlight = anchor.node.type.name === 'highlightBlock';
 
   if (!blockId && isHighlight) {
-    blockId = parseDomBlockAnchorId(resolveHighlightBlockDomWrapper(editor, anchor.selectionFrom)) ?? makeHighlightBlockId();
+    blockId = parseDomBlockAnchorId(resolveHighlightBlockDomWrapper(editor, anchor.selectionFrom)) ?? makeFeishuBlockId(anchor.node.type.name);
   } else if (!blockId) {
-    blockId = makeGenericBlockId();
+    blockId = makeFeishuBlockId(anchor.node.type.name);
   }
 
   if (!readStoredBlockId(anchor.node)) {
@@ -127,10 +122,10 @@ export async function copyCurrentBlockLink(editor: Editor): Promise<string | nul
 
 export function scrollToBlockFromHash(): boolean {
   const raw = decodeURIComponent(window.location.hash.replace(/^#/, '')).trim();
-  const blockId = sanitizeBlockId(raw);
+  const blockId = sanitizeFeishuBlockId(raw);
   if (!blockId) return false;
 
-  const target = document.getElementById(blockId) || document.querySelector(`[data-block-id="${CSS.escape(blockId)}"]`);
+  const target = resolveBlockElement(document, blockId);
   if (!(target instanceof HTMLElement)) return false;
 
   target.scrollIntoView({ block: 'center', behavior: 'smooth' });

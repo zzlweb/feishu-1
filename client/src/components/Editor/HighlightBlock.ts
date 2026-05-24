@@ -132,6 +132,7 @@ function HighlightBlockView({ editor, node, updateAttributes }: NodeViewProps) {
       id: blockId,
       ref: wrapperRef,
       'data-type': 'highlight-block',
+      'data-block-id': blockId,
       className: 'feishu-highlight-block-wrap',
       onMouseLeave: () => { if (showColors) setShowColors(false); },
       style: {

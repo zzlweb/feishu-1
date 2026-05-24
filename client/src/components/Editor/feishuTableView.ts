@@ -1,4 +1,5 @@
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { sanitizeFeishuBlockId } from './feishuBlockId';
 
 /** 与 @tiptap/extension-table 内置 TableView 一致，并强制包裹层 + feishu-table 类名 */
 function updateColumns(
@@ -62,7 +63,8 @@ export class FeishuTableView {
     this.dom.className = 'tableWrapper feishu-table-host';
     this.dom.setAttribute('data-block-type', 'table');
     this.dom.setAttribute('data-table-root', 'true');
-    if (node.attrs.tableId) this.dom.setAttribute('data-block-id', node.attrs.tableId);
+    const blockId = sanitizeFeishuBlockId(node.attrs.blockId) ?? sanitizeFeishuBlockId(node.attrs.tableId);
+    if (blockId) this.dom.setAttribute('data-block-id', blockId);
 
     this.scroll = document.createElement('div');
     this.scroll.className = 'feishu-table-scroll';
@@ -99,9 +101,10 @@ export class FeishuTableView {
   update(node: ProseMirrorNode) {
     if (node.type !== this.node.type) return false;
     this.node = node;
-    if (node.attrs.tableId) {
-      this.dom.setAttribute('data-block-id', node.attrs.tableId);
-      this.table.setAttribute('data-table-id', node.attrs.tableId);
+    const blockId = sanitizeFeishuBlockId(node.attrs.blockId) ?? sanitizeFeishuBlockId(node.attrs.tableId);
+    if (blockId) {
+      this.dom.setAttribute('data-block-id', blockId);
+      this.table.setAttribute('data-table-id', blockId);
     }
     updateColumns(node, this.colgroup, this.table, this.cellMinWidth);
     return true;

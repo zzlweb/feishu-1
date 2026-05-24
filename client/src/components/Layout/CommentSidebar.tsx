@@ -3,6 +3,7 @@ import { Dropdown, DialogPlugin, MessagePlugin } from 'tdesign-react';
 import type { DropdownOption } from 'tdesign-react';
 import type { RefObject } from 'react';
 import type { Comment } from '../../types';
+import { resolveBlockElement } from '../Editor/blockDom';
 
 interface CommentSidebarProps {
   comments: Comment[];
@@ -57,7 +58,7 @@ function getBlockQuotePreview(blockId: string, scrollRoot: HTMLElement | null): 
   if (!blockId || blockId === '__doc__') return '';
   if (!scrollRoot) return '';
   try {
-    const el = scrollRoot.querySelector(`#${CSS.escape(blockId)}`);
+    const el = resolveBlockElement(scrollRoot, blockId);
     if (!(el instanceof HTMLElement)) return '';
     const raw = (el.innerText || '').replace(/\s+/g, ' ').trim();
     if (!raw) return '';
@@ -76,7 +77,7 @@ function copyCommentAnchor(blockId: string) {
 }
 
 function getBlockTop(blockId: string, searchRoot: HTMLElement, referenceEl: HTMLElement): number | null {
-  const el = searchRoot.querySelector(`#${CSS.escape(blockId)}`);
+  const el = resolveBlockElement(searchRoot, blockId);
   if (!el) return null;
   const refRect = referenceEl.getBoundingClientRect();
   const elRect = el.getBoundingClientRect();
@@ -90,6 +91,39 @@ function buildCommentMoreOptions(isOwn: boolean): DropdownOption[] {
   if (isOwn) items.push({ content: '删除', value: 'delete', theme: 'error' });
   items.push({ content: '举报', value: 'report' });
   return items;
+}
+
+function openDeleteCommentDialog(
+  comment: Comment,
+  onDeleteComment: (comment: Comment) => boolean | Promise<boolean>,
+) {
+  const confirmDialog = DialogPlugin.confirm({
+    header: '删除评论',
+    body: '确定删除这条评论吗？删除后无法恢复。',
+    theme: 'danger',
+    confirmBtn: '删除',
+    cancelBtn: '取消',
+    zIndex: 12000,
+    onConfirm: async () => {
+      confirmDialog.setConfirmLoading(true);
+      try {
+        const ok = await Promise.resolve(onDeleteComment(comment));
+        if (ok) {
+          confirmDialog.hide();
+          confirmDialog.destroy();
+          MessagePlugin.success('评论已删除');
+        } else {
+          MessagePlugin.error('删除失败，请稍后重试');
+        }
+      } finally {
+        confirmDialog.setConfirmLoading(false);
+      }
+    },
+    onClose: () => {
+      confirmDialog.hide();
+      confirmDialog.destroy();
+    },
+  });
 }
 
 export default function CommentSidebar({
@@ -352,14 +386,9 @@ export default function CommentSidebar({
                             setEditDraft(comment.content);
                           }
                           if (key === 'delete') {
-                            DialogPlugin.confirm({
-                              header: '删除评论',
-                              body: '确定删除这条评论吗？删除后无法恢复。',
-                              theme: 'danger',
-                              confirmBtn: '删除',
-                              cancelBtn: '取消',
-                              onConfirm: () => void onDeleteComment(comment),
-                            });
+                            window.setTimeout(() => {
+                              openDeleteCommentDialog(comment, onDeleteComment);
+                            }, 0);
                           }
                           if (key === 'translate') {
                             MessagePlugin.info('翻译功能敬请期待');
@@ -469,9 +498,10 @@ export default function CommentSidebar({
                                   ta.style.height = `${Math.min(Math.max(ta.scrollHeight, 32), 120)}px`;
                                 }}
                                 onKeyDown={e => {
-                                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
                                     e.preventDefault();
-                                    void submitReply(blockId);
+                                    if (inputValue.trim()) void submitReply(blockId);
+                                    return;
                                   }
                                   if (e.key === 'Escape') setReplyingBlockId(null);
                                 }}

@@ -7,11 +7,9 @@ interface Props {
 }
 
 const PICKER_BAR_COUNT = MAX_COLUMNS_PICKER;
-const DEFAULT_COUNT = 3;
 
 export default function ColumnsCountPicker({ onPick }: Props) {
   const [hoverCount, setHoverCount] = useState(0);
-  const displayCount = hoverCount || DEFAULT_COUNT;
 
   const handlePick = (count: number) => {
     const picked = hoverCount || count;
@@ -22,12 +20,12 @@ export default function ColumnsCountPicker({ onPick }: Props) {
     <div className="columns-count-picker">
       <div className="columns-count-picker__head">
         <span className="columns-count-picker__title">选择栏数</span>
-        <span className="columns-count-picker__size">{displayCount}</span>
+        <span className="columns-count-picker__size">{hoverCount}</span>
       </div>
       <div className="columns-count-picker__bars" onMouseLeave={() => setHoverCount(0)}>
         {Array.from({ length: PICKER_BAR_COUNT }, (_, index) => {
           const count = index + 1;
-          const isActive = count <= displayCount;
+          const isActive = hoverCount > 0 && count <= hoverCount;
           return (
             <button
               key={count}

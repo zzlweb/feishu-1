@@ -517,19 +517,64 @@ function normalizeCellText(value: string): string {
   return value.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').trim();
 }
 
-function parseHtmlTable(html: string): string[][] | null {
+interface ParsedTableCell {
+  text: string;
+  html?: Element;
+  isHeader?: boolean;
+  backgroundColor?: string;
+}
+
+type ParsedTableMatrix = ParsedTableCell[][];
+
+function emptyParsedCell(): ParsedTableCell {
+  return { text: '' };
+}
+
+function readCellBackground(cell: Element): string {
+  if (cell instanceof HTMLElement) {
+    return cell.style.backgroundColor || cell.getAttribute('bgcolor') || '';
+  }
+  return cell.getAttribute('bgcolor') || '';
+}
+
+function parseHtmlTable(html: string): ParsedTableMatrix | null {
   if (!html || !/<table[\s>]/i.test(html)) return null;
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const table = doc.querySelector('table');
   if (!table) return null;
 
-  const matrix: string[][] = [];
-  table.querySelectorAll('tr').forEach(tr => {
-    const row: string[] = [];
+  const matrix: ParsedTableMatrix = [];
+  const rowSpans: number[] = [];
+  table.querySelectorAll('tr').forEach((tr, rowIndex) => {
+    const row: ParsedTableCell[] = [];
+    let colIndex = 0;
+    const flushRowSpanPlaceholders = () => {
+      while ((rowSpans[colIndex] || 0) > 0) {
+        row.push(emptyParsedCell());
+        rowSpans[colIndex] -= 1;
+        colIndex += 1;
+      }
+    };
+
+    flushRowSpanPlaceholders();
     tr.querySelectorAll('th,td').forEach(cell => {
       const colspan = Math.max(1, Number(cell.getAttribute('colspan') || 1));
+      const rowspan = Math.max(1, Number(cell.getAttribute('rowspan') || 1));
       const text = normalizeCellText(cell.textContent || '');
-      for (let i = 0; i < colspan; i += 1) row.push(i === 0 ? text : '');
+      row.push({
+        text,
+        html: cell,
+        isHeader: cell.tagName.toLowerCase() === 'th' || rowIndex === 0 && tr.querySelectorAll('th').length > 0,
+        backgroundColor: readCellBackground(cell),
+      });
+      if (rowspan > 1) rowSpans[colIndex] = Math.max(rowSpans[colIndex] || 0, rowspan - 1);
+      colIndex += 1;
+      for (let i = 1; i < colspan; i += 1) {
+        row.push(emptyParsedCell());
+        if (rowspan > 1) rowSpans[colIndex] = Math.max(rowSpans[colIndex] || 0, rowspan - 1);
+        colIndex += 1;
+      }
+      flushRowSpanPlaceholders();
     });
     if (row.length > 0) matrix.push(row);
   });
@@ -537,21 +582,70 @@ function parseHtmlTable(html: string): string[][] | null {
   return matrix.length > 0 ? matrix : null;
 }
 
-function parseDelimitedTable(text: string): string[][] | null {
+function parseDelimitedTable(text: string): ParsedTableMatrix | null {
   const normalized = text.replace(/\r\n?/g, '\n').trimEnd();
   if (!normalized.includes('\t') && !normalized.includes('\n')) return null;
   const rows = normalized
     .split('\n')
-    .map(row => row.split('\t').map(normalizeCellText));
-  const nonEmpty = rows.filter(row => row.some(cell => cell.length > 0));
+    .map(row => row.split('\t').map(cell => ({ text: normalizeCellText(cell) })));
+  const nonEmpty = rows.filter(row => row.some(cell => cell.text.length > 0));
   if (nonEmpty.length < 2 && Math.max(...nonEmpty.map(row => row.length), 0) < 2) return null;
   return nonEmpty.length > 0 ? nonEmpty : null;
 }
 
-function createTableNodeFromMatrix(editor: Editor, matrix: string[][]): ProseNode | null {
+function normalizeInlineText(value: string): string {
+  return value.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
+}
+
+function textNodesWithBreaks(editor: Editor, value: string, marks: any[] = []): ProseNode[] {
+  const hardBreak = editor.schema.nodes.hardBreak;
+  const nodes: ProseNode[] = [];
+  const parts = value.replace(/\r\n?/g, '\n').split('\n');
+  parts.forEach((part, index) => {
+    const text = normalizeInlineText(part);
+    if (text) nodes.push(editor.schema.text(text, marks));
+    if (index < parts.length - 1 && hardBreak) nodes.push(hardBreak.create());
+  });
+  return nodes;
+}
+
+function collectCellInlineNodes(editor: Editor, root: Element | undefined): ProseNode[] {
+  if (!root) return [];
+  const linkMark = editor.schema.marks.link;
+  const nodes: ProseNode[] = [];
+  const visit = (node: Node, marks: any[] = []) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      nodes.push(...textNodesWithBreaks(editor, node.textContent || '', marks));
+      return;
+    }
+    if (!(node instanceof Element)) return;
+    if (node.tagName.toLowerCase() === 'br') {
+      const hardBreak = editor.schema.nodes.hardBreak;
+      if (hardBreak) nodes.push(hardBreak.create());
+      return;
+    }
+    const nextMarks = [...marks];
+    if (node.tagName.toLowerCase() === 'a' && linkMark) {
+      const href = node.getAttribute('href');
+      if (href) nextMarks.push(linkMark.create({ href }));
+    }
+    const before = nodes.length;
+    node.childNodes.forEach(child => visit(child, nextMarks));
+    if (['p', 'div'].includes(node.tagName.toLowerCase()) && nodes.length > before) {
+      const hardBreak = editor.schema.nodes.hardBreak;
+      if (hardBreak) nodes.push(hardBreak.create());
+    }
+  };
+  root.childNodes.forEach(child => visit(child));
+  while (nodes[nodes.length - 1]?.type.name === 'hardBreak') nodes.pop();
+  return nodes;
+}
+
+function createTableNodeFromMatrix(editor: Editor, matrix: ParsedTableMatrix): ProseNode | null {
   const tableType = editor.schema.nodes.table;
   const rowType = editor.schema.nodes.tableRow;
   const cellType = editor.schema.nodes.tableCell;
+  const headerType = editor.schema.nodes.tableHeader;
   const paragraphType = editor.schema.nodes.paragraph;
   if (!tableType || !rowType || !cellType || !paragraphType) return null;
 
@@ -559,16 +653,20 @@ function createTableNodeFromMatrix(editor: Editor, matrix: string[][]): ProseNod
   if (matrix.length === 0 || cols === 0) return null;
 
   const rows = matrix.map(row => rowType.create(null, Array.from({ length: cols }, (_, colIndex) => {
-    const text = row[colIndex] ?? '';
-    const paragraph = text
-      ? paragraphType.create(null, editor.schema.text(text))
-      : paragraphType.create();
-    return cellType.create(null, paragraph);
+    const cell = row[colIndex] ?? emptyParsedCell();
+    const inlineContent = collectCellInlineNodes(editor, cell.html);
+    const paragraph = inlineContent.length > 0
+      ? paragraphType.create(null, inlineContent)
+      : cell.text
+        ? paragraphType.create(null, textNodesWithBreaks(editor, cell.text))
+        : paragraphType.create();
+    const type = cell.isHeader && headerType ? headerType : cellType;
+    const attrs = cell.backgroundColor ? { backgroundColor: cell.backgroundColor } : null;
+    return type.create(attrs, paragraph);
   })));
 
   return tableType.create(null, rows);
 }
-
 export function insertTableFromClipboardData(editor: Editor, clipboardData: DataTransfer | null): boolean {
   if (!clipboardData) return false;
   if (editor.isActive('table')) return false;

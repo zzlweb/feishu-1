@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/react';
-import type { SlashMenuItem } from './slashMenuConfig';
+import type { ButtonActionType, SlashMenuItem } from './slashMenuConfig';
 import { insertFeishuTableAt } from './tableInsert';
 import { insertFeishuColumnsAt } from './columnsInsert';
 
@@ -23,9 +23,16 @@ async function uploadFile(file: File) {
   return json.data as { name: string; size: number; type: string; url: string };
 }
 
+function dispatchMediaInsert(files: File[], insertAt: number) {
+  window.dispatchEvent(new CustomEvent('feishu-insert-media-files', {
+    detail: { files, insertAt },
+  }));
+}
+
 async function createChildDocumentBelow(editor: Editor, pos: number) {
   const parentId = (editor as any).__documentId as string | undefined;
-  const res = await fetch('/api/documents', {
+  const url = parentId ? `/api/documents/${parentId}/children` : '/api/documents';
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title: '未命名子文档', parent_id: parentId || null, content: '<p></p>' }),
@@ -47,10 +54,6 @@ async function insertFirstTemplateBelow(editor: Editor, pos: number) {
     editor.chain().focus().insertContentAt(pos, template.content).run();
     return;
   }
-  editor.chain().focus().insertContentAt(pos, {
-    type: 'localEmbedBlock',
-    attrs: { title: '模板库为空', desc: '请先在更多菜单中保存模板', kind: 'template' },
-  }).run();
 }
 
 export function getInsertBelowPosition(editor: Editor): number {
@@ -63,8 +66,40 @@ export function getInsertBelowPosition(editor: Editor): number {
   return editor.state.doc.content.size;
 }
 
-export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item: SlashMenuItem): void {
-  const pos = getInsertBelowPosition(editor);
+function createSyncBlockNode() {
+  return {
+    type: 'localSyncBlock',
+    attrs: { syncId: `sync-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` },
+    content: [{ type: 'paragraph' }],
+  };
+}
+
+const BUTTON_TYPE_LABELS: Record<ButtonActionType, string> = {
+  link: '打开超链接',
+  duplicate: '创建副本',
+  follow: '关注文档更新',
+};
+
+export function insertButtonBlockAt(editor: Editor, pos: number, actionType: ButtonActionType = 'link'): void {
+  editor.chain().focus().insertContentAt(pos, {
+    type: 'localButtonBlock',
+    attrs: {
+      actionType,
+      text: BUTTON_TYPE_LABELS[actionType],
+    },
+  }).run();
+}
+
+export function getInsertAbovePosition(editor: Editor): number {
+  const { $from, from } = editor.state.selection;
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (node.type.name !== 'doc' && node.isBlock) return $from.before(d);
+  }
+  return from;
+}
+
+export function insertSlashItemAt(editor: Editor, sectionTitle: string, item: SlashMenuItem, pos: number): void {
   const chain = editor.chain().focus();
 
   switch (item.label) {
@@ -122,7 +157,7 @@ export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item:
       }).run();
       return;
     case '同步块':
-      chain.insertContentAt(pos, { type: 'localSyncBlock', content: [{ type: 'paragraph' }] }).run();
+      chain.insertContentAt(pos, createSyncBlockNode()).run();
       return;
     case '链接':
       window.dispatchEvent(new CustomEvent('feishu-open-page-link-dialog', { detail: { insertAt: pos } }));
@@ -141,17 +176,7 @@ export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item:
       return;
     case '视频或文件':
       pickFile('video/*,application/*,*/*', file => {
-        void uploadFile(file).then(uploaded => {
-          editor.chain().focus().insertContentAt(pos, {
-            type: 'localFileBlock',
-            attrs: { name: uploaded.name, url: uploaded.url, size: uploaded.size, mime: uploaded.type },
-          }).run();
-        }).catch(err => {
-          editor.chain().focus().insertContentAt(pos, {
-            type: 'localEmbedBlock',
-            attrs: { title: '上传失败', desc: err instanceof Error ? err.message : '文件上传失败', kind: 'file' },
-          }).run();
-        });
+        dispatchMediaInsert([file], pos);
       });
       return;
     case '表格':
@@ -165,42 +190,24 @@ export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item:
       insertFeishuColumnsAt(editor, pos, 2);
       return;
     case '按钮':
-      chain.insertContentAt(pos, { type: 'localButtonBlock' }).run();
+      if (item.submenu === 'buttonType') return;
+      insertButtonBlockAt(editor, pos, 'link');
       return;
     case '公式':
       chain.insertContentAt(pos, { type: 'localFormulaBlock' }).run();
       return;
     case '模板':
+      if (item.submenu === 'templateList') return;
       void insertFirstTemplateBelow(editor, pos);
       return;
     case '子文档':
       void createChildDocumentBelow(editor, pos);
       return;
-    case '看板':
-      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '看板', desc: '多维表格看板视图占位块', kind: 'kanban' } }).run();
-      return;
-    case '甘特图':
-      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '甘特图', desc: '多维表格甘特视图占位块', kind: 'gantt' } }).run();
-      return;
-    case '画册':
-      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '画册', desc: '多维表格画册视图占位块', kind: 'gallery' } }).run();
-      return;
-    case '画板':
-      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '画板', desc: '飞书画板占位块', kind: 'board' } }).run();
-      return;
-    case '思维导图':
-      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '思维导图', desc: '思维导图占位块', kind: 'mindmap' } }).run();
-      return;
-    case '流程图':
-      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '流程图', desc: '流程图占位块', kind: 'flowchart' } }).run();
-      return;
-    case 'UML 图':
-      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: 'UML 图', desc: 'UML 图占位块', kind: 'uml' } }).run();
-      return;
-    case '人员':
-      chain.insertContentAt(pos, { type: 'localEmbedBlock', attrs: { title: '人员', desc: '@成员占位块', kind: 'mention' } }).run();
-      return;
     default:
       chain.insertContentAt(pos, '<p></p>').run();
   }
+}
+
+export function insertBelowSlashItem(editor: Editor, sectionTitle: string, item: SlashMenuItem): void {
+  insertSlashItemAt(editor, sectionTitle, item, getInsertBelowPosition(editor));
 }

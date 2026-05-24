@@ -41,10 +41,16 @@ test('selects multiple blocks from the gutter with a marquee rectangle', async (
   expect(thirdBox).not.toBeNull();
 
   if (!areaBox || !firstBox || !thirdBox) return;
-  const startX = firstBox.x + firstBox.width - 16;
-  const startY = firstBox.y + firstBox.height / 2;
-  const endX = thirdBox.x + thirdBox.width * 0.7;
-  const endY = thirdBox.y + thirdBox.height / 2;
+
+  const second = page.locator('.ProseMirror p').nth(1);
+  const secondBox = await second.boundingBox();
+  expect(secondBox).not.toBeNull();
+  if (!secondBox) return;
+
+  const startX = firstBox.x + firstBox.width / 2;
+  const startY = firstBox.y + firstBox.height + (secondBox.y - (firstBox.y + firstBox.height)) / 2;
+  const endX = thirdBox.x + thirdBox.width / 2;
+  const endY = thirdBox.y + thirdBox.height + 8;
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
@@ -96,6 +102,87 @@ test('does not start marquee from block drag handle or action button', async ({ 
   await expect(page.locator('.feishu-box-selection-rect')).toBeHidden();
 });
 
+test('does not start marquee from blank padding inside a block row', async ({ page }) => {
+  await page.goto('/doc/block-marquee-e2e');
+
+  const first = page.locator('.ProseMirror p').nth(0);
+  await expect(first).toBeVisible();
+  const box = await first.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+
+  await page.mouse.move(box.x + box.width - 8, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 8, box.y + box.height + 80, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.locator('.feishu-box-selection-rect')).toBeHidden();
+  await expect(page.locator('.feishu-box-selection-band')).toHaveCount(0);
+});
+
+test('does not select task items when marquee passes over them', async ({ page }) => {
+  await page.goto('/doc/block-marquee-e2e');
+
+  await page.locator('.ProseMirror').click();
+  await page.keyboard.type('/todo');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Task one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/todo');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Task two');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Plain paragraph below');
+
+  const taskList = page.locator('ul[data-type="taskList"]').first();
+  const paragraph = page.locator('.ProseMirror p', { hasText: 'Plain paragraph below' });
+  await expect(taskList).toBeVisible();
+  await expect(paragraph).toBeVisible();
+
+  const taskBox = await taskList.boundingBox();
+  const paraBox = await paragraph.boundingBox();
+  expect(taskBox).not.toBeNull();
+  expect(paraBox).not.toBeNull();
+  if (!taskBox || !paraBox) return;
+
+  const startX = paraBox.x + paraBox.width / 2;
+  const startY = taskBox.y + taskBox.height + (paraBox.y - (taskBox.y + taskBox.height)) / 2;
+  const endX = taskBox.x + taskBox.width / 2;
+  const endY = taskBox.y + 4;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(endX, endY, { steps: 12 });
+  await page.mouse.up();
+
+  await expect(page.locator('ul[data-type="taskList"] .feishu-box-selection-band')).toHaveCount(0);
+});
+
+test('does not start marquee from task checkbox', async ({ page }) => {
+  await page.goto('/doc/block-marquee-e2e');
+
+  await page.locator('.ProseMirror').click();
+  await page.keyboard.type('/todo');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Task one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Task two');
+
+  const checkbox = page.locator('ul[data-type="taskList"] input[type="checkbox"]').first();
+  await expect(checkbox).toBeVisible();
+  const box = await checkbox.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + 120, { steps: 10 });
+  await page.mouse.up();
+
+  await expect(page.locator('.feishu-box-selection-rect')).toBeHidden();
+  await expect(page.locator('.feishu-box-selection-band')).toHaveCount(0);
+});
+
 test('supports reverse drag selection', async ({ page }) => {
   await page.goto('/doc/block-marquee-e2e');
 
@@ -104,13 +191,23 @@ test('supports reverse drag selection', async ({ page }) => {
   await expect(third).toBeVisible();
   const firstBox = await first.boundingBox();
   const thirdBox = await third.boundingBox();
+  const second = page.locator('.ProseMirror p').nth(1);
+  const secondBox = await second.boundingBox();
+  const pre = page.locator('pre').first();
+  const preBox = await pre.boundingBox();
   expect(firstBox).not.toBeNull();
   expect(thirdBox).not.toBeNull();
-  if (!firstBox || !thirdBox) return;
+  expect(secondBox).not.toBeNull();
+  expect(preBox).not.toBeNull();
+  if (!firstBox || !thirdBox || !secondBox || !preBox) return;
 
-  await page.mouse.move(thirdBox.x + thirdBox.width - 16, thirdBox.y + thirdBox.height + 6);
+  const startX = firstBox.x + firstBox.width / 2;
+  const gapBelowFirst = firstBox.y + firstBox.height + (secondBox.y - (firstBox.y + firstBox.height)) / 2;
+  const belowLastBlock = preBox.y + preBox.height + 16;
+
+  await page.mouse.move(startX, belowLastBlock);
   await page.mouse.down();
-  await page.mouse.move(firstBox.x - 30, firstBox.y + 2, { steps: 12 });
+  await page.mouse.move(startX, gapBelowFirst, { steps: 12 });
   await page.mouse.up();
 
   await expect.poll(() => page.locator('.feishu-box-selection-band').count()).toBeGreaterThanOrEqual(3);

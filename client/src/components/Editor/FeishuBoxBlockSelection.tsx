@@ -9,6 +9,8 @@ import {
 } from 'react';
 import {
   canStartBoxSelect,
+  collectSelectableUnits,
+  findSelectableUnitAtPoint,
   findUnitsInClientRect,
   measureUnitBand,
   normalizeClientRect,
@@ -80,12 +82,14 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const autoScrollRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLElement | Window | null>(null);
+  const shiftAnchorIdRef = useRef<string | null>(null);
 
   const editorRef = useRef(editor);
   editorRef.current = editor;
 
   const clearSelection = useCallback(() => {
     selectedRef.current = [];
+    shiftAnchorIdRef.current = null;
     setSelectedUnits([]);
     setSelectionBands([]);
     setDragRect(null);
@@ -116,6 +120,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
 
   const selectUnits = useCallback((units: SelectableUnit[]) => {
     selectedRef.current = units;
+    if (units.length > 0) shiftAnchorIdRef.current = units[0].id;
     setSelectedUnits(units);
     syncSelectionBands(units);
   }, [syncSelectionBands]);
@@ -128,6 +133,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     document.body.classList.remove('feishu-box-select-dragging');
     editorAreaRef.current?.removeAttribute('data-selection-mode');
     if (units.length > 0) {
+      shiftAnchorIdRef.current = units[0].id;
       ed.view.focus();
     }
   }, [editorAreaRef, selectUnits]);
@@ -313,6 +319,21 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 || isUiChrome(e.target)) return;
+
+      if (e.shiftKey && selectedRef.current.length > 0) {
+        const unit = findSelectableUnitAtPoint(editor, e.clientX, e.clientY);
+        const anchorId = shiftAnchorIdRef.current || selectedRef.current[0]?.id;
+        const allUnits = collectSelectableUnits(editor);
+        const anchorIndex = allUnits.findIndex(item => item.id === anchorId);
+        const targetIndex = unit ? allUnits.findIndex(item => item.id === unit.id) : -1;
+        if (anchorIndex >= 0 && targetIndex >= 0) {
+          e.preventDefault();
+          const [from, to] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+          selectUnits(allUnits.slice(from, to + 1));
+          editor.view.focus();
+          return;
+        }
+      }
 
       const canStart = canStartBoxSelect(e.target, area, e.clientX, e.clientY);
 

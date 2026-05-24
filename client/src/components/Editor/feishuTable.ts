@@ -8,6 +8,7 @@ import { EditorState, NodeSelection, Selection, TextSelection } from '@tiptap/pm
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { FeishuTableView } from './feishuTableView';
+import { sanitizeFeishuBlockId } from './feishuBlockId';
 
 const TABLE_CLASS = 'feishu-table';
 const TABLE_MIME = 'application/x-feishu-doc-table';
@@ -395,7 +396,12 @@ function buildTableIdentityTransaction(state: EditorState) {
   let tr = state.tr;
   state.doc.descendants((node, pos) => {
     if (node.type.name !== 'table') return;
-    const tableAttrs = node.attrs.tableId ? node.attrs : { ...node.attrs, tableId: createStableId('table') };
+    const tableId = sanitizeFeishuBlockId(node.attrs.blockId)
+      ?? sanitizeFeishuBlockId(node.attrs.tableId)
+      ?? createStableId('table');
+    const tableAttrs = node.attrs.tableId === tableId && node.attrs.blockId === tableId
+      ? node.attrs
+      : { ...node.attrs, tableId, blockId: tableId };
     if (tableAttrs !== node.attrs) tr = tr.setNodeMarkup(pos, undefined, tableAttrs);
     node.forEach((row, rowOffset, rowIndex) => {
       const rowPos = pos + 1 + rowOffset;
@@ -548,12 +554,15 @@ export const FeishuTable = Table.extend({
       tableId: {
         default: null,
         parseHTML: element => element.getAttribute('data-block-id') || element.getAttribute('data-table-id'),
-        renderHTML: attributes => ({
-          'data-block-id': attributes.tableId,
-          'data-table-id': attributes.tableId,
-          'data-block-type': 'table',
-          'data-table-root': 'true',
-        }),
+        renderHTML: attributes => {
+          const id = sanitizeFeishuBlockId(attributes.blockId) ?? sanitizeFeishuBlockId(attributes.tableId);
+          return {
+            'data-block-id': id,
+            'data-table-id': id,
+            'data-block-type': 'table',
+            'data-table-root': 'true',
+          };
+        },
       },
     };
   },

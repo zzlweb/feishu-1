@@ -8,6 +8,8 @@ import {
   SlashGlyphDivider,
   SlashGlyphHighlight,
   SlashGlyphTable,
+  SlashGlyphImage,
+  SlashGlyphSubDoc,
 } from '../../icons/slashMenuGlyphs';
 
 const S = 16;
@@ -53,6 +55,13 @@ export default function BlockGutterGlyph({ type }: { type: string }) {
       return <SlashGlyphDivider size={S} fill={n1} />;
     case 'table':
       return <SlashGlyphTable size={S} fill="#52c41a" />;
+    case 'image':
+      return <SlashGlyphImage size={S} fill={b500} />;
+    case 'file':
+      return <SlashGlyphSubDoc size={S} fill={g500} />;
+    case 'embed':
+    case 'subdoc':
+      return <SlashGlyphSubDoc size={S} fill={b500} />;
     case 'paragraph':
       return <ContextGlyphText size={S} fill={b500} />;
     default:

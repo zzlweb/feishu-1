@@ -4,7 +4,11 @@ import { IconChevronMenuEnd } from '../../icons/feishuDoc';
 import { SLASH_SECTIONS, type SlashMenuItem } from './slashMenuConfig';
 import TableGridPicker from './TableGridPicker';
 import ColumnsCountPicker from './ColumnsCountPicker';
+import TemplatePicker from './TemplatePicker';
+import ButtonTypePicker from './ButtonTypePicker';
 import { computeSubmenuFlyoutPosition } from './contextSubmenuFlyout';
+import type { Template } from '../../types';
+import type { ButtonActionType } from './slashMenuConfig';
 
 const GRID_STROKE = 1.65;
 const LIST_STROKE = 1.55;
@@ -13,27 +17,31 @@ interface Props {
   onPickItem: (sectionTitle: string, item: SlashMenuItem) => void;
   onPickTable: (rows: number, cols: number) => void;
   onPickColumns: (columnCount: number) => void;
+  onPickTemplate?: (template: Template) => void;
+  onPickButton?: (type: ButtonActionType) => void;
 }
 
 export default function AddBelowSlashSections({
   onPickItem,
   onPickTable,
   onPickColumns,
+  onPickTemplate,
+  onPickButton,
 }: Props) {
   const [activeSubmenu, setActiveSubmenu] = useState<{
-    kind: 'tableGrid' | 'columnsCount';
+    kind: 'tableGrid' | 'columnsCount' | 'templateList' | 'buttonType';
     rect: DOMRect;
   } | null>(null);
 
-  const openSubmenu = (kind: 'tableGrid' | 'columnsCount', el: HTMLElement) => {
+  const openSubmenu = (kind: 'tableGrid' | 'columnsCount' | 'templateList' | 'buttonType', el: HTMLElement) => {
     setActiveSubmenu({ kind, rect: el.getBoundingClientRect() });
   };
 
   const submenuPosition = activeSubmenu
     ? computeSubmenuFlyoutPosition({
         trigger: activeSubmenu.rect,
-        panelWidth: activeSubmenu.kind === 'tableGrid' ? 304 : 184,
-        panelHeight: activeSubmenu.kind === 'tableGrid' ? 334 : 164,
+        panelWidth: activeSubmenu.kind === 'tableGrid' ? 304 : activeSubmenu.kind === 'columnsCount' ? 184 : activeSubmenu.kind === 'buttonType' ? 230 : 264,
+        panelHeight: activeSubmenu.kind === 'tableGrid' ? 334 : activeSubmenu.kind === 'columnsCount' ? 164 : activeSubmenu.kind === 'buttonType' ? 144 : 340,
         gap: 8,
         pad: 8,
       })
@@ -86,7 +94,9 @@ export default function AddBelowSlashSections({
               const tint = item.iconColor ?? '#1f2329';
               const isTableGrid = item.submenu === 'tableGrid';
               const isColumnsCount = item.submenu === 'columnsCount';
-              const hasSubmenu = isTableGrid || isColumnsCount;
+              const isTemplateList = item.submenu === 'templateList';
+              const isButtonType = item.submenu === 'buttonType';
+              const hasSubmenu = isTableGrid || isColumnsCount || isTemplateList || isButtonType;
               return (
                 <div
                   key={`${section.title}-${item.label}`}
@@ -97,6 +107,8 @@ export default function AddBelowSlashSections({
                   onMouseEnter={e => {
                     if (isTableGrid) openSubmenu('tableGrid', e.currentTarget);
                     else if (isColumnsCount) openSubmenu('columnsCount', e.currentTarget);
+                    else if (isTemplateList) openSubmenu('templateList', e.currentTarget);
+                    else if (isButtonType) openSubmenu('buttonType', e.currentTarget);
                     else setActiveSubmenu(null);
                   }}
                   onMouseDown={e => {
@@ -134,9 +146,24 @@ export default function AddBelowSlashSections({
             <div className="slash-table-grid-flyout is-portal">
               <TableGridPicker onPick={handlePickTable} />
             </div>
-          ) : (
+          ) : activeSubmenu.kind === 'columnsCount' ? (
             <div className="slash-columns-count-flyout is-portal">
               <ColumnsCountPicker onPick={handlePickColumns} />
+            </div>
+          ) : activeSubmenu.kind === 'templateList' ? (
+            <div className="slash-template-flyout is-portal">
+              <TemplatePicker
+                onPick={template => {
+                  onPickTemplate?.(template);
+                }}
+              />
+            </div>
+          ) : (
+            <div className="slash-button-type-flyout is-portal">
+              <ButtonTypePicker
+                onPickType={type => onPickButton?.(type)}
+                onPick={() => setActiveSubmenu(null)}
+              />
             </div>
           )}
         </div>,

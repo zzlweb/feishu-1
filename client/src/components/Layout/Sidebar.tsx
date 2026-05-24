@@ -1,5 +1,6 @@
 import React, { useCallback, forwardRef } from 'react';
 import { DOC_TITLE_CATALOGUE_ID, type HeadingItem } from '../../types';
+import { resolveBlockElement } from '../Editor/blockDom';
 import './Layout.less';
 
 interface SidebarProps {
@@ -55,7 +56,7 @@ const Sidebar = forwardRef<HTMLDivElement, SidebarProps>(function Sidebar(
 
   const scrollToHeading = useCallback(
     (id: string) => {
-      const target = document.getElementById(id);
+      const target = resolveBlockElement(document, id);
       if (target) {
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }

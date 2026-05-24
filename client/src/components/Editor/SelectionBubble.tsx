@@ -4,6 +4,7 @@ import { BubbleMenu } from '@tiptap/react';
 import type { Editor } from '@tiptap/react';
 import { isTextSelection } from '@tiptap/core';
 import { CellSelection } from '@tiptap/pm/tables';
+import { isImageBlockActive } from './imageBlockUtils';
 import type { EditorView } from '@tiptap/pm/view';
 import type { EditorState } from '@tiptap/pm/state';
 import FeishuColorPickerPanel from './FeishuColorPickerPanel';
@@ -170,6 +171,7 @@ function shouldShowBubble({
   if (document.querySelector('.context-menu')) return false;
   if (document.querySelector('.slash-menu')) return false;
   if (editor.isActive('codeBlock')) return false;
+  if (isImageBlockActive(editor)) return false;
   return true;
 }
 

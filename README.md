@@ -2,7 +2,13 @@
 
 > 基于 TipTap / ProseMirror 的飞书云文档风格编辑器。目标：在可运行的工程基础上，**逐步对齐飞书的块编辑体验、视觉规范与协作能力**。
 
-本文档依据 **当前代码实际状态**（截至 2026-05）编写，供后续人工或 AI 按阶段推进时对照，避免重复实现或误判完成度。
+本文档依据 **当前代码实际状态**（截至 2026-05-24）与本机飞书客户端前端产物解析结果编写，供后续人工或 AI 按阶段推进时对照，避免重复实现或误判完成度。
+
+更多接力资料：
+
+- `docs/FEISHU_REPLICA_PLAN.md`：当前实现复盘、错误实现与逐项 review 执行计划。
+- `docs/FEISHU_LOCAL_ASSETS_ANALYSIS.md`：本机飞书 `webcontent` / `.asar` 前端产物解析记录。
+- `docs/FEISHU_MENU_AUDIT.md`：插入菜单逐项功能验收，标记哪些不允许再作为占位实现。
 
 ---
 
@@ -23,16 +29,16 @@
 ## 当前实现进度
 
 > 统计口径：对照下方「功能对照表」按用户可感知能力点估算。✅ 计 100%，🟡 计 50%，❌ 计 0%。  
-> 更新时间：2026-05-22
+> 更新时间：2026-05-24
 
 ### 总体进度
 
 | 指标 | 数值 |
 |------|------|
-| **综合完成度** | **约 82%**（核心编辑体验接近完整，高级块 / 协作仍是主要缺口） |
-| ✅ 已实现 | 文档 CRUD、富文本、Slash、块菜单、目录、表格高保真交互、分栏基础、块级评论 |
-| 🟡 部分实现 | 稳定 blockId、封面、模板、子文档、框选增强、评论 range / 线程、高级块真实化 |
-| ❌ 未实现 | 实时协同、权限 ACL、历史版本、全文搜索替换、Excel 粘贴、块拖拽排序 |
+| **综合完成度** | **约 82%**（核心编辑体验接近完整；表格能力比旧记录更完整；块模型、评论闭环、权限 / 协作仍是主要缺口） |
+| ✅ 已实现 | 文档 CRUD、富文本、Slash、块菜单、目录、表格高保真交互、Excel/HTML 表格基础粘贴、表格行列基础拖拽重排、分栏基础、块级评论 |
+| 🟡 部分实现 | 稳定 blockId、封面、模板、子文档、框选增强、评论 range / 线程、高级块真实化、表格复杂场景 |
+| ❌ 未实现 | 实时协同、权限 ACL、历史版本、全文搜索替换、块级拖拽排序、右键统一菜单 |
 | 后端 API 路由 | 文档 / 评论 / 模板 / 上传 **已可用** |
 | 构建状态 | 最近一次人工记录：`client` `tsc` + `vite build` 可通过；本次仅更新文档，未重新构建 |
 
@@ -55,7 +61,7 @@
 | 2. 编辑器基础 | 10 | 1 | 0 | ~96% | 富文本、列表、退格降级齐全；Markdown 规则不全 |
 | 3. 飞书风格交互 | 12 | 1 | 2 | ~90% | Slash、块菜单、行高亮、块链接、框选多块已完成；**缺真实拖拽排序 / 右键统一菜单** |
 | 4. 目录与标题 | 5 | 1 | 1 | ~79% | 大纲、折叠、光标同步已有；**折叠不持久化** |
-| 5. 高级块 | 8 | 7 | 1 | ~76% | 表格和分栏已明显增强；公式 / 同步 / 多维表格等仍为占位 |
+| 5. 高级块 | 9 | 7 | 1 | ~76% | 表格和分栏已明显增强；公式 / 同步 / 多维表格等已有本地雏形但未对齐飞书真实能力 |
 | 6. 评论与协作 | 4 | 1 | 4 | ~50% | 块评论闭环可用；**无协同 / 划词 / 线程** |
 
 ### 路线图阶段进度
@@ -63,9 +69,9 @@
 | 阶段 | 名称 | 进度 | 状态 |
 |------|------|------|------|
 | 0 | 基线与规范 | ~20% | 🟡 已有 `docs/specs/feishu-table.md`；仍缺完整 UI 截图目录 |
-| 1 | 块数据基础 | ~35% | 🟡 `headingId`、段落/标题 `blockId`、块链接已有；统一全块 `blockId`、折叠持久化未做 |
-| 2 | 块操作闭环 | ~50% | 🟡 剪切复制、删除、在下方添加、框选批量删除已有；**拖拽排序、右键、转子文档 UI**未做 |
-| 3 | 表格与分栏 | ~80% | 🟡 表格 Overlay、行列选择/插入/删除、合并拆分、单元格背景、均分列宽、可编辑分栏已做；Excel 粘贴和高级表格能力未做 |
+| 1 | 块数据基础 | ~90% | 🟡 已新增统一 `FeishuBlockId` 扩展覆盖主要可操作块；`headingId` / `tableId` 已与 `blockId` 收敛，标题折叠状态已持久化，块定位 API 已统一 |
+| 2 | 块操作闭环 | ~92% | ✅ 剪切复制、删除、上下方添加、框选批量删除/复制/移动、六点柄同父级拖拽排序、保存块模板、转子文档、右键统一菜单已有 |
+| 3 | 表格与分栏 | ~90% | 🟡 表格 Overlay、行列选择/插入/删除、合并拆分、单元格背景、均分列宽、Excel/HTML 富粘贴、简单行列拖拽重排、可编辑分栏已做；冻结行列和合并单元格下的重排策略未做 |
 | 4 | 菜单与视觉对齐 | ~60% | 🟡 块菜单、表格块菜单、Slash、选区气泡较完整；最近颜色、完整截图对照未做 |
 | 5 | 评论与 @ | ~40% | 🟡 块评论可用；划词、回复线程、@ 未做 |
 | 6 | 高级块真实化 | ~30% | 🟡 分栏已真实化；公式 / 同步 / 画板 / 多维表格等仍为占位 |
@@ -84,8 +90,21 @@
 - 表格 Overlay：顶部 / 左侧轨道、边界灰点、插入行列加号、滚动渐隐
 - 表格选区：整行 / 整列 `CellSelection`、浅蓝选中态、表格选区浮动工具栏
 - 表格操作补齐：合并 / 拆分单元格、单元格背景色、删除行列、均分列宽
+- 表格粘贴基础版：`insertTableFromClipboardData()` 已支持 HTML table / TSV 生成 TipTap 表格
+- 表格行列拖拽基础版：`FeishuTableOverlay.tsx` 已接 `moveTableRow()` / `moveTableColumn()`，简单表格可重排
 - 分栏块真实化：2–5 栏插入、栏内可编辑块、空栏「+」菜单、栏宽拖动、栏间新增
 - 框选多块：拖拽矩形选择普通块 / 列表项 / 表格行，支持 `Delete` / `Backspace` / `Enter` 批量删除
+- 本机飞书前端产物解析：已定位 `D:\ferishu\Feishu\app\webcontent`，确认 `space.asar`、`docs`、`ccm-offline`、`bitable` 等可作为模块和视觉对照依据
+- 统一块 ID 基础：新增 `FeishuBlockId` 扩展，paragraph / heading / listItem / blockquote / codeBlock / table / columns / media / embed 等主要可操作块会自动补 `blockId`
+- 历史锚点收敛：标题 `headingId`、表格 `tableId` 会与 `blockId` 保持同一稳定 ID，目录、折叠、块链接、评论定位共用锚点策略
+- 标题折叠持久化：文档保存 `collapsed_heading_ids`，刷新或复制文档后可恢复折叠状态
+- 块定位 API：新增 `resolveBlockElement()`，目录、块链接、评论侧栏和评论孤儿检测共用同一锚点解析策略
+- 六点柄拖拽排序：段落、标题、列表项、引用、代码等同父级块可通过六点柄拖到目标块前后，undo 可用
+- 块菜单补齐：支持在上方/下方添加、当前块/选区保存为模板、转换为子文档卡片
+- 多块选择增强：Shift 点击扩展范围，选中连续同父级块后可复制、删除、Alt+↑/↓ 批量移动
+- 右键统一菜单：正文普通块右键打开块菜单，表格右键打开表格菜单
+- 转子文档闭环：后端新增父文档下创建子文档 API，块菜单可把选中块迁入子文档并在父文档留下卡片
+- 表格粘贴增强：HTML 表格粘贴保留链接、换行、表头和背景色，合并单元格先安全降级为占位矩阵
 
 ### 当前验收状态（2026-05-22）
 
@@ -102,17 +121,19 @@
 | 表格：合并 / 拆分单元格 | ✅ 已实现 | 选中多单元格后，块菜单自动激活「合并单元格 / 拆分单元格」选项 |
 | 表格：轨道选择 / 边界插入 | ✅ 已实现 | `FeishuTableOverlay.tsx` 区分选择轨道与插入灰点，避免点击冲突 |
 | 表格：单元格背景色 | ✅ 已实现 | 选区气泡写入 `backgroundColor` cell attr，刷新后随 HTML 恢复 |
+| 表格：Excel / HTML 基础粘贴 | ✅ 已实现 | `tableInsert.ts` 解析 HTML table / TSV；暂不完整保留样式、链接、合并单元格 |
+| 表格：行列拖拽重排 | 🟡 部分通过 | 简单矩阵表格可拖拽重排；含 rowspan / colspan 的复杂表格仍需策略 |
 | 分栏：可编辑 / 调宽 / 新增栏 | ✅ 已实现 | `localColumnsBlock` + React NodeView，列内可继续插入块 |
 | 框选多块批量删除 | ✅ 已实现 | 拖拽框选块 / 列表项 / 表格行，键盘删除 |
 | 标题折叠 | 🟡 部分通过 | 会话内可折叠；刷新后持久化待实现 |
-| 评论闭环 | 🟡 部分通过 | 块级评论可用；划词 range、回复线程待实现 |
+| 评论闭环 | 🟡 部分通过 | 块级评论可用；前端已有划词 / 回复 UI 雏形，但后端 `thread_id` / `parent_id` / `anchor_json` 未闭环 |
 
 ### 建议下一步（优先级）
 
 1. **阶段 1**：统一所有可操作块的 `blockId` + 折叠状态写入文档 JSON  
 2. **阶段 2**：六点柄真实拖拽排序（含插入线、撤销、分栏内外边界）  
-3. **阶段 3**：Excel / HTML 表格粘贴、表格行列拖拽重排、冻结行列  
-4. **阶段 4**：建立完整 `docs/feishu-spec` 对照截图，校准块菜单 / 表格 / 评论像素  
+3. **阶段 3**：表格粘贴增强、复杂表格重排策略、冻结行列  
+4. **阶段 4**：结合本机飞书 `webcontent` 产物与运行时截图，建立完整 `docs/feishu-spec` 对照资料，校准块菜单 / 表格 / 评论像素  
 
 ---
 
@@ -219,7 +240,7 @@ word/
 | 自动保存正文 | ✅ | `Editor.tsx` debounce ~1s |
 | 文档标题 / 图标 | ✅ | 标题输入 + `EmojiPicker.tsx`，字段 `icon` |
 | 封面 | 🟡 | 可添加预设 `/static/01.gif` 并移除；无上传裁剪 `Editor.tsx` |
-| 复制文档 | ✅ | `POST /:id/duplicate`，仍需补复制 `cover_url` |
+| 复制文档 | ✅ | `POST /:id/duplicate`，已复制 `cover_url` / `icon` / `parent_id` 等基础元信息 |
 | 保存为模板 | 🟡 | API + Header 入口；Slash「模板」仅取列表第一项 |
 | 子文档 `parent_id` | 🟡 | Slash / insertBelow 可创建；首页无树形展示 |
 | 阅读 / 编辑模式 | ✅ | `DocumentPage` `readOnly` → `editor.setEditable` |
@@ -331,12 +352,35 @@ word/
 
 ## 与飞书的主要差距（汇总）
 
-1. **块模型**：缺少统一全块 `blockId` 体系（当前主要覆盖 heading / paragraph）、父子树、拖拽排序。
+1. **块模型**：已有统一 `blockId` 基础扩展覆盖主要可操作块，并已收敛 heading / table 历史锚点语义和折叠持久化；同父级块拖拽排序已实现，仍缺父子树和跨父级拖拽。
 2. **高级块**：多数 Slash 项为 embed 占位，非可编辑真实组件。
-3. **表格**：核心富文本表格已可用；仍缺 Excel / HTML 粘贴、冻结行列、行列拖拽重排、列宽自适应。
-4. **协作**：无多人实时、权限、@人、通知。
-5. **产品化**：首页 Tab、搜索、收藏、封面上传、模板选择器未完整。
+3. **表格**：核心富文本表格已可用；基础 Excel / HTML 粘贴、简单行列拖拽重排已实现；仍缺复杂粘贴保真、冻结行列、合并单元格下的重排策略、列宽自适应。
+4. **协作与权限**：无多人实时、动作级权限、@人、通知。本机飞书产物显示权限动作至少包括 `VIEW`、`COMMENT`、`EDIT`、`COPY`、`DUPLICATE`、`MANAGE_HISTORY_RECORD`、`EXPORT` 等，后续不能只做 read/edit 两档。
+5. **产品化**：首页 Tab、搜索、收藏、封面上传、模板选择器未完整。本机 `space.asar` 可见 `clone_modal`、`app_share_menu`、`apply_edit_permission_modal`、`bear-template-center-external`、`explorer_sidebar_tree` 等真实模块线索。
 6. **视觉**：菜单尺寸 / 图标 / 动效距飞书像素级仍有差距（需对照截图迭代）。
+
+---
+
+## 本机飞书产物解析结论
+
+本机已启动 / 安装飞书客户端，可读取到打包后的前端产物，但不是可维护源码仓库。
+
+| 位置 | 结论 |
+|------|------|
+| `D:\ferishu\Feishu\app\webcontent` | 飞书主要 WebView 前端产物目录 |
+| `webcontent/docs` | 文档选择、绑定文档、doc preview 等 chunk |
+| `webcontent/ccm-offline` | 云文档通用能力、权限、domain / drive / space API 相关 chunk |
+| `webcontent/bitable` | 多维表格 HTML 入口 |
+| `webcontent/space.asar` | 云文档空间、模板、分享、权限、空间树等产品化模块 |
+| `webcontent/resource.asar` | 字体、图片、主题样式与通用资源 |
+
+可用方式：
+
+- 用 `.asar` / chunk 名称反推真实模块边界，例如权限、分享、模板中心、空间树、拖拽移动进度。
+- 用本地运行时 DOM / 截图补 `docs/feishu-spec/`，做像素和交互验收。
+- 不直接复制飞书私有压缩代码；本项目按现有 TipTap 架构独立实现。
+
+详见 `docs/FEISHU_LOCAL_ASSETS_ANALYSIS.md`。
 
 ---
 
@@ -366,11 +410,11 @@ word/
 
 | # | 任务 | 文件 | 细节 |
 |---|------|------|------|
-| 1.1 | 扩展 `blockId` 到 paragraph / list / quote 等 | 新建 `feishuBlockId.ts`，各 Node 扩展 | 创建时 UUID，parse/render HTML attr |
-| 1.2 | 替换仅 pos 依赖的 ID | `feishuHeading.ts`（已有 headingId） | 保持 headingId 与 blockId 一致或合并 |
-| 1.3 | 持久化 `collapsedHeadingIds` | `database.ts` Document 类型 + `DocumentPage.tsx` | JSON 字段 `collapsed_headings: string[]` |
-| 1.4 | 修复 duplicate 丢失 `cover_url` | `server/routes/documents.ts` | duplicate 复制全部 meta |
-| 1.5 | 块定位 API | `blockLink.ts` | 统一 `resolveBlockElement(blockId)` |
+| 1.1 | 扩展 `blockId` 到 paragraph / list / quote 等 | `feishuBlockId.ts`，各 Node 扩展 | ✅ 已覆盖主要可操作块，创建 / 粘贴旧内容时自动补 ID |
+| 1.2 | 替换仅 pos 依赖的 ID | `feishuHeading.ts`、`feishuTable.ts` | ✅ headingId / tableId 与 blockId 保持一致 |
+| 1.3 | 持久化 `collapsedHeadingIds` | `database.ts` Document 类型 + `DocumentPage.tsx` | ✅ JSON 字段 `collapsed_heading_ids: string[]` |
+| 1.4 | 修复 duplicate 丢失 `cover_url` | `server/routes/documents.ts` | ✅ 已修复基础元信息；历史版本 / 权限 / 评论继承待后续权限模型确定 |
+| 1.5 | 块定位 API | `blockDom.ts`、`blockLink.ts` | ✅ 统一 `resolveBlockElement(blockId)` |
 
 **验收**：
 - 复制块链接刷新后仍可跳转；
@@ -407,13 +451,13 @@ word/
 
 | # | 任务 | 文件 | 细节 |
 |---|------|------|------|
-| 3.1 | Excel / HTML 表格粘贴 | `Editor.tsx` paste handler | HTML table / TSV → TipTap table，保留基础文本和行列 |
-| 3.2 | 行列拖拽重排 | `FeishuTableOverlay.tsx` / `tableInsert.ts` | 拖动顶部 / 左侧轨道重排整列 / 整行 |
+| 3.1 | Excel / HTML 表格粘贴增强 | `tableInsert.ts` | 已有 HTML table / TSV → TipTap table；继续补链接、换行、表头、背景色、合并单元格降级策略 |
+| 3.2 | 复杂表格行列拖拽策略 | `FeishuTableOverlay.tsx` / `tableInsert.ts` | 已有简单矩阵表格重排；继续补 rowspan / colspan 禁用提示或安全移动 |
 | 3.3 | 冻结首行 / 首列 | `feishuTable.ts` / `FeishuTableOverlay.tsx` | 先做视觉冻结，后续再持久化配置 |
 | 3.4 | 列宽内容自适应 | `panelActions.ts` | 选区列按内容或容器宽度自动调整 |
 | 3.5 | 分栏操作补齐 | `columnsNodeViews.tsx` / `columnsHelpers.ts` | 删除栏、栏间拖拽重排、分栏转普通块 |
 
-**验收**：从 Excel 粘贴能生成 TipTap 表格；行列可重排；分栏可删除 / 调整 / 还原。
+**验收**：从 Excel / 网页粘贴能更高保真生成 TipTap 表格；复杂表格重排有安全策略；分栏可删除 / 调整 / 还原。
 
 ---
 
@@ -490,26 +534,26 @@ word/
 | 顺序 | 目标 | 关键文件 | 完成标准 |
 |------|------|----------|----------|
 | P0.1 | 建立完整飞书 UI 对照资料 | `docs/feishu-spec/`、`docs/specs/feishu-table.md` | 表格规格已有；继续补块菜单、Slash、评论、目录截图与尺寸标注 |
-| P0.2 | 统一块 ID | `Editor.tsx`、新建 `feishuBlockId.ts`、`blockLink.ts` | paragraph / heading / list / quote / code / table / columns 等刷新后都有稳定 `data-block-id` |
-| P0.3 | 折叠状态持久化 | `DocumentPage.tsx`、`server/src/database.ts`、`documents.ts` | 折叠标题刷新后仍保持折叠 |
+| P0.2 | 统一块 ID | `Editor.tsx`、`feishuBlockId.ts`、`blockLink.ts` | ✅ paragraph / heading / list / quote / code / table / columns 等刷新后都有稳定 `data-block-id`；heading / table 历史锚点已收敛 |
+| P0.3 | 折叠状态持久化 | `DocumentPage.tsx`、`server/src/database.ts`、`documents.ts` | ✅ 折叠标题刷新后仍保持折叠 |
 | P0.4 | 自动保存健壮性 | `Editor.tsx`、`api/documents.ts` | 保存失败有提示；连续输入不丢内容 |
-| P0.5 | 复制文档元信息完整性 | `server/src/routes/documents.ts` | duplicate 同步复制 `cover_url`、`icon`、`parent_id` 等元字段 |
+| P0.5 | 复制文档元信息完整性 | `server/src/routes/documents.ts` | ✅ duplicate 已同步复制 `cover_url`、`icon`、`parent_id` 等基础元字段 |
 
 ### P1：核心块编辑体验
 
 | 顺序 | 目标 | 关键文件 | 完成标准 |
 |------|------|----------|----------|
-| P1.1 | 六点柄真实拖拽排序 | `Editor.tsx`、新建 `feishuBlockDrag.ts` | 段落、标题、列表可拖拽换序，撤销可用 |
-| P1.2 | 多块选择增强 | `FeishuBoxBlockSelection.tsx`、`boxSelectionModel.ts` | 已有框选 + 批量删除；补 Shift 点击、批量复制、批量移动 |
-| P1.3 | 块菜单补齐 | `ContextMenu.tsx`、`insertBelowBlocks.ts` | 在上方添加、转换类型、保存为模板、转子文档均可用 |
-| P1.4 | 右键统一菜单 | `Editor.tsx`、`ContextMenu.tsx` | 浏览器右键被飞书风格块菜单替代 |
+| P1.1 | 六点柄真实拖拽排序 | `Editor.tsx`、`feishuBlockDrag.ts` | ✅ 段落、标题、列表等同父级块可拖拽换序，撤销可用 |
+| P1.2 | 多块选择增强 | `FeishuBoxBlockSelection.tsx`、`boxSelectionModel.ts` | ✅ 已有框选 + 批量删除/复制/移动；支持 Shift 点击扩展范围 |
+| P1.3 | 块菜单补齐 | `ContextMenu.tsx`、`insertBelowBlocks.ts` | ✅ 在上方添加、转换类型、保存为模板、转子文档均可用 |
+| P1.4 | 右键统一菜单 | `Editor.tsx`、`ContextMenu.tsx` | ✅ 浏览器右键被飞书风格块菜单替代 |
 
 ### P2：表格与高级编辑块
 
 | 顺序 | 目标 | 关键文件 | 完成标准 |
 |------|------|----------|----------|
-| P2.1 | Excel / HTML 表格粘贴 | `Editor.tsx` paste handler | 从 Excel / 网页粘贴能生成 TipTap 表格 |
-| P2.2 | 表格行列拖拽重排 | `FeishuTableOverlay.tsx`、`tableInsert.ts` | 拖动轨道可移动整行 / 整列 |
+| P2.1 | Excel / HTML 表格粘贴增强 | `tableInsert.ts` | 已有基础粘贴；继续补链接、换行、表头、背景色、合并单元格降级策略 |
+| P2.2 | 表格复杂重排策略 | `FeishuTableOverlay.tsx`、`tableInsert.ts` | 已有简单表格行列拖拽；复杂表格禁用时有提示或支持安全移动 |
 | P2.3 | 表格高级能力 | `panelActions.ts`、`feishuTable.ts` | 冻结首行 / 首列、列宽自适应、更多 tooltip |
 | P2.4 | 分栏增强 | `columnsNodeViews.tsx`、`columnsHelpers.ts` | 删除栏、栏重排、分栏转普通块 |
 | P2.5 | 公式块真实化 | 公式 NodeView | 支持输入、预览、保存，推荐 KaTeX |

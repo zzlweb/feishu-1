@@ -55,41 +55,52 @@ function getTargetElement(target: EventTarget | null): Element | null {
   return null;
 }
 
-function isNativeInteractiveElement(element: Element): boolean {
-  return Boolean(element.closest('button, input, textarea, select, option, a, label, [role="button"], [contenteditable="false"]'));
+const INTERACTIVE_CONTROL_SELECTOR =
+  'button, input, textarea, select, option, a, label, [role="button"]';
+
+const WIDGET_BLOCK_SELECTOR =
+  '[data-local-block], [contenteditable="false"], img, video, audio, iframe, .feishu-image-block, .feishu-local-card, .feishu-button-block, .feishu-formula-editor, .feishu-bitable-block, .feishu-sync-block, .feishu-media-preview, .feishu-file-actions, .feishu-divider, .feishu-code-block__toolbar, .feishu-highlight-block-wrap';
+
+const WIDGET_BLOCK_MATCHERS = WIDGET_BLOCK_SELECTOR.split(',').map(item => item.trim());
+
+/** 判断 li 是否为任务列表项（含 checkbox 控件，整行视为控件占位区域） */
+function isTaskListItem(li: Element): boolean {
+  return Boolean(li.closest('ul[data-type="taskList"]'));
+}
+
+/** 控件或块级 widget 已占位的区域，不允许作为框选起点 */
+export function isControlOccupiedElement(element: Element): boolean {
+  if (element.closest(INTERACTIVE_CONTROL_SELECTOR)) return true;
+  if (element.closest(WIDGET_BLOCK_SELECTOR)) return true;
+  // taskItem（任务列表 li）整行由 checkbox 控件占据，不允许从该区域发起框选
+  const li = element.closest('li');
+  if (li && isTaskListItem(li)) return true;
+  return false;
+}
+
+/** 框选时排除控件块 / 待办项，避免选中 checkbox、卡片、图片等占位区域 */
+function isMarqueeExcludedUnit(unit: SelectableUnit): boolean {
+  const { dom } = unit;
+  if (unit.kind === 'listItem' && isTaskListItem(dom)) return true;
+  if (WIDGET_BLOCK_MATCHERS.some(selector => dom.matches(selector))) return true;
+  return false;
+}
+
+function resolvePointElement(
+  target: EventTarget | null,
+  clientX?: number,
+  clientY?: number,
+): Element | null {
+  if (clientX != null && clientY != null) {
+    const hit = document.elementFromPoint(clientX, clientY);
+    const fromPoint = getTargetElement(hit);
+    if (fromPoint) return fromPoint;
+  }
+  return getTargetElement(target);
 }
 
 function isTableInteractionTarget(element: Element): boolean {
   return Boolean(element.closest(TABLE_INTERACTION_SELECTOR));
-}
-
-function isEditableTextTarget(element: Element): boolean {
-  const root = element.closest('.ProseMirror, .tiptap');
-  if (!root) return false;
-  return Boolean(element.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, code, .feishu-code-block__content, td, th'));
-}
-
-function textNodeClientRectsIntersectPoint(root: Element, clientX: number, clientY: number): boolean {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node = walker.nextNode();
-  while (node) {
-    if (node.textContent?.trim()) {
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      const rects = Array.from(range.getClientRects());
-      range.detach();
-      if (rects.some(rect => (
-        clientX >= rect.left - 2
-        && clientX <= rect.right + 2
-        && clientY >= rect.top - 2
-        && clientY <= rect.bottom + 2
-      ))) {
-        return true;
-      }
-    }
-    node = walker.nextNode();
-  }
-  return false;
 }
 
 /** 点击是否落在顶层块之间的空白区（含最后一个块下方） */
@@ -251,9 +262,29 @@ export function findUnitsInClientRect(editor: Editor, rect: ClientRect): Selecta
 
   return collectSelectableUnits(editor).filter(unit => {
     if (!unit.dom.isConnected) return false;
+    if (isMarqueeExcludedUnit(unit)) return false;
     const bounds = unit.dom.getBoundingClientRect();
     return bounds.width > 0 && bounds.height > 0 && clientRectsIntersect(rect, bounds);
   });
+}
+
+export function findSelectableUnitAtPoint(editor: Editor, clientX: number, clientY: number): SelectableUnit | null {
+  const hits = collectSelectableUnits(editor).filter(unit => {
+    if (!unit.dom.isConnected || isMarqueeExcludedUnit(unit)) return false;
+    const rect = unit.dom.getBoundingClientRect();
+    return (
+      clientX >= rect.left
+      && clientX <= rect.right
+      && clientY >= rect.top
+      && clientY <= rect.bottom
+    );
+  });
+  if (hits.length === 0) return null;
+  return hits.sort((a, b) => {
+    const ar = a.dom.getBoundingClientRect();
+    const br = b.dom.getBoundingClientRect();
+    return (ar.width * ar.height) - (br.width * br.height);
+  })[0];
 }
 
 export function deleteSelectableUnits(editor: Editor, units: SelectableUnit[]): boolean {
@@ -297,52 +328,83 @@ export async function copySelectableUnits(editor: Editor, units: SelectableUnit[
   return true;
 }
 
-/** 文档编辑区域：仅在空白区域按下左键拖动才开始框选块内容 */
+function unitParentKey(editor: Editor, unit: SelectableUnit): string | null {
+  try {
+    const $pos = editor.state.doc.resolve(unit.from);
+    return $pos.depth > 0 ? String($pos.before($pos.depth)) : 'doc';
+  } catch {
+    return null;
+  }
+}
+
+export function moveSelectableUnits(editor: Editor, units: SelectableUnit[], direction: 'up' | 'down'): boolean {
+  if (units.length === 0) return false;
+
+  const allUnits = collectSelectableUnits(editor);
+  const selectedIds = new Set(units.map(unit => unit.id));
+  const selectedIndexes = allUnits
+    .map((unit, index) => selectedIds.has(unit.id) ? index : -1)
+    .filter(index => index >= 0);
+  if (selectedIndexes.length === 0) return false;
+
+  const firstIndex = Math.min(...selectedIndexes);
+  const lastIndex = Math.max(...selectedIndexes);
+  if (lastIndex - firstIndex + 1 !== selectedIndexes.length) return false;
+
+  const neighbor = direction === 'up' ? allUnits[firstIndex - 1] : allUnits[lastIndex + 1];
+  if (!neighbor) return false;
+
+  const sortedSelected = allUnits.slice(firstIndex, lastIndex + 1);
+  const parentKey = unitParentKey(editor, sortedSelected[0]);
+  if (!parentKey || sortedSelected.some(unit => unitParentKey(editor, unit) !== parentKey)) return false;
+  if (unitParentKey(editor, neighbor) !== parentKey) return false;
+
+  const from = sortedSelected[0].from;
+  const to = sortedSelected[sortedSelected.length - 1].to;
+  const slice = editor.state.doc.slice(from, to);
+  let tr = editor.state.tr;
+
+  if (direction === 'up') {
+    tr = tr.delete(from, to).insert(neighbor.from, slice.content);
+  } else {
+    tr = tr.delete(from, to).insert(neighbor.to - (to - from), slice.content);
+  }
+
+  editor.view.dispatch(tr.scrollIntoView());
+  editor.view.focus();
+  return true;
+}
+
+/** 文档编辑区域：仅块间空白 / 编辑区边距可按下左键拖动框选 */
 export function canStartBoxSelect(
   target: EventTarget | null,
   editorArea: HTMLElement,
   clientX?: number,
   clientY?: number,
 ): boolean {
-  const element = getTargetElement(target);
+  const element = resolvePointElement(target, clientX, clientY);
   if (!element) return false;
   if (!editorArea.contains(element)) return false;
-  if (isUiChrome(element) || isNativeInteractiveElement(element)) return false;
+  if (isUiChrome(element)) return false;
   if (isTableInteractionTarget(element)) return false;
-
-  if (element === editorArea) return true;
+  if (isControlOccupiedElement(element)) return false;
 
   const tiptap = getTiptapRoot(editorArea);
-  if (!tiptap) return false;
+  if (!tiptap || clientX == null || clientY == null) return false;
 
-  if (element === tiptap) return true;
-
-  if (clientX != null && clientY != null) {
-    const areaRect = editorArea.getBoundingClientRect();
-    const tiptapRect = tiptap.getBoundingClientRect();
-    if (
-      clientX >= areaRect.left
-      && clientX <= areaRect.right
-      && clientY >= areaRect.top
-      && clientY <= areaRect.bottom
-      && (clientX < tiptapRect.left || clientX > tiptapRect.right)
-    ) {
-      return true;
-    }
-
-    if (isBlankEditorPoint(clientX, clientY, tiptap)) return true;
-
-    const textBlock = element.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, code, .feishu-code-block__content');
-    if (textBlock) {
-      return !textNodeClientRectsIntersectPoint(textBlock, clientX, clientY);
-    }
-
-    if (isEditableTextTarget(element)) return false;
-
-    return Boolean(element.closest('[data-local-block], .feishu-code-block, .feishu-highlight-block-wrap, .feishu-divider, img, video'));
+  const areaRect = editorArea.getBoundingClientRect();
+  const tiptapRect = tiptap.getBoundingClientRect();
+  if (
+    clientX >= areaRect.left
+    && clientX <= areaRect.right
+    && clientY >= areaRect.top
+    && clientY <= areaRect.bottom
+    && (clientX < tiptapRect.left || clientX > tiptapRect.right)
+  ) {
+    return true;
   }
 
-  return false;
+  return isBlankEditorPoint(clientX, clientY, tiptap);
 }
 
 /** 兼容旧入口：判断正文区域是否可用于框选 */

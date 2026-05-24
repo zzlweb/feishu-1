@@ -1,5 +1,5 @@
 import { useEditor, EditorContent, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type Editor as TipTapEditor, type NodeViewProps } from '@tiptap/react';
-import { Extension, Mark, Node as TiptapNode } from '@tiptap/core';
+import { Mark, Node as TiptapNode } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -13,16 +13,26 @@ import Highlight from '@tiptap/extension-highlight';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Image from '@tiptap/extension-image';
 import HorizontalRule from '@tiptap/extension-horizontal-rule';
-import { NodeSelection, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { common, createLowlight } from 'lowlight';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { MessagePlugin } from 'tdesign-react';
 import ContextMenu from './ContextMenu';
+import ImageContextMenu from './ImageContextMenu';
 import TableContextMenu from './TableContextMenu';
 import { computeBlockPanelPosition, useHoverFloatingGroup } from './floatingPanel';
 import { computeTableBlockMenuPosition } from './tableMenu';
 import SlashMenu from './SlashMenu';
-import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH } from './slashMenuConfig';
+import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH, type ButtonActionType } from './slashMenuConfig';
 import SelectionBubble from './SelectionBubble';
+import ImageBlockToolbar from './ImageBlockToolbar';
+import ImageCropOverlay from './ImageCropOverlay';
+import { useImageBlockInteractions } from './useImageBlockInteractions';
+import { getActiveImageCropSession } from './imageCropSession';
+import { normalizeImageAlign, type ImageAlign } from './imageBlockUtils';
+import { removeCommentHighlightsFromEditor } from './commentDocumentSync';
 import { DOC_TITLE_CATALOGUE_ID, type HeadingItem } from '../../types';
 import { HelpCircleIcon, BookOpenIcon } from 'tdesign-icons-react';
 import { wrapIcon } from '../../icons/wrap';
@@ -31,12 +41,14 @@ import BlockGutterGlyph from './BlockGutterGlyph';
 import EmojiPicker from './EmojiPicker';
 import { HighlightBlock } from './HighlightBlock';
 import { BlockIndent } from './blockIndent';
-import { scrollToBlockFromHash } from './blockLink';
-import { syncEditorSelectionToAnchoredBlock } from './blockAnchorSelection';
+import { copyCurrentBlockLink, scrollToBlockFromHash } from './blockLink';
+import { resolveInlineBlockElementFromEditor, syncEditorSelectionToAnchoredBlock } from './blockAnchorSelection';
+import { moveDraggableBlock, resolveDraggableBlockPos } from './feishuBlockDrag';
 import { FeishuBlockBackspace } from './feishuBlockBackspace';
 import { FeishuBoxSelectionKeyboard } from './feishuBoxSelectionKeyboard';
 import BoxBlockSelectionLayer from './FeishuBoxBlockSelection';
 import { FeishuHeading, readHeadingId } from './feishuHeading';
+import { FeishuBlockId, makeFeishuBlockId } from './feishuBlockId';
 import { feishuTableExtensions } from './feishuTable';
 import { localColumnsExtensions } from './columnsExtensions';
 import FeishuTableOverlay from './FeishuTableOverlay';
@@ -53,6 +65,7 @@ import {
   syncAllHeadingCollapseStates,
 } from './headingCollapse';
 import { insertTableFromClipboardData } from './tableInsert';
+import { registerMediaUploadFile } from './mediaUploadRegistry';
 import './Editor.less';
 
 const Notebook = wrapIcon(BookOpenIcon);
@@ -63,6 +76,11 @@ const MEDIA_UPLOAD_EVENT = 'feishu-media-upload-action';
 const MEDIA_UPLOAD_MAX_SIZE = 200 * 1024 * 1024;
 const BLOCKED_FILE_EXTENSIONS = new Set(['exe', 'bat', 'cmd', 'sh', 'msi', 'com', 'scr', 'ps1']);
 const mediaUploadFiles = new Map<string, { file: File; objectUrl?: string; controller?: AbortController }>();
+
+function blockDomAttrs(attrs: Record<string, unknown> | null | undefined) {
+  const blockId = typeof attrs?.blockId === 'string' && attrs.blockId ? attrs.blockId : '';
+  return blockId ? { id: blockId, 'data-block-id': blockId } : {};
+}
 
 function createMediaId(prefix = 'media') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
@@ -96,6 +114,13 @@ function formatFileSize(size: number) {
   return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+function stripFileExtension(name: string, extension = '') {
+  const value = String(name || '').trim();
+  if (!value || !extension) return value;
+  const suffix = `.${extension}`;
+  return value.toLowerCase().endsWith(suffix.toLowerCase()) ? value.slice(0, -suffix.length) : value;
+}
+
 function mediaIcon(kind: string, extension = '') {
   if (kind === 'image') return 'IMG';
   if (kind === 'video') return 'VID';
@@ -106,6 +131,149 @@ function mediaIcon(kind: string, extension = '') {
   if (['ppt', 'pptx'].includes(extension)) return 'PPT';
   if (kind === 'archive') return 'ZIP';
   return 'FILE';
+}
+
+type FileViewMode = 'text' | 'card' | 'preview';
+
+function MediaToolbarIcon({ paths, rotate = false, iconClass = 'universe-icon' }: { paths: string[]; rotate?: boolean; iconClass?: string }) {
+  return (
+    <span className={iconClass} style={rotate ? { transform: 'rotate(90deg)' } : undefined} aria-hidden>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+        {paths.map((path, index) => <path key={index} d={path} fill="currentColor" />)}
+      </svg>
+    </span>
+  );
+}
+
+function MediaFileToolbar({
+  editor,
+  viewMode,
+  canPreview,
+  src,
+  fileName,
+  documentId,
+  blockId,
+  onViewModeChange,
+  onEnsureBlockId,
+  onActivateBlock,
+  onFullscreen,
+}: {
+  editor: TipTapEditor;
+  viewMode: FileViewMode;
+  canPreview: boolean;
+  src: string;
+  fileName: string;
+  documentId?: string;
+  blockId?: string;
+  onViewModeChange: (mode: FileViewMode) => void;
+  onEnsureBlockId?: (id: string) => void;
+  onActivateBlock?: () => void;
+  onFullscreen?: () => void;
+}) {
+  const ensureLinkableBlock = () => {
+    onActivateBlock?.();
+    const resolved = blockId || makeFeishuBlockId('file');
+    onEnsureBlockId?.(resolved);
+    return resolved;
+  };
+
+  const handleDownload = () => {
+    if (!src) return;
+    const a = document.createElement('a');
+    a.href = src;
+    a.download = fileName || 'file';
+    a.rel = 'noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const handleCopyLink = () => {
+    ensureLinkableBlock();
+    void copyCurrentBlockLink(editor).then(url => {
+      if (url) MessagePlugin.success('已复制块链接');
+    });
+  };
+
+  const handleShareLink = async () => {
+    ensureLinkableBlock();
+    const url = await copyCurrentBlockLink(editor);
+    if (!url) return;
+    if (navigator.share) {
+      await navigator.share({ title: fileName || document.title, url });
+      return;
+    }
+    MessagePlugin.success('已复制分享链接');
+  };
+
+  const openCommentSidebar = () => {
+    onActivateBlock?.();
+    const resolved = blockId || makeFeishuBlockId('file');
+    onEnsureBlockId?.(resolved);
+    window.dispatchEvent(new CustomEvent('feishu-open-comment-sidebar', {
+      detail: {
+        documentId,
+        blockId: resolved,
+        threadId: resolved,
+        anchorType: 'block',
+      },
+    }));
+  };
+
+  const menuButton = ({
+    name,
+    paths,
+    onClick,
+    active = false,
+    disabled = false,
+    rotate = false,
+    iconClass,
+  }: {
+    name: string;
+    paths: string[];
+    onClick: () => void;
+    active?: boolean;
+    disabled?: boolean;
+    rotate?: boolean;
+    iconClass?: string;
+  }) => (
+    <button
+      key={name}
+      type="button"
+      className={`panel-menu-item${active ? ' menu-item-actived' : ''}`}
+      data-name={name}
+      disabled={disabled}
+      onMouseDown={event => event.preventDefault()}
+      onClick={() => {
+        if (!disabled) onClick();
+      }}
+    >
+      <span className="menu-item-content">
+        <span className="menu-icon">
+          <MediaToolbarIcon paths={paths} rotate={rotate} iconClass={iconClass} />
+        </span>
+        <span className="menu-item-main-box-wrapper">
+          <span className="menu-item-main-box" />
+        </span>
+      </span>
+    </button>
+  );
+
+  return (
+    <div className="docx-menu-container overlay-container block-toolbar__overlay slide-top feishu-file-view-toolbar" contentEditable={false} data-no-marquee-selection="true">
+      {menuButton({ name: 'fullscreen', rotate: true, paths: ['M9 2a1 1 0 0 1 0 2H5.414l5.293 5.293a1 1 0 0 1-1.414 1.414L4 5.414V9a1 1 0 0 1-2 0V3a1 1 0 0 1 1-1h6Zm6 20a1 1 0 1 1 0-2h3.586l-5.293-5.293a1 1 0 0 1 1.414-1.414L20 18.586V15a1 1 0 1 1 2 0v6a1 1 0 0 1-1 1h-6Z'], onClick: () => onFullscreen?.(), disabled: !onFullscreen })}
+      {menuButton({ name: 'download', paths: ['M20 18a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a1 1 0 1 1 2 0v1h14v-1a1 1 0 0 1 1-1Zm-7-3.964 2.657-2.657a1 1 0 0 1 1.414 1.414c-1.414 1.415-2.828 2.83-4.244 4.244a1 1 0 0 1-1.412 0c-1.417-1.415-2.833-2.833-4.249-4.25a.993.993 0 0 1 .013-1.401.992.992 0 0 1 1.401-.013l2.42 2.42V3.5a1 1 0 1 1 2 0v10.536Z'], onClick: handleDownload, disabled: !src })}
+      <div className="menu-divider-item" />
+      {menuButton({ name: 'inline view', paths: ['M2 11a1 1 0 1 0 0 2h2a1 1 0 1 0 0-2H2Zm6 0a1 1 0 1 0 0 2h14a1 1 0 1 0 0-2H8Z'], active: viewMode === 'text', onClick: () => onViewModeChange('text') })}
+      {menuButton({ name: 'card view', paths: ['M3 7.5h18c.552 0 1 .424 1 .948v7.104c0 .524-.448.948-1 .948H3c-.552 0-1-.424-1-.947V8.447c0-.524.448-.948 1-.948Zm1 2v5h16v-5H4ZM2.5 19h19c.275 0 .5.225.5.5v1c0 .275-.225.5-.5.5h-19a.501.501 0 0 1-.5-.5v-1c0-.275.225-.5.5-.5Zm0-16h19c.275 0 .5.225.5.5v1c0 .275-.225.5-.5.5h-19a.501.501 0 0 1-.5-.5v-1c0-.275.225-.5.5-.5Z'], active: viewMode === 'card', onClick: () => onViewModeChange('card') })}
+      {menuButton({ name: 'preview view', paths: ['M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5Zm2 0v9h14V5H5ZM4 19a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2H4Z'], active: viewMode === 'preview', disabled: !canPreview, onClick: () => onViewModeChange('preview') })}
+      <div className="menu-divider-item override-full-height" />
+      {menuButton({ name: 'copyAnchorLink', paths: ['M4.15 1.7h14.894a2 2 0 0 1 2 2v2.014h-2V3.7H4.15v14.895h2.543v2H4.15a2 2 0 0 1-2-2V3.7a2 2 0 0 1 2-2Zm17.57 5.954c1.9 1.594 2.296 4.415.703 6.313l-.443.528a1 1 0 1 1-1.532-1.286l.443-.528c.81-.965.687-2.536-.456-3.495-1.142-.959-2.71-.808-3.521.158l-2.487 2.963c-.638.761-.552 2.019.374 2.795l.675.567A1 1 0 1 1 14.19 17.2l-.675-.567c-1.683-1.412-2.04-3.919-.62-5.612l2.487-2.963c1.592-1.899 4.439-2 6.339-.405Zm-5.697 13.942c-1.593 1.898-4.44 1.999-6.34.404-1.9-1.594-2.294-4.415-.702-6.313l.443-.527a1 1 0 1 1 1.532 1.285l-.443.528c-.81.966-.687 2.537.456 3.495 1.143.96 2.711.808 3.521-.158l2.487-2.963c.639-.761.552-2.018-.373-2.795l-.676-.566a1 1 0 1 1 1.286-1.533l.675.567c1.683 1.412 2.04 3.92.62 5.613l-2.486 2.963Z'], iconClass: 'universe-icon menu_ud_icon color-b-500', onClick: handleCopyLink })}
+      {menuButton({ name: 'shareTextLink', paths: ['M21.5 5c0-.552-.473-1-1.055-1H3.555C2.974 4 2.5 4.448 2.5 5s.473 1 1.056 1h16.889c.582 0 1.055-.448 1.055-1Zm-9.617 6c.647 0 1.172.448 1.172 1s-.525 1-1.172 1h-8.21c-.648 0-1.173-.448-1.173-1s.525-1 1.173-1h8.21Zm-3.167 7c.648 0 1.173.448 1.173 1s-.525 1-1.173 1H3.673c-.648 0-1.173-.448-1.173-1s.525-1 1.173-1h5.043Zm9.077-8.242a1 1 0 0 1 1.415 0l3.535 3.535a1 1 0 0 1 0 1.415l-3.535 3.535a1 1 0 0 1-1.415-1.414l1.822-1.822c-1.819.07-3.162.64-4.065 1.543-.965.965-1.55 2.435-1.55 4.45a1 1 0 1 1-2 0c0-2.403.706-4.434 2.136-5.864 1.356-1.356 3.251-2.06 5.491-2.13l-1.834-1.834a1 1 0 0 1 0-1.414Z'], iconClass: 'universe-icon menu_ud_icon color-b-500', onClick: () => void handleShareLink() })}
+      <div className="menu-divider-item" />
+      {menuButton({ name: 'comment', paths: ['M7 11a1 1 0 0 1 1-1h8a1 1 0 1 1 0 2H8a1 1 0 0 1-1-1Z', 'M2 5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v11.5a2 2 0 0 1-2 2h-3.812a.5.5 0 0 0-.33.124l-2.541 2.224a2 2 0 0 1-2.634 0l-2.542-2.224a.5.5 0 0 0-.329-.124H4a2 2 0 0 1-2-2V5Zm2 0v11.5h3.812a2.5 2.5 0 0 1 1.646.619L12 19.343l2.542-2.224a2.5 2.5 0 0 1 1.646-.619H20V5H4Z'], onClick: openCommentSidebar })}
+    </div>
+  );
 }
 
 function updateMediaBlockAttrs(editor: TipTapEditor, uploadId: string, attrs: Record<string, unknown>, addToHistory = false) {
@@ -187,6 +355,7 @@ function createPendingMediaNode(file: File) {
   const localObjectUrl = canUseLocalPreview ? URL.createObjectURL(file) : '';
   if (localObjectUrl) mediaUploadFiles.set(uploadId, { file, objectUrl: localObjectUrl });
   else mediaUploadFiles.set(uploadId, { file });
+  registerMediaUploadFile(uploadId, file);
   return {
     uploadId,
     node: {
@@ -233,6 +402,7 @@ function startMediaUpload(editor: TipTapEditor, uploadId: string) {
     if (controller.signal.aborted) return;
     if (task.objectUrl) URL.revokeObjectURL(task.objectUrl);
     mediaUploadFiles.delete(uploadId);
+    // 保留 mediaUploadRegistry 中的原始 File，便于后续裁剪无需重新 fetch
     const blockStillExists = updateMediaBlockAttrs(editor, uploadId, {
       uploadStatus: 'success',
       uploadProgress: 100,
@@ -290,29 +460,6 @@ function insertMediaFiles(editor: TipTapEditor, files: File[], insertPos?: numbe
   return true;
 }
 
-/** 为段落/标题等块挂稳定 id，便于评论锚点写入 HTML 并可滚动定位。 */
-const CommentAnchorAttributes = Extension.create({
-  name: 'commentAnchorAttributes',
-  addGlobalAttributes() {
-    return [
-      {
-        types: ['paragraph', 'heading'],
-        attributes: {
-          blockId: {
-            default: null,
-            parseHTML: element =>
-              element.getAttribute('data-block-id') || element.getAttribute('id'),
-            renderHTML: (attributes: { blockId?: string | null }) =>
-              attributes.blockId
-                ? { id: attributes.blockId, 'data-block-id': attributes.blockId }
-                : {},
-          },
-        },
-      },
-    ];
-  },
-});
-
 const normalizeTitle = (value: string) => value === '未命名文档' ? '' : value;
 
 const CommentHighlightMark = Mark.create({
@@ -362,7 +509,7 @@ function getRelatedNode(target: EventTarget | null): Node | null {
 }
 
 const BLOCK_TOOLS_OVERLAY_SELECTOR =
-  '.block-inline-tools, .block-plus-menu-shell, .selection-bubble, .slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .feishu-table-chrome, .feishu-table-chrome-mount, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .feishu-columns-block__plus-menu-shell, .feishu-columns-block__col-wrap, .feishu-columns-block__add-hover-wrap, .feishu-columns-block__add-btn';
+  '.block-inline-tools, .block-plus-menu-shell, .selection-bubble, .slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .feishu-table-chrome, .feishu-table-chrome-mount, .context-menu, .context-submenu-flyout, .context-add-below-flyout, .feishu-columns-block__plus-menu-shell, .feishu-columns-block__col-wrap, .feishu-columns-block__add-hover-wrap, .feishu-columns-block__add-btn, .docx-menu-container, .docx-menu-wrapper.image-context-menu';
 
 const PLUS_MENU_HOVER_BRIDGE_SELECTOR =
   '.block-inline-tools, .block-add-hover-wrap, .block-add-btn, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .slash-tooltip';
@@ -377,7 +524,7 @@ function isPlusMenuHoverBridgeTarget(target: EventTarget | null): boolean {
 }
 
 const CONTEXT_MENU_SHELL_SELECTOR =
-  '.context-menu, .context-submenu-flyout, .context-add-below-flyout';
+  '.context-menu, .context-submenu-flyout, .context-add-below-flyout, .docx-menu-wrapper.image-context-menu';
 
 function isPointerInContextMenuShell(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest(CONTEXT_MENU_SHELL_SELECTOR));
@@ -474,7 +621,7 @@ const CODE_BLOCK_LANGUAGES = [
 ];
 
 // ── Divider NodeView ──────────────────────────────────────────────────────────
-function FeishuDividerView({ selected, getPos, editor }: NodeViewProps) {
+function FeishuDividerView({ node, selected, getPos, editor }: NodeViewProps) {
   const handleClick = () => {
     if (typeof getPos === 'function') {
       const pos = getPos();
@@ -485,6 +632,7 @@ function FeishuDividerView({ selected, getPos, editor }: NodeViewProps) {
     <NodeViewWrapper
       as="div"
       className={`feishu-divider${selected ? ' feishu-divider--selected' : ''}`}
+      {...blockDomAttrs(node.attrs)}
       contentEditable={false}
       onClick={handleClick}
     >
@@ -500,22 +648,160 @@ const FeishuHorizontalRule = HorizontalRule.extend({
   },
 });
 
-function MediaFileBlockView({ node, updateAttributes, deleteNode, editor, getPos, selected }: NodeViewProps) {
+function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: NodeViewProps) {
+  const align = normalizeImageAlign(node.attrs.align);
+  const blockId = String(node.attrs.blockId || '');
+  const src = String(node.attrs.src || '');
+  const {
+    captionRef,
+    imageRef,
+    showCaption,
+    isCropping,
+    cropRect,
+    setCropRect,
+    focusCaption,
+    toggleCrop,
+    handleBoundsChange,
+    setAlign,
+    setNodeSelection,
+  } = useImageBlockInteractions({
+    editor,
+    getPos,
+    updateAttributes,
+    attrs: node.attrs,
+    src,
+  });
+
+  const ensureBlockId = (id: string) => {
+    if (!id || node.attrs.blockId === id) return;
+    updateAttributes({ blockId: id });
+  };
+
+  return (
+    <NodeViewWrapper
+      className={`feishu-image-block-wrap feishu-image-block-wrap--${align}${selected ? ' is-selected' : ''}${isCropping ? ' is-cropping' : ''}`}
+      {...blockDomAttrs(node.attrs)}
+      contentEditable={false}
+      onClick={setNodeSelection}
+    >
+      <ImageBlockToolbar
+        editor={editor}
+        align={align}
+        onAlignChange={setAlign}
+        onCaptionClick={focusCaption}
+        onCropClick={toggleCrop}
+        isCropping={isCropping}
+        documentId={(editor as any).__documentId}
+        blockId={blockId}
+        onEnsureBlockId={ensureBlockId}
+      />
+      <div className={`feishu-image-block${selected ? ' is-selected' : ''}`}>
+        <img
+          ref={imageRef}
+          className="feishu-image"
+          src={src}
+          alt={node.attrs.alt || ''}
+          title={node.attrs.title || undefined}
+          draggable={false}
+        />
+        {isCropping && src && (
+          <ImageCropOverlay
+            imageRef={imageRef}
+            crop={cropRect}
+            onCropChange={setCropRect}
+            onBoundsChange={handleBoundsChange}
+          />
+        )}
+      </div>
+      {showCaption && (
+        <input
+          ref={captionRef}
+          className="feishu-media-caption"
+          placeholder="添加描述"
+          value={node.attrs.caption || ''}
+          onChange={e => updateAttributes({ caption: e.target.value })}
+          onBlur={e => {
+            if (!e.target.value.trim()) updateAttributes({ captionVisible: false });
+          }}
+          onMouseDown={e => e.stopPropagation()}
+          data-no-marquee-selection="true"
+        />
+      )}
+    </NodeViewWrapper>
+  );
+}
+
+const FeishuImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      align: {
+        default: 'center',
+        parseHTML: element => normalizeImageAlign(element.getAttribute('data-align')),
+        renderHTML: attributes => ({ 'data-align': normalizeImageAlign(attributes.align) }),
+      },
+      caption: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-caption') || '',
+        renderHTML: attributes => {
+          if (!attributes.caption) return {};
+          return { 'data-caption': attributes.caption };
+        },
+      },
+      captionVisible: {
+        default: false,
+        parseHTML: element => element.getAttribute('data-caption-visible') === 'true',
+        renderHTML: attributes => {
+          if (!attributes.captionVisible) return {};
+          return { 'data-caption-visible': 'true' };
+        },
+      },
+    };
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(FeishuImageView);
+  },
+});
+
+function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }: NodeViewProps) {
   const attrs = node.attrs;
   const status = String(attrs.uploadStatus || 'success');
   const kind = String(attrs.mediaKind || classifyMediaFile({ name: attrs.name || '', type: attrs.mime || '' } as File));
   const extension = String(attrs.extension || getFileExtension(attrs.name || ''));
   const src = String(attrs.url || attrs.previewUrl || attrs.localObjectUrl || '');
   const progress = Math.max(0, Math.min(100, Number(attrs.uploadProgress || 0)));
-  const viewMode = String(attrs.viewMode || (kind === 'image' ? 'preview' : 'card'));
+  const viewMode = (['text', 'card', 'preview'].includes(String(attrs.viewMode)) ? String(attrs.viewMode) : (kind === 'image' ? 'preview' : 'card')) as FileViewMode;
   const isUploading = status === 'local' || status === 'uploading' || status === 'processing';
   const isFailed = status === 'failed' || status === 'canceled';
-  const canPreview = Boolean(src && canPreviewMedia(kind, attrs.mime));
-
-  const setNodeSelection = () => {
-    const pos = typeof getPos === 'function' ? getPos() : null;
-    if (typeof pos === 'number') editor.commands.setNodeSelection(pos);
-  };
+  const canPreview = Boolean(src && (canPreviewMedia(kind, attrs.mime) || extension === 'pdf'));
+  const isImagePreview = kind === 'image' && viewMode === 'preview' && canPreview;
+  const isFilePreview = kind !== 'image' && viewMode === 'preview' && canPreview;
+  const isVideoPreview = kind === 'video' && viewMode === 'preview' && canPreview;
+  const [videoActivated, setVideoActivated] = useState(false);
+  const mediaPreviewRef = useRef<HTMLDivElement>(null);
+  const align = normalizeImageAlign(attrs.align);
+  const blockId = String(attrs.blockId || attrs.id || '');
+  const {
+    captionRef,
+    imageRef,
+    showCaption,
+    isCropping,
+    cropRect,
+    setCropRect,
+    focusCaption,
+    toggleCrop,
+    handleBoundsChange,
+    setAlign,
+    setNodeSelection,
+  } = useImageBlockInteractions({
+    editor,
+    getPos,
+    updateAttributes,
+    attrs,
+    src,
+    isLocalFileBlock: true,
+    uploadId: String(attrs.uploadId || ''),
+  });
   const retryUpload = () => {
     window.dispatchEvent(new CustomEvent(MEDIA_UPLOAD_EVENT, { detail: { action: 'retry', uploadId: attrs.uploadId } }));
   };
@@ -526,27 +812,132 @@ function MediaFileBlockView({ node, updateAttributes, deleteNode, editor, getPos
   const copyLink = () => {
     if (attrs.url) void navigator.clipboard?.writeText(String(attrs.url));
   };
-  const toggleViewMode = () => {
-    const next = viewMode === 'preview' ? 'card' : canPreview ? 'preview' : 'text';
-    updateAttributes({ viewMode: next });
+  const setViewMode = (mode: FileViewMode) => updateAttributes({ viewMode: mode });
+  const deleteNode = () => {
+    const pos = typeof getPos === 'function' ? getPos() : null;
+    if (typeof pos !== 'number') return;
+    editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
+  };
+  const ensureBlockId = (id: string) => {
+    if (!id) return;
+    const patch: Record<string, string> = {};
+    if (attrs.blockId !== id) patch.blockId = id;
+    if (attrs.id !== id) patch.id = id;
+    if (Object.keys(patch).length) updateAttributes(patch);
   };
 
   return (
     <NodeViewWrapper
       as="div"
-      className={`feishu-file-block feishu-file-block--${kind} feishu-file-block--${viewMode}${selected ? ' is-selected' : ''}`}
+      className={`feishu-file-block feishu-file-block--${kind} feishu-file-block--${viewMode}${isImagePreview ? ` feishu-file-block--image-preview feishu-image-block-wrap feishu-image-block-wrap--${align}` : ''}${isVideoPreview ? ` feishu-file-block--video-preview feishu-image-block-wrap feishu-image-block-wrap--${align}` : ''}${selected ? ' is-selected' : ''}${isCropping ? ' is-cropping' : ''}`}
       data-local-block="file"
       data-upload-id={attrs.uploadId}
       data-upload-status={status}
+      {...blockDomAttrs(attrs)}
       contentEditable={false}
       onClick={setNodeSelection}
     >
+      {kind !== 'image' && (
+        <MediaFileToolbar
+          editor={editor}
+          viewMode={viewMode}
+          canPreview={canPreview}
+          src={src}
+          fileName={String(attrs.name || 'file')}
+          documentId={(editor as any).__documentId}
+          blockId={blockId}
+          onViewModeChange={setViewMode}
+          onEnsureBlockId={ensureBlockId}
+          onActivateBlock={setNodeSelection}
+          onFullscreen={viewMode === 'preview' && canPreview ? () => {
+            const el = mediaPreviewRef.current;
+            if (el?.requestFullscreen) void el.requestFullscreen();
+          } : undefined}
+        />
+      )}
+      {isImagePreview && (
+        <ImageBlockToolbar
+          editor={editor}
+          align={align}
+          onAlignChange={setAlign}
+          onCaptionClick={focusCaption}
+          onCropClick={toggleCrop}
+          isCropping={isCropping}
+          documentId={(editor as any).__documentId}
+          blockId={blockId}
+          onEnsureBlockId={ensureBlockId}
+        />
+      )}
       {viewMode === 'preview' && canPreview && (
-        <div className="feishu-media-preview" data-no-marquee-selection="true">
-          {kind === 'image' && <img className="feishu-media-preview__image" src={src} alt={attrs.name || 'image'} draggable={false} />}
-          {kind === 'video' && <video className="feishu-media-preview__video" src={src} controls preload="metadata" data-no-marquee-selection="true" />}
+        <div ref={mediaPreviewRef} className={`feishu-media-preview feishu-media-preview--${kind}`} data-no-marquee-selection="true">
+          {kind === 'image' && (
+            <>
+              <img ref={imageRef} className="feishu-media-preview__image" src={src} alt={attrs.name || 'image'} draggable={false} />
+              {isCropping && src && (
+                <ImageCropOverlay
+                  imageRef={imageRef}
+                  crop={cropRect}
+                  onCropChange={setCropRect}
+                  onBoundsChange={handleBoundsChange}
+                />
+              )}
+            </>
+          )}
+          {kind === 'video' && (
+            <div className="feishu-media-preview__video-shell">
+              <video
+                className="feishu-media-preview__video"
+                src={src}
+                controls={videoActivated}
+                preload="metadata"
+                data-no-marquee-selection="true"
+                onPlay={() => setVideoActivated(true)}
+                onPause={() => setVideoActivated(false)}
+              />
+              <div className="feishu-media-preview__video-title">
+                <span className="feishu-media-preview__video-file-icon">VID</span>
+                <span>{stripFileExtension(String(attrs.name || '视频'), extension)}</span>
+              </div>
+              {!videoActivated && (
+                <button
+                  type="button"
+                  className="feishu-media-preview__play"
+                  aria-label="播放视频"
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={event => {
+                    setVideoActivated(true);
+                    const video = event.currentTarget.closest('.feishu-media-preview')?.querySelector('video') as HTMLVideoElement | null;
+                    void video?.play();
+                  }}
+                >
+                  <span aria-hidden />
+                </button>
+              )}
+            </div>
+          )}
           {kind === 'audio' && <audio className="feishu-media-preview__audio" src={src} controls preload="metadata" data-no-marquee-selection="true" />}
           {extension === 'pdf' && <iframe className="feishu-media-preview__pdf" src={src} title={attrs.name || 'PDF'} sandbox="allow-same-origin allow-scripts" />}
+          {isFilePreview && kind !== 'video' && (
+            <div className="feishu-media-preview__meta">
+              <span className="feishu-media-preview__file-icon">{mediaIcon(kind, extension)}</span>
+              <span className="feishu-media-preview__name" title={attrs.name}>{attrs.name || '文件'}</span>
+              <span className="feishu-media-preview__desc">
+                {isUploading ? `上传中 ${progress}%` : isFailed ? (attrs.errorMessage || '上传失败') : formatFileSize(Number(attrs.size || 0))}
+              </span>
+              {isUploading && (
+                <div className="feishu-media-progress" aria-label={`上传进度 ${progress}%`}>
+                  <span style={{ width: `${progress}%` }} />
+                </div>
+              )}
+              <div className="feishu-file-actions" data-no-marquee-selection="true">
+                {isFailed && <button type="button" onMouseDown={e => e.preventDefault()} onClick={retryUpload}>重试</button>}
+                {isUploading && <button type="button" onMouseDown={e => e.preventDefault()} onClick={cancelUpload}>取消</button>}
+                {attrs.url && <button type="button" onMouseDown={e => e.preventDefault()} onClick={copyLink}>复制链接</button>}
+                {attrs.url && <a href={attrs.url} download={attrs.name || 'file'} onMouseDown={e => e.stopPropagation()}>下载</a>}
+                <button type="button" className="is-danger" onMouseDown={e => e.preventDefault()} onClick={deleteNode}>删除</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -554,8 +945,9 @@ function MediaFileBlockView({ node, updateAttributes, deleteNode, editor, getPos
         <div className="feishu-file-text" title={attrs.name}>
           <span className="feishu-file-text__icon">{mediaIcon(kind, extension)}</span>
           <span className="feishu-file-text__name">{attrs.name || '文件'}</span>
+          <span className="feishu-file-text__meta">{formatFileSize(Number(attrs.size || 0))}</span>
         </div>
-      ) : (
+      ) : !isImagePreview && !isFilePreview ? (
         <div className={`feishu-local-card feishu-local-card--file feishu-local-card--${kind}`}>
           <div className="feishu-local-card__icon">{mediaIcon(kind, extension)}</div>
           <div className="feishu-local-card__body">
@@ -574,17 +966,20 @@ function MediaFileBlockView({ node, updateAttributes, deleteNode, editor, getPos
             {isUploading && <button type="button" onMouseDown={e => e.preventDefault()} onClick={cancelUpload}>取消</button>}
             {attrs.url && <button type="button" onMouseDown={e => e.preventDefault()} onClick={copyLink}>复制链接</button>}
             {attrs.url && <a href={attrs.url} download={attrs.name || 'file'} onMouseDown={e => e.stopPropagation()}>下载</a>}
-            <button type="button" onMouseDown={e => e.preventDefault()} onClick={toggleViewMode}>切换视图</button>
             <button type="button" className="is-danger" onMouseDown={e => e.preventDefault()} onClick={deleteNode}>删除</button>
           </div>
         </div>
-      )}
-      {kind === 'image' && (
+      ) : null}
+      {kind === 'image' && showCaption && (
         <input
+          ref={captionRef}
           className="feishu-media-caption"
           placeholder="添加描述"
           value={attrs.caption || ''}
           onChange={e => updateAttributes({ caption: e.target.value })}
+          onBlur={e => {
+            if (!e.target.value.trim()) updateAttributes({ captionVisible: false });
+          }}
           onMouseDown={e => e.stopPropagation()}
           data-no-marquee-selection="true"
         />
@@ -618,6 +1013,19 @@ const LocalFileBlock = TiptapNode.create({
       displayWidth: { default: null },
       displayHeight: { default: null },
       caption: { default: '' },
+      captionVisible: {
+        default: false,
+        parseHTML: element => element.getAttribute('data-caption-visible') === 'true',
+        renderHTML: attributes => {
+          if (!attributes.captionVisible) return {};
+          return { 'data-caption-visible': 'true' };
+        },
+      },
+      align: {
+        default: 'center',
+        parseHTML: element => normalizeImageAlign(element.getAttribute('data-align')),
+        renderHTML: attributes => ({ 'data-align': normalizeImageAlign(attributes.align) }),
+      },
     };
   },
   parseHTML() {
@@ -672,11 +1080,73 @@ const LocalSyncBlock = TiptapNode.create({
   name: 'localSyncBlock',
   group: 'block',
   content: 'block+',
+  addAttributes() {
+    return {
+      syncId: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-sync-id'),
+        renderHTML: attributes => ({ 'data-sync-id': attributes.syncId }),
+      },
+    };
+  },
   parseHTML() {
     return [{ tag: 'div[data-local-block="sync"]' }];
   },
-  renderHTML() {
-    return ['div', { 'data-local-block': 'sync', class: 'feishu-sync-block' }, ['div', { class: 'feishu-sync-block__label' }, '同步块'], ['div', { class: 'feishu-sync-block__content' }, 0]];
+  renderHTML({ HTMLAttributes }) {
+    const syncId = HTMLAttributes.syncId || HTMLAttributes['data-sync-id'] || '';
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'sync', class: 'feishu-sync-block' }, ['div', { class: 'feishu-sync-block__label' }, syncId ? `同步块 · ${String(syncId).slice(-6)}` : '同步块'], ['div', { class: 'feishu-sync-block__content' }, 0]];
+  },
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('feishuSyncBlockMirror'),
+        appendTransaction(transactions, _oldState, newState) {
+          if (!transactions.some(tr => tr.docChanged) || transactions.some(tr => tr.getMeta('feishuSyncBlockMirror'))) return null;
+          let activeSyncId = '';
+          const { $from } = newState.selection;
+          for (let depth = $from.depth; depth > 0; depth -= 1) {
+            const node = $from.node(depth);
+            if (node.type.name === 'localSyncBlock') {
+              activeSyncId = String(node.attrs.syncId || '');
+              break;
+            }
+          }
+
+          const groups = new Map<string, Array<{ pos: number; node: any }>>();
+          newState.doc.descendants((node, pos) => {
+            if (node.type.name !== 'localSyncBlock') return;
+            const syncId = String(node.attrs.syncId || '');
+            if (!syncId) return;
+            const group = groups.get(syncId);
+            if (group) group.push({ pos, node });
+            else groups.set(syncId, [{ pos, node }]);
+          });
+
+          let tr = newState.tr;
+          let changed = false;
+          groups.forEach((items, syncId) => {
+            if (items.length < 2) return;
+            const source = (syncId === activeSyncId ? items.find(item => {
+              const from = item.pos;
+              const to = item.pos + item.node.nodeSize;
+              return newState.selection.from >= from && newState.selection.from <= to;
+            }) : null) ?? items[0];
+            items.forEach(item => {
+              if (item === source || item.node.content.eq(source.node.content)) return;
+              tr = tr.replaceWith(
+                item.pos,
+                item.pos + item.node.nodeSize,
+                item.node.type.create(item.node.attrs, source.node.content, item.node.marks),
+              );
+              changed = true;
+            });
+          });
+          if (!changed) return null;
+          tr.setMeta('feishuSyncBlockMirror', true);
+          return tr;
+        },
+      }),
+    ];
   },
 });
 
@@ -689,35 +1159,302 @@ function normalizeBlockUrl(raw: string): string {
   return `https://${t}`;
 }
 
-function LocalButtonBlockView({ node, updateAttributes, selected }: NodeViewProps) {
+const BUTTON_ACTION_LABELS: Record<ButtonActionType, string> = {
+  link: '打开超链接',
+  duplicate: '创建副本',
+  follow: '关注文档更新',
+};
+
+function normalizeButtonActionType(raw: unknown): ButtonActionType {
+  if (raw === 'duplicate' || raw === 'follow') return raw;
+  return 'link';
+}
+
+type ButtonColorName =
+  | 'red'
+  | 'orange'
+  | 'green'
+  | 'wathet'
+  | 'blue'
+  | 'carmine'
+  | 'purple'
+  | 'neutral'
+  | 'red-solid'
+  | 'orange-solid'
+  | 'green-solid'
+  | 'wathet-solid'
+  | 'blue-solid'
+  | 'carmine-solid'
+  | 'purple-solid'
+  | 'neutral-solid';
+
+const BUTTON_COLORS: Array<{ name: ButtonColorName; bg: string; text: string; border: string }> = [
+  { name: 'red', bg: '#fde2e2', text: '#d83931', border: '#f8b4b4' },
+  { name: 'orange', bg: '#fee7c8', text: '#de7802', border: '#f8c98b' },
+  { name: 'green', bg: '#d9f5d6', text: '#2ea121', border: '#a9df9f' },
+  { name: 'wathet', bg: '#d9f3fd', text: '#0797d9', border: '#a6ddf5' },
+  { name: 'blue', bg: '#dfeaff', text: '#245bdb', border: '#8fb2ff' },
+  { name: 'carmine', bg: '#f9d9ee', text: '#c5267a', border: '#efadd5' },
+  { name: 'purple', bg: '#eadffb', text: '#7f3bf5', border: '#c7adf6' },
+  { name: 'neutral', bg: '#eff0f1', text: '#646a73', border: '#d8dadf' },
+  { name: 'red-solid', bg: '#f65a55', text: '#ffffff', border: '#f65a55' },
+  { name: 'orange-solid', bg: '#ff9d2e', text: '#ffffff', border: '#ff9d2e' },
+  { name: 'green-solid', bg: '#4cc94a', text: '#ffffff', border: '#4cc94a' },
+  { name: 'wathet-solid', bg: '#1fb6e9', text: '#ffffff', border: '#1fb6e9' },
+  { name: 'blue-solid', bg: '#336df4', text: '#ffffff', border: '#336df4' },
+  { name: 'carmine-solid', bg: '#e83e9f', text: '#ffffff', border: '#e83e9f' },
+  { name: 'purple-solid', bg: '#8b4cec', text: '#ffffff', border: '#8b4cec' },
+  { name: 'neutral-solid', bg: '#2b3038', text: '#ffffff', border: '#2b3038' },
+];
+
+function normalizeButtonColor(raw: unknown): ButtonColorName {
+  return BUTTON_COLORS.some(item => item.name === raw) ? raw as ButtonColorName : 'blue';
+}
+
+function getButtonColor(name: unknown) {
+  return BUTTON_COLORS.find(item => item.name === normalizeButtonColor(name)) ?? BUTTON_COLORS[4];
+}
+
+function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
+  const actionType = normalizeButtonActionType(node.attrs.actionType);
+  const colorName = normalizeButtonColor(node.attrs.color);
+  const color = getButtonColor(colorName);
   const text = node.attrs.text || '按钮';
   const url = node.attrs.url || '';
+  const [panelOpen, setPanelOpen] = useState(selected);
+  const [draftText, setDraftText] = useState(text);
+  const [draftActionType, setDraftActionType] = useState<ButtonActionType>(actionType);
+  const [draftUrl, setDraftUrl] = useState(url);
+  const [draftColor, setDraftColor] = useState<ButtonColorName>(colorName);
+  const documentId = String((editor as any).__documentId || '');
+  const isFollowed = actionType === 'follow' && documentId
+    ? window.localStorage.getItem(`feishu-follow-doc:${documentId}`) === 'true'
+    : false;
 
-  const openButtonLink = () => {
+  useEffect(() => {
+    if (selected) setPanelOpen(true);
+  }, [selected]);
+
+  useEffect(() => {
+    if (!panelOpen) return;
+    setDraftText(text);
+    setDraftActionType(actionType);
+    setDraftUrl(url);
+    setDraftColor(colorName);
+  }, [actionType, colorName, panelOpen, text, url]);
+
+  const runButtonAction = async () => {
     const href = normalizeBlockUrl(url);
-    if (href) window.open(href, '_blank', 'noopener,noreferrer');
+    if (actionType === 'link') {
+      if (href) window.open(href, '_blank', 'noopener,noreferrer');
+      else void MessagePlugin.warning('请先填写链接地址');
+      return;
+    }
+
+    if (actionType === 'duplicate') {
+      if (!documentId) {
+        void MessagePlugin.warning('当前文档尚未保存，暂无法创建副本');
+        return;
+      }
+      try {
+        const res = await fetch(`/api/documents/${documentId}/duplicate`, { method: 'POST' });
+        const json = await res.json();
+        if (!res.ok || json.code !== 0 || !json.data?.id) throw new Error(json.message || '创建副本失败');
+        void MessagePlugin.success('已创建副本');
+        window.open(`/doc/${json.data.id}`, '_blank', 'noopener,noreferrer');
+      } catch (error) {
+        void MessagePlugin.error(error instanceof Error ? error.message : '创建副本失败');
+      }
+      return;
+    }
+
+    if (!documentId) {
+      void MessagePlugin.warning('当前文档尚未保存，暂无法关注');
+      return;
+    }
+    const key = `feishu-follow-doc:${documentId}`;
+    const next = window.localStorage.getItem(key) !== 'true';
+    window.localStorage.setItem(key, String(next));
+    void MessagePlugin.success(next ? '已关注文档更新' : '已取消关注');
   };
 
+  const selectThisButton = () => {
+    const pos = typeof getPos === 'function' ? getPos() : null;
+    if (typeof pos === 'number') {
+      editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, pos)));
+    }
+  };
+
+  const openPanel = () => {
+    selectThisButton();
+    setPanelOpen(true);
+  };
+
+  const confirmPanel = () => {
+    const nextText = draftText.trim() || BUTTON_ACTION_LABELS[draftActionType];
+    updateAttributes({
+      text: nextText,
+      actionType: draftActionType,
+      url: draftActionType === 'link' ? draftUrl.trim() : '',
+      color: draftColor,
+    });
+    setPanelOpen(false);
+  };
+
+  const cancelPanel = () => {
+    setDraftText(text);
+    setDraftActionType(actionType);
+    setDraftUrl(url);
+    setDraftColor(colorName);
+    setPanelOpen(false);
+  };
+
+  const buttonStyle = {
+    '--button-bg': color.bg,
+    '--button-color': color.text,
+    '--button-border': color.border,
+  } as CSSProperties;
+
   return (
-    <NodeViewWrapper className={`feishu-button-block${selected ? ' is-selected' : ''}`} contentEditable={false}>
+    <NodeViewWrapper
+      className={`feishu-button-block feishu-button-block--${actionType}${panelOpen ? ' is-configuring' : ''}${selected ? ' is-selected' : ''}`}
+      {...blockDomAttrs(node.attrs)}
+      contentEditable={false}
+    >
       <div className="feishu-button-block__preview">
-        <button type="button" className="feishu-action-button" onClick={openButtonLink}>
+        <button
+          type="button"
+          className="feishu-action-button"
+          style={buttonStyle}
+          onMouseDown={event => event.preventDefault()}
+          onClick={() => {
+            if (editor.isEditable) {
+              openPanel();
+              return;
+            }
+            void runButtonAction();
+          }}
+        >
           {text}
         </button>
       </div>
+      {panelOpen && editor.isEditable && (
+        <form
+          className="button-panel"
+          onMouseDown={event => event.stopPropagation()}
+          onSubmit={event => {
+            event.preventDefault();
+            confirmPanel();
+          }}
+        >
+          <div className="button-panel__content">
+            <label className="button-panel__form-item">
+              <span className="button-panel__label">按钮文字</span>
+              <input
+                className="button-panel__input"
+                value={draftText}
+                placeholder="请输入按钮"
+                autoFocus
+                onChange={event => setDraftText(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === 'Escape') cancelPanel();
+                }}
+              />
+            </label>
+            <div className="button-panel__form-item">
+              <span className="button-panel__label">按钮颜色</span>
+              <div className="docx-button-color-picker">
+                {[BUTTON_COLORS.slice(0, 8), BUTTON_COLORS.slice(8)].map((group, index) => (
+                  <div key={index} className="docx-button-color-picker__group">
+                    {group.map(item => (
+                      <button
+                        key={item.name}
+                        type="button"
+                        className={`docx-button-color-picker__item${draftColor === item.name ? ' selected' : ''}`}
+                        style={{ background: item.bg }}
+                        aria-label={item.name}
+                        onClick={() => setDraftColor(item.name)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <label className="button-panel__form-item">
+              <span className="button-panel__label">执行操作</span>
+              <select
+                className="button-panel__select"
+                value={draftActionType}
+                onChange={event => {
+                  const nextType = normalizeButtonActionType(event.target.value);
+                  setDraftActionType(nextType);
+                  if (!draftText.trim() || draftText === BUTTON_ACTION_LABELS[draftActionType]) {
+                    setDraftText(BUTTON_ACTION_LABELS[nextType]);
+                  }
+                }}
+              >
+                <option value="link">打开超链接</option>
+                <option value="duplicate">创建副本</option>
+                <option value="follow">关注文档更新</option>
+              </select>
+            </label>
+            {draftActionType === 'link' && (
+              <label className="button-panel__form-item">
+                <span className="button-panel__label">超链接地址</span>
+                <input
+                  className="button-panel__input"
+                  value={draftUrl}
+                  placeholder="请输入链接地址"
+                  onChange={event => setDraftUrl(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Escape') cancelPanel();
+                  }}
+                />
+              </label>
+            )}
+          </div>
+          <div className="button-panel__footer">
+            <button type="button" className="button-panel__btn button-panel__btn--cancel" onClick={cancelPanel}>取消</button>
+            <button type="submit" className="button-panel__btn button-panel__btn--confirm">确定</button>
+          </div>
+        </form>
+      )}
       <div className="feishu-button-block__form">
+        <select
+          className="feishu-block-field feishu-button-block__type"
+          value={actionType}
+          onChange={e => {
+            const nextType = normalizeButtonActionType(e.target.value);
+            updateAttributes({
+              actionType: nextType,
+              text: text === BUTTON_ACTION_LABELS[actionType] ? BUTTON_ACTION_LABELS[nextType] : text,
+            });
+          }}
+        >
+          <option value="link">打开超链接</option>
+          <option value="duplicate">创建副本</option>
+          <option value="follow">关注文档更新</option>
+        </select>
         <input
           className="feishu-block-field"
           value={text}
           placeholder="按钮文字"
           onChange={e => updateAttributes({ text: e.target.value })}
         />
-        <input
-          className="feishu-block-field"
-          value={url}
-          placeholder="链接或页面地址"
-          onChange={e => updateAttributes({ url: e.target.value })}
-        />
+        {actionType === 'link' ? (
+          <input
+            className="feishu-block-field"
+            value={url}
+            placeholder="链接或页面地址"
+            onChange={e => updateAttributes({ url: e.target.value })}
+          />
+        ) : (
+          <span className="feishu-button-block__hint">
+            {actionType === 'duplicate'
+              ? '点击按钮会复制当前文档并打开副本'
+              : isFollowed ? '当前文档已关注' : '点击按钮会关注当前文档更新'}
+          </span>
+        )}
       </div>
     </NodeViewWrapper>
   );
@@ -734,6 +1471,11 @@ const LocalButtonBlock = TiptapNode.create({
         parseHTML: element => element.getAttribute('data-text') || element.textContent || '按钮',
         renderHTML: attributes => ({ 'data-text': attributes.text }),
       },
+      actionType: {
+        default: 'link',
+        parseHTML: element => normalizeButtonActionType(element.getAttribute('data-action-type')),
+        renderHTML: attributes => ({ 'data-action-type': normalizeButtonActionType(attributes.actionType) }),
+      },
       url: {
         default: '',
         parseHTML: element => element.getAttribute('data-url') || '',
@@ -746,9 +1488,10 @@ const LocalButtonBlock = TiptapNode.create({
   },
   renderHTML({ HTMLAttributes }) {
     const href = normalizeBlockUrl(String(HTMLAttributes.url || ''));
+    const actionType = normalizeButtonActionType(HTMLAttributes.actionType);
     const button = ['span', { class: 'feishu-action-button' }, HTMLAttributes.text || '按钮'];
-    return ['div', { ...HTMLAttributes, 'data-local-block': 'button', class: 'feishu-button-block' },
-      href ? ['a', { href, class: 'feishu-button-block__link' }, button] : button,
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'button', class: `feishu-button-block feishu-button-block--${actionType}` },
+      actionType === 'link' && href ? ['a', { href, class: 'feishu-button-block__link' }, button] : button,
     ];
   },
   addNodeView() {
@@ -758,14 +1501,30 @@ const LocalButtonBlock = TiptapNode.create({
 
 function LocalFormulaBlockView({ node, updateAttributes, selected }: NodeViewProps) {
   const formula = node.attrs.formula || '';
+  let formulaHtml = '';
+  let formulaError = '';
+  try {
+    formulaHtml = katex.renderToString(formula || 'E = mc^2', {
+      displayMode: true,
+      throwOnError: false,
+      strict: false,
+    });
+  } catch (error) {
+    formulaError = error instanceof Error ? error.message : '公式渲染失败';
+    formulaHtml = katex.renderToString('E = mc^2', { displayMode: true, throwOnError: false });
+  }
 
   return (
-    <NodeViewWrapper className={`feishu-formula-editor${selected ? ' is-selected' : ''}`} contentEditable={false}>
-      <div className="feishu-formula-block">{formula || 'E = mc²'}</div>
+    <NodeViewWrapper className={`feishu-formula-editor${selected ? ' is-selected' : ''}`} {...blockDomAttrs(node.attrs)} contentEditable={false}>
+      <div
+        className={`feishu-formula-block${formulaError ? ' feishu-formula-block--error' : ''}`}
+        dangerouslySetInnerHTML={{ __html: formulaHtml }}
+      />
+      {formulaError && <div className="feishu-formula-error">{formulaError}</div>}
       <textarea
         className="feishu-formula-editor__input"
         value={formula}
-        placeholder="输入公式，例如 E = mc²"
+        placeholder="输入 LaTeX，例如 E = mc^2"
         rows={2}
         onChange={e => updateAttributes({ formula: e.target.value })}
       />
@@ -780,8 +1539,8 @@ const LocalFormulaBlock = TiptapNode.create({
   addAttributes() {
     return {
       formula: {
-        default: 'E = mc²',
-        parseHTML: element => element.getAttribute('data-formula') || element.textContent || 'E = mc²',
+        default: 'E = mc^2',
+        parseHTML: element => element.getAttribute('data-formula') || element.textContent || 'E = mc^2',
         renderHTML: attributes => ({ 'data-formula': attributes.formula }),
       },
     };
@@ -790,7 +1549,7 @@ const LocalFormulaBlock = TiptapNode.create({
     return [{ tag: 'div[data-local-block="formula"]' }];
   },
   renderHTML({ HTMLAttributes }) {
-    return ['div', { ...HTMLAttributes, 'data-local-block': 'formula', class: 'feishu-formula-block' }, HTMLAttributes.formula || 'E = mc²'];
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'formula', class: 'feishu-formula-block' }, HTMLAttributes.formula || 'E = mc^2'];
   },
   addNodeView() {
     return ReactNodeViewRenderer(LocalFormulaBlockView);
@@ -868,7 +1627,7 @@ function LocalBitableBlockView({ node, updateAttributes, selected }: NodeViewPro
   };
 
   return (
-    <NodeViewWrapper className={`feishu-bitable-block${selected ? ' is-selected' : ''}`} contentEditable={false}>
+    <NodeViewWrapper className={`feishu-bitable-block${selected ? ' is-selected' : ''}`} {...blockDomAttrs(node.attrs)} contentEditable={false}>
       <div className="feishu-bitable-block__header">
         <input
           className="feishu-bitable-block__title"
@@ -980,7 +1739,7 @@ const EMBED_KIND_META: Record<string, { icon: string; title: string; desc: strin
   embed: { icon: '+', title: '内容块', desc: '' },
 };
 
-function LocalEmbedBlockView({ node, updateAttributes, selected }: NodeViewProps) {
+function LocalEmbedBlockView({ node, updateAttributes, selected, deleteNode }: NodeViewProps) {
   const kind = String(node.attrs.kind || 'embed');
   const meta = EMBED_KIND_META[kind] || EMBED_KIND_META.embed;
   const title = node.attrs.title || meta.title;
@@ -992,6 +1751,7 @@ function LocalEmbedBlockView({ node, updateAttributes, selected }: NodeViewProps
     <NodeViewWrapper
       className={`feishu-local-card feishu-local-card--${kind}${selected ? ' is-selected' : ''}`}
       data-local-block="embed"
+      {...blockDomAttrs(node.attrs)}
       contentEditable={false}
     >
       <div className="feishu-local-card__icon">{meta.icon}</div>
@@ -1078,7 +1838,7 @@ function FeishuCodeBlockView({ node, updateAttributes }: any) {
   };
 
   return (
-    <NodeViewWrapper className={`feishu-code-block${wrap ? ' feishu-code-block--wrap' : ''}`}>
+    <NodeViewWrapper className={`feishu-code-block${wrap ? ' feishu-code-block--wrap' : ''}`} {...blockDomAttrs(node.attrs)}>
       <div className="feishu-code-block__toolbar" contentEditable={false}>
         <span className="feishu-code-block__title">代码块</span>
         <div className="feishu-code-block__actions">
@@ -1119,7 +1879,7 @@ const editorExtensions = [
     horizontalRule: false,
   }),
   FeishuHeading.configure({ levels: [1, 2, 3, 4, 5, 6] }),
-  CommentAnchorAttributes,
+  FeishuBlockId,
   CommentHighlightMark,
   FeishuHorizontalRule,
   FeishuCodeBlock.configure({ lowlight }),
@@ -1130,7 +1890,7 @@ const editorExtensions = [
   }),
   TaskList,
   TaskItem.configure({ nested: true }),
-  Image.configure({
+  FeishuImage.configure({
     inline: false,
     allowBase64: true,
     HTMLAttributes: { class: 'feishu-image' },
@@ -1202,6 +1962,8 @@ function getBlockDomFromEditor(editorInstance: {
     if (dividerWrapper && root.contains(dividerWrapper)) return dividerWrapper;
     const tableHost = resolveTableHostFromElement(el);
     if (tableHost && root.contains(tableHost)) return tableHost;
+    const imageBlock = el.closest?.('.feishu-image-block-wrap, .feishu-file-block--image') as HTMLElement | null;
+    if (imageBlock && root.contains(imageBlock)) return imageBlock;
     const tag = el.tagName?.toLowerCase() ?? '';
     if (/^(p|h[1-6]|blockquote|pre|hr)$/.test(tag)) return el;
     if (tag === 'li') return el;
@@ -1282,6 +2044,12 @@ function getBlockToolsAnchorTop(
     if (tr) return tr.top + tr.height / 2 - areaRectTop;
   }
   if (blockEl.classList.contains('tableWrapper') || blockEl.classList.contains('feishu-table-host')) {
+    return rr.top + 20 - areaRectTop;
+  }
+  if (
+    blockEl.classList.contains('feishu-image-block-wrap')
+    || blockEl.classList.contains('feishu-file-block--image')
+  ) {
     return rr.top + 20 - areaRectTop;
   }
   return rr.top + rr.height / 2 - areaRectTop;
@@ -1370,7 +2138,7 @@ export default function Editor({
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
-    variant: 'block' | 'table';
+    variant: 'block' | 'table' | 'image';
   } | null>(null);
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
   const [slashMenuPos, setSlashMenuPos] = useState({ top: 0, left: 0 });
@@ -1414,6 +2182,15 @@ export default function Editor({
   const [plusHovered, setPlusHovered] = useState(false);
   const [blockGutterHovered, setBlockGutterHovered] = useState(false);
   const [rowHighlightBand, setRowHighlightBand] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const [blockDragIndicator, setBlockDragIndicator] = useState<{ top: number; left: number; width: number } | null>(null);
+  const blockDragStateRef = useRef<{
+    source: HTMLElement;
+    startX: number;
+    startY: number;
+    dragging: boolean;
+    dropTarget: HTMLElement | null;
+    placement: 'before' | 'after';
+  } | null>(null);
 
   const setBlockGutterHoveredState = useCallback((value: boolean) => {
     setBlockGutterHovered(value);
@@ -1506,6 +2283,10 @@ export default function Editor({
       const isEmpty = !cell?.textContent?.trim();
       return { element: tableHost, type: 'table', isEmpty };
     }
+    const imageBlock = target.closest('.feishu-image-block-wrap, .feishu-file-block--image') as HTMLElement | null;
+    if (imageBlock && editorAreaRef.current.contains(imageBlock)) {
+      return { element: imageBlock, type: 'image', isEmpty: false };
+    }
     const block = target.closest('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre') as HTMLElement | null;
     if (!block || !editorAreaRef.current.contains(block)) return null;
 
@@ -1535,6 +2316,12 @@ export default function Editor({
     if (editorInstance.isActive('highlightBlock')) return 'highlightBlock';
     if (editorInstance.isActive('horizontalRule')) return 'hr';
     if (editorInstance.isActive('table')) return 'table';
+    if (editorInstance.isActive('image')) return 'image';
+    if (editorInstance.isActive('localFileBlock')) {
+      const attrs = editorInstance.getAttributes('localFileBlock');
+      if (String(attrs.mediaKind || '') === 'image') return 'image';
+      return 'file';
+    }
     return 'paragraph';
   }, []);
 
@@ -1965,6 +2752,149 @@ export default function Editor({
     [contextMenu, readOnly, resolveHoveredBlockInfo, revealBlockToolsFromInfo, slashMenuFromPlus, slashMenuVisible],
   );
 
+  const handleEditorContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (readOnly || !editor || !editorAreaRef.current) return;
+    if (isBlockToolsOverlayElement(e.target as Element | null)) return;
+
+    const resolved = resolveHoveredBlockInfo(e.target);
+    if (!resolved || resolved === 'keep') return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    cancelContextMenuClose();
+    closeSlashMenu();
+    setSlashMenuFromPlus(false);
+    setSlashMenuFromTableCellPlus(false);
+    revealBlockToolsFromInfo(resolved);
+    activeBlockElRef.current = resolved.element;
+
+    if (resolved.type === 'table') {
+      setActiveTableHost(resolved.element);
+      setTableHandleHovered(true);
+      selectTableNodeFromHost(editor, resolved.element);
+      setContextMenu({ x: e.clientX, y: e.clientY, variant: 'table' });
+      return;
+    }
+
+    if (resolved.type === 'image') {
+      try {
+        const pos = editor.view.posAtDOM(resolved.element, 0);
+        editor.commands.setNodeSelection(pos);
+      } catch {
+        editor.commands.focus();
+      }
+      setContextMenu({ x: e.clientX, y: e.clientY, variant: 'image' });
+      return;
+    }
+
+    if (resolved.type === 'hr') {
+      try {
+        const pos = editor.view.posAtDOM(resolved.element, 0);
+        editor.commands.setNodeSelection(pos);
+      } catch {
+        editor.commands.focus();
+      }
+    } else {
+      syncEditorSelectionToAnchoredBlock(editor, resolved.element);
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY, variant: 'block' });
+  }, [
+    cancelContextMenuClose,
+    closeSlashMenu,
+    editor,
+    readOnly,
+    resolveHoveredBlockInfo,
+    revealBlockToolsFromInfo,
+  ]);
+
+  const beginBlockDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!editor || readOnly) return;
+    const source = activeBlockElRef.current;
+    if (!source?.isConnected || !resolveDraggableBlockPos(editor, source)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu(null);
+    setBlockGutterHoveredState(true);
+    blockDragStateRef.current = {
+      source,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+      dropTarget: null,
+      placement: 'before',
+    };
+
+    const resolveDrop = (clientX: number, clientY: number) => {
+      const dragState = blockDragStateRef.current;
+      const area = editorAreaRef.current;
+      if (!dragState || !area) return;
+      const hit = document.elementFromPoint(clientX, clientY);
+      const resolved = resolveHoveredBlockInfo(hit);
+      if (!resolved || resolved === 'keep' || resolved.type === 'table') {
+        dragState.dropTarget = null;
+        setBlockDragIndicator(null);
+        return;
+      }
+      const target = resolved.element;
+      if (target === dragState.source || !resolveDraggableBlockPos(editor, target)) {
+        dragState.dropTarget = null;
+        setBlockDragIndicator(null);
+        return;
+      }
+
+      const targetRect = target.getBoundingClientRect();
+      const areaRect = area.getBoundingClientRect();
+      const columnContent = getColumnContentFromBlock(target);
+      const indicatorRect = columnContent?.isConnected ? columnContent.getBoundingClientRect() : targetRect;
+      const placement = clientY < targetRect.top + targetRect.height / 2 ? 'before' : 'after';
+      dragState.dropTarget = target;
+      dragState.placement = placement;
+      setBlockDragIndicator({
+        top: (placement === 'before' ? targetRect.top : targetRect.bottom) - areaRect.top,
+        left: columnContent?.isConnected ? indicatorRect.left - areaRect.left : 0,
+        width: columnContent?.isConnected ? indicatorRect.width : areaRect.width,
+      });
+    };
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const dragState = blockDragStateRef.current;
+      if (!dragState) return;
+      const dx = Math.abs(moveEvent.clientX - dragState.startX);
+      const dy = Math.abs(moveEvent.clientY - dragState.startY);
+      if (!dragState.dragging && dx < 4 && dy < 4) return;
+      dragState.dragging = true;
+      moveEvent.preventDefault();
+      resolveDrop(moveEvent.clientX, moveEvent.clientY);
+    };
+
+    const finish = () => {
+      const dragState = blockDragStateRef.current;
+      document.removeEventListener('pointermove', onMove, true);
+      document.removeEventListener('pointerup', finish, true);
+      document.removeEventListener('pointercancel', finish, true);
+      blockDragStateRef.current = null;
+      setBlockDragIndicator(null);
+      if (dragState?.dragging && dragState.dropTarget) {
+        const moved = moveDraggableBlock(editor, dragState.source, dragState.dropTarget, dragState.placement);
+        if (moved) {
+          hideBlockTools();
+        }
+      }
+    };
+
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', finish, true);
+    document.addEventListener('pointercancel', finish, true);
+  }, [
+    editor,
+    getColumnContentFromBlock,
+    hideBlockTools,
+    readOnly,
+    resolveHoveredBlockInfo,
+    setBlockGutterHoveredState,
+  ]);
+
   const handleBlockToolsMouseLeave = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const next = getRelatedNode(e.relatedTarget);
@@ -2177,9 +3107,24 @@ export default function Editor({
     };
   }, [editor]);
 
+  useEffect(() => {
+    if (!editor || readOnly) return undefined;
+    const onInsertMediaFiles = (event: Event) => {
+      const detail = (event as CustomEvent<{ files?: File[]; insertAt?: number }>).detail;
+      const files = Array.from(detail?.files ?? []).filter(file => file instanceof File);
+      if (!files.length) return;
+      insertMediaFiles(editor, files, detail?.insertAt);
+    };
+    window.addEventListener('feishu-insert-media-files', onInsertMediaFiles as EventListener);
+    return () => window.removeEventListener('feishu-insert-media-files', onInsertMediaFiles as EventListener);
+  }, [editor, readOnly]);
+
   useLayoutEffect(() => {
-    if (editor) (editor as any).__documentId = documentId;
-  }, [documentId, editor]);
+    if (editor) {
+      (editor as any).__documentId = documentId;
+      (editor as any).__author = author;
+    }
+  }, [author, documentId, editor]);
 
   useEffect(() => {
     const openPageLinkDialog = (ev: Event) => {
@@ -2196,6 +3141,49 @@ export default function Editor({
     window.addEventListener('feishu-open-page-link-dialog', openPageLinkDialog as EventListener);
     return () => window.removeEventListener('feishu-open-page-link-dialog', openPageLinkDialog as EventListener);
   }, [closeSlashMenu, editor, readOnly]);
+
+  useEffect(() => {
+    const openTableCellBlockMenu = (ev: Event) => {
+      if (!editor || readOnly) return;
+      const detail = (ev as CustomEvent<{ x?: number; y?: number; cursorPos?: number }>).detail ?? {};
+      cancelContextMenuClose();
+      closeSlashMenu();
+      setSlashMenuFromTableCellPlus(false);
+
+      const cursorPos = detail.cursorPos;
+      if (typeof cursorPos === 'number') {
+        const node = editor.state.doc.nodeAt(cursorPos);
+        if (
+          node
+          && (
+            node.isAtom
+            || node.type.name === 'horizontalRule'
+            || node.type.name === 'image'
+            || node.type.name === 'localEmbedBlock'
+            || node.type.name === 'localFileBlock'
+          )
+        ) {
+          editor.chain().focus().setNodeSelection(cursorPos).run();
+        } else {
+          editor.chain().focus().setTextSelection(cursorPos).run();
+        }
+      } else {
+        editor.commands.focus();
+      }
+
+      const inlineBlock = resolveInlineBlockElementFromEditor(editor);
+      if (inlineBlock?.isConnected) {
+        activeBlockElRef.current = inlineBlock;
+      }
+
+      const anchorX = typeof detail.x === 'number' ? detail.x : 24;
+      const anchorY = typeof detail.y === 'number' ? detail.y : 24;
+      const pos = computeBlockPanelPosition(new DOMRect(anchorX, anchorY, 1, 1));
+      setContextMenu({ ...pos, variant: 'block' });
+    };
+    window.addEventListener('feishu-open-table-cell-block-menu', openTableCellBlockMenu as EventListener);
+    return () => window.removeEventListener('feishu-open-table-cell-block-menu', openTableCellBlockMenu as EventListener);
+  }, [cancelContextMenuClose, closeSlashMenu, editor, readOnly]);
 
   useEffect(() => {
     const openTableCellSlashMenu = (ev: Event) => {
@@ -2317,6 +3305,31 @@ export default function Editor({
     }
   }, [readOnly, editor, closeSlashMenu]);
 
+  useEffect(() => {
+    if (!editor || readOnly) return;
+    const handleRemoveCommentHighlights = (event: Event) => {
+      const threadIds = (event as CustomEvent<{ threadIds?: string[] }>).detail?.threadIds;
+      if (!threadIds?.length) return;
+      if (!removeCommentHighlightsFromEditor(editor, threadIds)) return;
+      onSave({ content: sanitizeEditorHtmlForSave(editor.getHTML()) });
+    };
+    window.addEventListener('feishu-remove-comment-highlights', handleRemoveCommentHighlights);
+    return () => window.removeEventListener('feishu-remove-comment-highlights', handleRemoveCommentHighlights);
+  }, [editor, onSave, readOnly]);
+
+  useEffect(() => {
+    if (!editor || readOnly) return undefined;
+
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      const session = getActiveImageCropSession();
+      if (!session || session.shouldSkipConfirmTarget(event.target)) return;
+      void session.confirm();
+    };
+
+    document.addEventListener('mousedown', handleDocumentMouseDown, true);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
+  }, [editor, readOnly]);
+
   useLayoutEffect(() => {
     syncRowHighlightBand();
   }, [
@@ -2394,9 +3407,16 @@ export default function Editor({
   const openBlockConfigMenu = (options?: { skipCooldown?: boolean }) => {
     if (slashMenuVisible && slashMenuFromPlus) return;
     const isTableTarget = blockTools.type === 'table';
+    const isImageTarget = blockTools.type === 'image';
+    const openVariant = isTableTarget ? 'table' : isImageTarget ? 'image' : 'block';
+    if (contextMenu?.variant === openVariant) {
+      cancelContextMenuClose();
+      return;
+    }
     if (
       !options?.skipCooldown
       && !isTableTarget
+      && !isImageTarget
       && Date.now() - menuClosedAtRef.current < 300
     ) {
       return;
@@ -2404,6 +3424,13 @@ export default function Editor({
     cancelContextMenuClose();
     // For atom blocks (divider), ensure a NodeSelection so context menu actions target the right node
     if (blockTools.type === 'hr' && activeBlockElRef.current && editor) {
+      try {
+        const pos = editor.view.posAtDOM(activeBlockElRef.current, 0);
+        editor.commands.setNodeSelection(pos);
+      } catch {
+        editor.commands.focus();
+      }
+    } else if (blockTools.type === 'image' && activeBlockElRef.current && editor) {
       try {
         const pos = editor.view.posAtDOM(activeBlockElRef.current, 0);
         editor.commands.setNodeSelection(pos);
@@ -2429,15 +3456,15 @@ export default function Editor({
     const btn = blockDragRowRef.current;
     if (btn?.isConnected) {
       const pos = computeBlockPanelPosition(btn.getBoundingClientRect());
-      setContextMenu({ ...pos, variant: 'block' });
+      setContextMenu({ ...pos, variant: isImageTarget ? 'image' : 'block' });
       return;
     }
     const area = editorAreaRef.current;
     if (area) {
       const ar = area.getBoundingClientRect();
-      setContextMenu({ x: ar.left - 8, y: ar.top + blockTools.top + 30, variant: 'block' });
+      setContextMenu({ x: ar.left - 8, y: ar.top + blockTools.top + 30, variant: isImageTarget ? 'image' : 'block' });
     } else {
-      setContextMenu({ x: 24, y: blockTools.top + 30, variant: 'block' });
+      setContextMenu({ x: 24, y: blockTools.top + 30, variant: isImageTarget ? 'image' : 'block' });
     }
   };
 
@@ -2527,7 +3554,7 @@ export default function Editor({
         scheduleClose();
         return;
       }
-      if (target.closest('.slash-menu, .slash-submenu-portal, .feishu-table-chrome__cell-plus')) {
+      if (target.closest('.slash-menu, .slash-submenu-portal, .feishu-table-chrome__cell-handle')) {
         cancelClose();
         return;
       }
@@ -2654,6 +3681,7 @@ export default function Editor({
             aria-label="文档正文编辑区"
             onPointerOver={handleEditorPointerOver}
             onPointerMove={handleEditorPointerMove}
+            onContextMenu={handleEditorContextMenu}
             onMouseLeave={handleEditorMouseLeave}
             onClick={handleEditorBlankClick}
             onDragEnter={handleFileDragOver}
@@ -2723,9 +3751,10 @@ export default function Editor({
                     type="button"
                     className="block-drag-row"
                     onMouseDown={e => e.preventDefault()}
+                    onPointerDown={beginBlockDrag}
                     onPointerEnter={blockTools.type === 'table' ? undefined : () => {
                       blockHoverFloatingGroup.cancelClose();
-                      openBlockConfigMenu();
+                      openBlockConfigMenu({ skipCooldown: true });
                     }}
                     onMouseLeave={(e) => {
                       const next = getRelatedNode(e.relatedTarget);
@@ -2733,10 +3762,8 @@ export default function Editor({
                       if (isPointerInContextMenuShell(next)) return;
                       scheduleContextMenuClose();
                     }}
-                    onClick={() => openBlockConfigMenu()}
                     aria-label="块配置"
                   >
-                    {!contextMenu && <span className="block-drag-row-tooltip">块配置</span>}
                     <div className="hover-drag-icon-wrapper">
                       <div className="hover-block-type-icon-container">
                         <span className="menu_ud_icon color-b-500">
@@ -2801,6 +3828,16 @@ export default function Editor({
                   right: 'auto',
                 }}
                 aria-hidden
+              />
+            )}
+            {blockDragIndicator && (
+              <div
+                className="block-drag-drop-indicator"
+                style={{
+                  top: blockDragIndicator.top,
+                  left: blockDragIndicator.left,
+                  width: blockDragIndicator.width,
+                }}
               />
             )}
             {pageLinkDialogVisible && !readOnly && (
@@ -2888,6 +3925,18 @@ export default function Editor({
       )}
       {contextMenu?.variant === 'block' && (
         <ContextMenu
+          editor={editor}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          anchorRef={blockDragRowRef}
+          blockAnchorRef={activeBlockElRef}
+          onClose={closeContextMenu}
+          onHoverDismiss={dismissContextMenuFromHover}
+          onMouseEnterCancel={cancelContextMenuClose}
+        />
+      )}
+      {contextMenu?.variant === 'image' && (
+        <ImageContextMenu
           editor={editor}
           x={contextMenu.x}
           y={contextMenu.y}

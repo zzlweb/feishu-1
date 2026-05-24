@@ -214,6 +214,28 @@
         border-radius: 4px;
       }
 
+      .block-drag-drop-indicator {
+        position: absolute;
+        z-index: 260;
+        height: 2px;
+        pointer-events: none;
+        background: @primary;
+        border-radius: 999px;
+        box-shadow: 0 0 0 1px rgba(51, 112, 255, 0.12);
+
+        &::before {
+          content: '';
+          position: absolute;
+          left: -4px;
+          top: 50%;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: @primary;
+          transform: translateY(-50%);
+        }
+      }
+
       .tiptap {
         outline: none;
         min-height: 300px;
@@ -469,6 +491,11 @@
             &:hover,
             &.is-active {
               background: #f2f3f5;
+            }
+
+            &.menu-item-actived {
+              background: rgba(51, 112, 255, 0.1);
+              color: @primary;
             }
 
             .menu-item-content {
@@ -1015,6 +1042,7 @@
         }
 
         .feishu-local-card {
+          position: relative;
           display: flex;
           align-items: center;
           gap: 12px;
@@ -1126,6 +1154,7 @@
         }
 
         .feishu-file-block {
+          position: relative;
           margin: 8px 0;
           border-radius: 8px;
           outline: 2px solid transparent;
@@ -1133,6 +1162,102 @@
 
           &.is-selected {
             outline-color: fade(@primary, 55%);
+          }
+
+          &--video-preview.is-selected,
+          &--video.feishu-file-block--preview.is-selected {
+            outline-color: transparent;
+          }
+        }
+
+        .feishu-image-block-wrap {
+          position: relative;
+          display: block;
+          max-width: 100%;
+          margin: 8px 0;
+
+          &:hover .docx-menu-container,
+          &:focus-within .docx-menu-container,
+          &.is-selected .docx-menu-container {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, 0);
+          }
+
+          &--left {
+            text-align: left;
+
+            .feishu-image-block,
+            .feishu-media-preview {
+              margin-left: 0;
+              margin-right: auto;
+            }
+
+            .feishu-media-caption {
+              text-align: left;
+            }
+          }
+
+          &--center {
+            text-align: center;
+
+            .feishu-image-block,
+            .feishu-media-preview {
+              margin-left: auto;
+              margin-right: auto;
+            }
+
+            .feishu-media-caption {
+              text-align: center;
+            }
+          }
+
+          &--right {
+            text-align: right;
+
+            .feishu-image-block,
+            .feishu-media-preview {
+              margin-left: auto;
+              margin-right: 0;
+            }
+
+            .feishu-media-caption {
+              text-align: right;
+            }
+          }
+        }
+
+        .feishu-image-block {
+          position: relative;
+          display: inline-block;
+          max-width: 100%;
+          margin: 8px 0;
+          line-height: 0;
+
+          &.is-selected {
+            outline: 2px solid fade(@primary, 55%);
+            outline-offset: 2px;
+            border-radius: 8px;
+          }
+
+          .feishu-image {
+            margin: 0;
+          }
+        }
+
+        .feishu-image-block-wrap.is-cropping,
+        .feishu-file-block.is-cropping {
+          .feishu-image-block,
+          .feishu-media-preview {
+            position: relative;
+          }
+        }
+
+        .feishu-file-block--image-preview {
+          &.is-selected .feishu-media-preview__image {
+            outline: 2px solid fade(@primary, 55%);
+            outline-offset: 2px;
+            border-radius: 8px;
           }
         }
 
@@ -1155,12 +1280,67 @@
           margin-top: 0;
         }
 
+        .feishu-file-block .feishu-local-card--file {
+          width: min(100%, 520px);
+          min-height: 52px;
+          box-sizing: border-box;
+          gap: 10px;
+          margin: 8px 0;
+          padding: 8px 10px;
+          border-color: #dee0e3;
+          border-radius: 6px;
+          box-shadow: none;
+
+          &:hover {
+            border-color: #dee0e3;
+            background: #fafafa;
+          }
+
+          .feishu-local-card__icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 700;
+          }
+
+          .feishu-local-card__title {
+            overflow: hidden;
+            color: #1f2329;
+            font-weight: 400;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .feishu-local-card__desc {
+            margin-top: 1px;
+          }
+        }
+
+        .feishu-file-block--video .feishu-local-card__icon {
+          color: #7c3aed;
+          background: rgba(124, 58, 237, 0.1);
+        }
+
+        .feishu-file-block--audio .feishu-local-card__icon {
+          color: #0f9960;
+          background: rgba(15, 153, 96, 0.1);
+        }
+
+        .feishu-file-block--archive .feishu-local-card__icon {
+          color: #d46b08;
+          background: rgba(212, 107, 8, 0.1);
+        }
+
         .feishu-media-preview {
+          position: relative;
           max-width: 100%;
-          margin: 8px 0 6px;
-          border-radius: 8px;
+          margin: 8px 0;
+          border: 1px solid #dee0e3;
+          border-radius: 6px;
           overflow: hidden;
-          background: #f5f6f7;
+          background: #fff;
+          box-shadow: 0 1px 2px rgba(31, 35, 41, 0.04);
 
           &__image {
             display: block;
@@ -1173,23 +1353,41 @@
           &__audio,
           &__pdf {
             display: block;
-            width: min(100%, 760px);
             border: 0;
-            background: #000;
           }
 
           &__video {
-            max-height: 430px;
+            width: auto;
+            max-width: min(100%, 520px);
+            max-height: 560px;
+            background: #000;
+            object-fit: contain;
           }
 
           &__audio {
+            width: min(100%, 520px);
             height: 42px;
             background: transparent;
           }
 
           &__pdf {
+            width: min(100%, 720px);
             height: 420px;
             background: #fff;
+          }
+
+          &--video,
+          &--audio,
+          &--document {
+            display: inline-block;
+          }
+
+          &--video {
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            box-shadow: none;
+            line-height: 0;
           }
         }
 
@@ -1214,21 +1412,45 @@
           display: inline-flex;
           align-items: center;
           max-width: 100%;
-          gap: 6px;
-          padding: 2px 4px;
+          gap: 5px;
+          min-height: 24px;
+          padding: 1px 4px;
           border-radius: 4px;
-          color: @primary;
-          background: rgba(51, 112, 255, 0.08);
+          color: #1f2329;
+          background: transparent;
+          vertical-align: baseline;
 
           &__icon {
-            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            border-radius: 4px;
+            color: @primary;
+            background: rgba(51, 112, 255, 0.1);
+            font-size: 9px;
             font-weight: 700;
+            line-height: 1;
           }
 
           &__name {
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            font-size: 14px;
+            line-height: 22px;
+          }
+
+          &__meta {
+            flex: 0 0 auto;
+            color: #8f959e;
+            font-size: 12px;
+            line-height: 20px;
+          }
+
+          &:hover {
+            background: #f5f6f7;
           }
         }
 
@@ -1266,21 +1488,201 @@
           opacity: 1;
         }
 
+        .feishu-file-block {
+          position: relative;
+        }
+
+        .feishu-file-block:hover .docx-menu-container,
+        .feishu-file-block:focus-within .docx-menu-container,
+        .feishu-file-block.is-selected .docx-menu-container {
+          opacity: 1;
+          pointer-events: auto;
+          transform: translate(-50%, 0);
+        }
+
+        .feishu-file-view-toolbar {
+          top: -48px;
+          height: 36px;
+          padding: 0 4px;
+          border-color: #dee0e3;
+          border-radius: 6px;
+          box-shadow:
+            0 8px 24px rgba(31, 35, 41, 0.12),
+            0 2px 6px rgba(31, 35, 41, 0.08);
+
+          .panel-menu-item:disabled {
+            color: #bbbfc4;
+            cursor: not-allowed;
+
+            &:hover {
+              background: transparent;
+            }
+          }
+        }
+
         .feishu-media-progress {
           width: 100%;
-          height: 4px;
+          height: 3px;
           margin-top: 6px;
           border-radius: 999px;
-          background: #e8e9eb;
+          background: #eff0f1;
           overflow: hidden;
 
           span {
             display: block;
             height: 100%;
             border-radius: inherit;
-            background: @primary;
+            background: #3370ff;
             transition: width 0.15s ease;
           }
+        }
+
+        .feishu-media-preview__meta {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 8px;
+          min-height: 46px;
+          padding: 7px 10px;
+          border-top: 1px solid #eff0f1;
+          background: #fff;
+          line-height: 20px;
+
+          .feishu-media-progress {
+            grid-column: 2 / 4;
+            margin-top: 0;
+          }
+
+          .feishu-file-actions {
+            grid-column: 1 / 4;
+            justify-content: flex-end;
+            min-height: 24px;
+          }
+        }
+
+        .feishu-media-preview__file-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 30px;
+          height: 30px;
+          border-radius: 6px;
+          background: rgba(51, 112, 255, 0.1);
+          color: @primary;
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .feishu-media-preview__video-shell {
+          position: relative;
+          display: inline-block;
+          overflow: hidden;
+          border-radius: 6px;
+          background: #000;
+          line-height: 0;
+
+          video {
+            display: block;
+          }
+        }
+
+        .feishu-media-preview__video-title {
+          position: absolute;
+          top: 10px;
+          left: 12px;
+          right: 12px;
+          z-index: 2;
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          min-width: 0;
+          color: #fff;
+          font-size: 15px;
+          font-weight: 600;
+          line-height: 22px;
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+          pointer-events: none;
+
+          span:last-child {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+        }
+
+        .feishu-media-preview__video-file-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 14px;
+          height: 14px;
+          border-radius: 3px;
+          background: #3370ff;
+          color: #fff;
+          font-size: 6px;
+          font-weight: 700;
+          line-height: 1;
+          text-shadow: none;
+        }
+
+        .feishu-media-preview__play {
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          z-index: 3;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 52px;
+          height: 52px;
+          margin: -26px 0 0 -26px;
+          border: 0;
+          border-radius: 999px;
+          background: rgba(31, 35, 41, 0.72);
+          cursor: pointer;
+
+          &:hover {
+            background: rgba(31, 35, 41, 0.82);
+          }
+
+          span {
+            display: block;
+            width: 0;
+            height: 0;
+            margin-left: 4px;
+            border-top: 11px solid transparent;
+            border-bottom: 11px solid transparent;
+            border-left: 16px solid #fff;
+          }
+        }
+
+        .feishu-media-preview__name {
+          overflow: hidden;
+          color: @text-primary;
+          font-size: 14px;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .feishu-media-preview__desc {
+          color: #8f959e;
+          font-size: 12px;
+          white-space: nowrap;
+        }
+
+        .feishu-file-block--video .feishu-media-preview__file-icon {
+          color: #7c3aed;
+          background: rgba(124, 58, 237, 0.1);
+        }
+
+        .feishu-file-block--audio .feishu-media-preview__file-icon {
+          color: #0f9960;
+          background: rgba(15, 153, 96, 0.1);
+        }
+
+        .feishu-file-block--archive .feishu-media-preview__file-icon {
+          color: #d46b08;
+          background: rgba(212, 107, 8, 0.1);
         }
 
         .feishu-image {
@@ -1643,6 +2045,16 @@
               min-height: 20px !important;
               line-height: 1.5 !important;
               display: block !important;
+            }
+
+            .feishu-file-block,
+            .feishu-image-block,
+            .feishu-local-card {
+              margin: 0 !important;
+            }
+
+            .feishu-media-preview {
+              margin: 0 !important;
             }
           }
 
@@ -2186,25 +2598,30 @@
         .feishu-action-button {
           margin: 8px 0;
           padding: 6px 14px;
-          border: 1px solid rgba(51, 112, 255, 0.32);
+          border: 1px solid var(--button-border, rgba(51, 112, 255, 0.32));
           border-radius: 6px;
-          color: @primary;
-          background: rgba(51, 112, 255, 0.08);
+          color: var(--button-color, @primary);
+          background: var(--button-bg, rgba(51, 112, 255, 0.08));
           font-size: 14px;
           line-height: 20px;
+          cursor: pointer;
         }
 
         .feishu-button-block {
-          display: flex;
+          position: relative;
+          display: inline-flex;
           align-items: center;
-          gap: 10px;
-          margin: 8px 0;
-          padding: 8px 10px;
+          width: fit-content;
+          max-width: 100%;
+          margin: 8px 0 8px;
+          padding: 0;
           border: 1px solid transparent;
-          border-radius: 8px;
+          border-radius: 6px;
+          vertical-align: top;
         }
 
         .feishu-button-block.is-selected,
+        .feishu-button-block.is-configuring,
         .feishu-formula-editor.is-selected,
         .feishu-local-card.is-selected {
           border-color: rgba(51, 112, 255, 0.35);
@@ -2225,11 +2642,31 @@
         }
 
         .feishu-button-block__form {
-          display: grid;
-          grid-template-columns: minmax(120px, 180px) minmax(180px, 1fr);
+          display: none;
+          grid-template-columns: minmax(116px, 152px) minmax(120px, 170px) minmax(180px, 1fr);
           gap: 8px;
           min-width: 0;
           flex: 1;
+        }
+
+        .feishu-button-block__type {
+          cursor: pointer;
+        }
+
+        .feishu-button-block__hint {
+          display: inline-flex;
+          align-items: center;
+          min-width: 0;
+          height: 28px;
+          padding: 0 8px;
+          overflow: hidden;
+          border-radius: 4px;
+          color: #646a73;
+          background: #f7f8fa;
+          font-size: 13px;
+          line-height: 20px;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .feishu-block-field {
@@ -2238,6 +2675,132 @@
           background: #f7f8fa;
           font-size: 13px;
           line-height: 20px;
+        }
+
+        .button-panel {
+          position: absolute;
+          left: 0;
+          bottom: calc(100% + 8px);
+          z-index: 50;
+          width: 270px;
+          padding: 14px 12px 12px;
+          border: 1px solid #dee0e3;
+          border-radius: 6px;
+          background: #fff;
+          box-shadow: 0 8px 24px rgba(31, 35, 41, 0.12);
+          color: #1f2329;
+        }
+
+        .button-panel__content {
+          display: grid;
+          gap: 16px;
+        }
+
+        .button-panel__form-item {
+          display: grid;
+          gap: 8px;
+          margin: 0;
+          min-width: 0;
+        }
+
+        .button-panel__label {
+          color: #1f2329;
+          font-size: 14px;
+          line-height: 20px;
+          font-weight: 400;
+        }
+
+        .button-panel__input,
+        .button-panel__select {
+          width: 100%;
+          height: 32px;
+          padding: 5px 10px;
+          border: 1px solid #d0d3d6;
+          border-radius: 5px;
+          outline: none;
+          background: #fff;
+          color: #1f2329;
+          font-size: 14px;
+          line-height: 20px;
+        }
+
+        .button-panel__input::placeholder {
+          color: #8f959e;
+        }
+
+        .button-panel__input:focus,
+        .button-panel__select:focus {
+          border-color: #336df4;
+          box-shadow: 0 0 0 2px rgba(51, 109, 244, 0.14);
+        }
+
+        .button-panel__select {
+          appearance: none;
+          padding-right: 34px;
+          background-image:
+            linear-gradient(45deg, transparent 50%, #646a73 50%),
+            linear-gradient(135deg, #646a73 50%, transparent 50%);
+          background-position:
+            calc(100% - 17px) 13px,
+            calc(100% - 12px) 13px;
+          background-size: 5px 5px, 5px 5px;
+          background-repeat: no-repeat;
+          cursor: pointer;
+        }
+
+        .docx-button-color-picker {
+          display: grid;
+          gap: 8px;
+        }
+
+        .docx-button-color-picker__group {
+          display: grid;
+          grid-template-columns: repeat(8, 20px);
+          gap: 11px;
+        }
+
+        .docx-button-color-picker__item {
+          width: 20px;
+          height: 20px;
+          padding: 0;
+          border: 0;
+          border-radius: 4px;
+          box-shadow: none;
+          cursor: pointer;
+        }
+
+        .docx-button-color-picker__item.selected {
+          outline: 2px solid #336df4;
+          outline-offset: 2px;
+        }
+
+        .button-panel__footer {
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+          margin-top: 18px;
+        }
+
+        .button-panel__btn {
+          min-width: 80px;
+          height: 32px;
+          padding: 0 16px;
+          border-radius: 6px;
+          font-size: 14px;
+          line-height: 20px;
+          cursor: pointer;
+        }
+
+        .button-panel__btn--cancel {
+          border: 1px solid #d0d3d6;
+          color: #1f2329;
+          background: #fff;
+        }
+
+        .button-panel__btn--confirm {
+          border: 1px solid #1456f0;
+          color: #fff;
+          background: #1456f0;
         }
 
         .feishu-formula-block {
@@ -2249,6 +2812,18 @@
           font-family: Georgia, 'Times New Roman', serif;
           font-size: 18px;
           text-align: center;
+        }
+
+        .feishu-formula-block--error {
+          color: #d54941;
+          background: #fff1f0;
+        }
+
+        .feishu-formula-error {
+          margin: -2px 0 8px;
+          color: #d54941;
+          font-size: 12px;
+          line-height: 18px;
         }
 
         .feishu-formula-editor {
@@ -2612,29 +3187,6 @@
       &:focus-visible {
         outline: 2px solid fade(@primary, 35%);
         outline-offset: 1px;
-      }
-
-      // Custom tooltip above the button
-      .block-drag-row-tooltip {
-        position: absolute;
-        bottom: calc(100% + 6px);
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 5px 9px;
-        border-radius: 6px;
-        background: #1f2329;
-        color: #fff;
-        font-size: 12px;
-        line-height: 18px;
-        white-space: nowrap;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 0.15s ease;
-        z-index: 10;
-      }
-
-      &:hover .block-drag-row-tooltip {
-        opacity: 1;
       }
     }
 

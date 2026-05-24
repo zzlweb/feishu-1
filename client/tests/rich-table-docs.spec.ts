@@ -46,7 +46,15 @@ test('edits a rich text cell without selecting the table block', async ({ page }
 
   const firstCell = page.locator('td[data-table-cell="true"]').first();
   await firstCell.click();
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.evaluate(() => {
+    const paragraph = document.querySelector('td[data-table-cell="true"] p');
+    if (!(paragraph instanceof HTMLElement)) return;
+    const range = document.createRange();
+    range.selectNodeContents(paragraph);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
   await page.keyboard.type('Edited cell');
 
   await expect(firstCell).toContainText('Edited cell');
@@ -121,21 +129,81 @@ test('selects and highlights a full row from the row rail', async ({ page }) => 
   await expect(secondRowRail).toHaveClass(/is-selected/);
 });
 
-test('opens the table-cell insert menu by hovering the in-cell plus button', async ({ page }) => {
+test('opens the table-cell insert menu at the cursor-positioned plus button', async ({ page }) => {
   await openRichTable(page);
 
   const firstCell = page.locator('td[data-table-cell="true"]').first();
-  const box = await firstCell.boundingBox();
-  expect(box).not.toBeNull();
-  await page.mouse.move(box!.x + 30, box!.y + box!.height / 2);
+  await firstCell.click();
+  await page.evaluate(() => {
+    const paragraph = document.querySelector('td[data-table-cell="true"] p');
+    if (!(paragraph instanceof HTMLElement)) return;
+    const range = document.createRange();
+    range.selectNodeContents(paragraph);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.press('Backspace');
+  await expect(firstCell).toHaveText('');
 
-  const plus = page.locator('.feishu-table-chrome__cell-plus').first();
+  const plus = page.locator('.feishu-table-chrome__cell-handle--insert').first();
   await expect(plus).toBeVisible();
 
+  await plus.hover();
   await expect(page.locator('.slash-menu').first()).toBeVisible();
   await page.mouse.move(20, 20);
   await expect(page.locator('.slash-menu').first()).toBeHidden();
   await expect(firstCell.locator('.ProseMirror-selectednode')).toHaveCount(0);
+});
+
+test('opens block context menu from the text cell handle', async ({ page }) => {
+  await openRichTable(page);
+
+  const firstCell = page.locator('td[data-table-cell="true"]').first();
+  await firstCell.click();
+
+  const handle = page.locator('.feishu-table-chrome__cell-handle--block').first();
+  await expect(handle).toBeVisible();
+  await handle.hover();
+  await expect(page.locator('.context-menu').first()).toBeVisible();
+});
+
+test('deletes embedded block content inside a table cell with Backspace', async ({ page }) => {
+  const docWithEmbed = {
+    ...tableDocument,
+    content: `
+      <table class="feishu-table">
+        <tbody>
+          <tr>
+            <td data-table-cell="true" data-cell-id="cell-embed-1" data-row-index="0" data-col-index="0">
+              <div data-local-block="embed" data-kind="subdoc" data-title="子文档" data-desc="/doc/child" data-href="/doc/child" class="feishu-local-card feishu-local-card--subdoc">
+                <div class="feishu-local-card__icon">↗</div>
+                <div class="feishu-local-card__body">
+                  <div class="feishu-local-card__title">子文档</div>
+                  <div class="feishu-local-card__desc">/doc/child</div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    `,
+  };
+
+  await page.route('**/api/documents/rich-table-docs-e2e', route => {
+    if (route.request().method() === 'GET') {
+      return route.fulfill({ json: { code: 0, data: docWithEmbed } });
+    }
+    return route.fulfill({ json: { code: 0, data: docWithEmbed } });
+  });
+
+  await openRichTable(page);
+
+  const embedCard = page.locator('td .feishu-local-card').first();
+  await expect(embedCard).toBeVisible();
+  await embedCard.click();
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('td .feishu-local-card')).toHaveCount(0);
 });
 
 test('resizes columns and rows without creating native text selection', async ({ page }) => {

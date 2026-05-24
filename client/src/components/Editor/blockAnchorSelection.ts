@@ -1,5 +1,6 @@
 import { TextSelection } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/react';
+import { syncImageNodeSelection } from './imageBlockUtils';
 import { getTableElementFromHost, resolveTableHostFromElement } from './tableDom';
 
 function trySetTextCaret(editor: Editor, el: HTMLElement, offset: number): boolean {
@@ -21,14 +22,91 @@ function trySetTextCaret(editor: Editor, el: HTMLElement, offset: number): boole
 
 function syncSelectionToTableBlock(editor: Editor, blockEl: HTMLElement): boolean {
   const host = resolveTableHostFromElement(blockEl) ?? blockEl;
+
+  const { selection } = editor.state;
+  const $from = selection.$from;
+  for (let d = $from.depth; d > 0; d--) {
+    const name = $from.node(d).type.name;
+    if (name !== 'tableCell' && name !== 'tableHeader') continue;
+    try {
+      const cellPos = $from.before(d);
+      const dom = editor.view.nodeDOM(cellPos);
+      const cell = dom instanceof HTMLElement ? (dom.closest('td, th') as HTMLElement | null) : null;
+      if (cell?.isConnected && host.contains(cell)) {
+        const inner =
+          cell.querySelector('p, h1, h2, h3, h4, h5, h6, blockquote, pre, li')
+          ?? cell;
+        if (inner instanceof HTMLElement) return trySetTextCaret(editor, inner, 0);
+      }
+    } catch {
+      break;
+    }
+  }
+
   const table = getTableElementFromHost(host);
   const cell =
     (blockEl.closest('td, th') as HTMLElement | null)
     ?? (table?.querySelector('td, th') as HTMLElement | null);
   if (!cell) return false;
-  const inner = cell.querySelector('p') ?? cell;
+  const inner = cell.querySelector('p, h1, h2, h3, h4, h5, h6') ?? cell;
   if (inner instanceof HTMLElement) return trySetTextCaret(editor, inner, 0);
   return false;
+}
+
+/** 无选区时选中当前文本块内容，便于对整块应用字体/背景色 */
+export function selectTextblockContentRange(editor: Editor): boolean {
+  const { selection } = editor.state;
+  if (!selection.empty) return true;
+
+  const { $from } = selection;
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (!node.isTextblock) continue;
+    const from = $from.start(d);
+    const to = $from.end(d);
+    if (from >= to) return false;
+    editor.chain().focus().setTextSelection({ from, to }).run();
+    return true;
+  }
+  return false;
+}
+
+export function prepareEditorForInlineColor(editor: Editor, blockEl: HTMLElement | null): void {
+  if (!editor.state.selection.empty) return;
+  if (blockEl?.isConnected && editor.view.dom.contains(blockEl)) {
+    syncEditorSelectionToAnchoredBlock(editor, blockEl);
+  }
+  selectTextblockContentRange(editor);
+}
+
+/** 解析当前选区所在的 inline 文本块 DOM（表格内返回 cell 中的 p/h，而非 table host） */
+export function resolveInlineBlockElementFromEditor(editor: Editor): HTMLElement | null {
+  const root = editor.view.dom as HTMLElement;
+  const from = editor.state.selection.from;
+
+  try {
+    const nodeEl = editor.view.nodeDOM?.(from);
+    if (nodeEl instanceof HTMLElement && root.contains(nodeEl)) {
+      const inCell = nodeEl.closest('td, th');
+      if (inCell) {
+        const textBlock = nodeEl.closest('p, h1, h2, h3, h4, h5, h6, blockquote, pre, li') as HTMLElement | null;
+        if (textBlock && inCell.contains(textBlock)) return textBlock;
+      }
+      if (/^(p|h[1-6]|blockquote|pre|li)$/i.test(nodeEl.tagName)) return nodeEl;
+    }
+  } catch { /* ignore */ }
+
+  const domAt = editor.view.domAtPos(from);
+  let n: Node | null = domAt.node;
+  if (n.nodeType === Node.TEXT_NODE) n = n.parentElement;
+  let el = n as HTMLElement | null;
+  while (el && el !== root) {
+    const cell = el.closest('td, th');
+    if (cell && /^(p|h[1-6]|blockquote|pre|li)$/i.test(el.tagName)) return el;
+    if (!cell && /^(p|h[1-6]|blockquote|pre|li)$/i.test(el.tagName)) return el;
+    el = el.parentElement;
+  }
+  return null;
 }
 
 /**
@@ -44,6 +122,8 @@ export function syncEditorSelectionToAnchoredBlock(editor: Editor, blockEl: HTML
     syncSelectionToTableBlock(editor, blockEl);
     return;
   }
+
+  if (syncImageNodeSelection(editor, blockEl)) return;
 
   const divider =
     blockEl.classList.contains('feishu-divider')

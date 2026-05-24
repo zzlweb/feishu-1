@@ -1,0 +1,150 @@
+.feishu-image-crop-layer {
+  position: absolute;
+  z-index: 12;
+  pointer-events: auto;
+  touch-action: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  &__middle {
+    display: flex;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+  }
+
+  &__shade {
+    background: rgba(0, 0, 0, 0.35);
+    flex-shrink: 0;
+    pointer-events: none;
+
+    &--top,
+    &--bottom {
+      width: 100%;
+    }
+  }
+
+  &__box {
+    position: absolute;
+    box-sizing: border-box;
+    border: 1px dashed #8f959e;
+    cursor: move;
+    touch-action: none;
+  }
+
+  &__move {
+    position: absolute;
+    inset: 0;
+    cursor: move;
+  }
+
+  &__handle {
+    position: absolute;
+    touch-action: none;
+    z-index: 1;
+
+    &--nw {
+      top: -1px;
+      left: -1px;
+      width: 14px;
+      height: 14px;
+      border-top: 3px solid #1f2329;
+      border-left: 3px solid #1f2329;
+      cursor: nwse-resize;
+    }
+
+    &--ne {
+      top: -1px;
+      right: -1px;
+      width: 14px;
+      height: 14px;
+      border-top: 3px solid #1f2329;
+      border-right: 3px solid #1f2329;
+      cursor: nesw-resize;
+    }
+
+    &--sw {
+      bottom: -1px;
+      left: -1px;
+      width: 14px;
+      height: 14px;
+      border-bottom: 3px solid #1f2329;
+      border-left: 3px solid #1f2329;
+      cursor: nesw-resize;
+    }
+
+    &--se {
+      bottom: -1px;
+      right: -1px;
+      width: 14px;
+      height: 14px;
+      border-bottom: 3px solid #1f2329;
+      border-right: 3px solid #1f2329;
+      cursor: nwse-resize;
+    }
+
+    &--n {
+      top: -2px;
+      left: 50%;
+      width: 28px;
+      height: 4px;
+      margin-left: -14px;
+      background: #1f2329;
+      border-radius: 1px;
+      cursor: ns-resize;
+    }
+
+    &--s {
+      bottom: -2px;
+      left: 50%;
+      width: 28px;
+      height: 4px;
+      margin-left: -14px;
+      background: #1f2329;
+      border-radius: 1px;
+      cursor: ns-resize;
+    }
+
+    &--e {
+      top: 50%;
+      right: -2px;
+      width: 4px;
+      height: 28px;
+      margin-top: -14px;
+      background: #1f2329;
+      border-radius: 1px;
+      cursor: ew-resize;
+    }
+
+    &--w {
+      top: 50%;
+      left: -2px;
+      width: 4px;
+      height: 28px;
+      margin-top: -14px;
+      background: #1f2329;
+      border-radius: 1px;
+      cursor: ew-resize;
+    }
+  }
+}
+
+.feishu-image-block-wrap.is-cropping,
+.feishu-file-block.is-cropping {
+  .feishu-image-block,
+  .feishu-media-preview {
+    outline: none;
+  }
+
+  .feishu-image-block.is-selected,
+  &.is-selected .feishu-media-preview__image {
+    outline: none;
+  }
+
+  .docx-menu-container {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, 0);
+  }
+}
