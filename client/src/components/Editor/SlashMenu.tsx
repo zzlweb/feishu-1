@@ -3,7 +3,12 @@ import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
 import { IconChevronMenuEnd } from '../../icons/feishuDoc';
 import type { SlashMenuItem } from './slashMenuConfig';
-import { insertTemplateContent, SLASH_SECTIONS, itemMatchesQuery } from './slashMenuConfig';
+import {
+  insertTemplateContent,
+  resolveSlashInsertRange,
+  SLASH_SECTIONS,
+  itemMatchesQuery,
+} from './slashMenuConfig';
 import TableGridPicker from './TableGridPicker';
 import ColumnsCountPicker from './ColumnsCountPicker';
 import TemplatePicker from './TemplatePicker';
@@ -11,6 +16,10 @@ import ButtonTypePicker from './ButtonTypePicker';
 import { insertFeishuTable } from './tableInsert';
 import { insertFeishuColumns } from './columnsInsert';
 import { computeSubmenuFlyoutPosition } from './contextSubmenuFlyout';
+import {
+  TEMPLATE_PICKER_LIST_HEIGHT,
+  TEMPLATE_PICKER_LIST_WIDTH,
+} from './templatePickerConfig';
 import './SlashMenu.less';
 
 interface Props {
@@ -35,6 +44,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     rect: DOMRect;
   } | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const templateInsertRangeRef = useRef<{ from: number; to: number } | null>(null);
 
   const filteredSections = SLASH_SECTIONS.map(s => ({
     ...s,
@@ -140,6 +150,9 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
 
   const openSubmenu = (kind: 'tableGrid' | 'columnsCount' | 'templateList' | 'buttonType', el: HTMLElement) => {
     hideTooltip();
+    if (kind === 'templateList') {
+      templateInsertRangeRef.current = resolveSlashInsertRange(editor);
+    }
     setActiveSubmenu({ kind, rect: el.getBoundingClientRect() });
   };
 
@@ -200,8 +213,24 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const submenuPosition = activeSubmenu
     ? computeSubmenuFlyoutPosition({
         trigger: activeSubmenu.rect,
-        panelWidth: activeSubmenu.kind === 'tableGrid' ? 304 : activeSubmenu.kind === 'columnsCount' ? 184 : activeSubmenu.kind === 'buttonType' ? 230 : 264,
-        panelHeight: activeSubmenu.kind === 'tableGrid' ? 334 : activeSubmenu.kind === 'columnsCount' ? 164 : activeSubmenu.kind === 'buttonType' ? 144 : 340,
+        panelWidth: activeSubmenu.kind === 'tableGrid'
+          ? 304
+          : activeSubmenu.kind === 'columnsCount'
+            ? 184
+            : activeSubmenu.kind === 'buttonType'
+              ? 230
+              : activeSubmenu.kind === 'templateList'
+                ? TEMPLATE_PICKER_LIST_WIDTH
+                : 264,
+        panelHeight: activeSubmenu.kind === 'tableGrid'
+          ? 334
+          : activeSubmenu.kind === 'columnsCount'
+            ? 164
+            : activeSubmenu.kind === 'buttonType'
+              ? 144
+              : activeSubmenu.kind === 'templateList'
+                ? TEMPLATE_PICKER_LIST_HEIGHT
+                : 340,
         gap: 8,
         pad: 8,
       })
@@ -210,12 +239,13 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   const submenuPortal = activeSubmenu && submenuPosition
       ? createPortal(
         <div
-          className="slash-submenu-portal"
+          className={`slash-submenu-portal${activeSubmenu.kind === 'templateList' ? ' slash-submenu-portal--template' : ''}`}
           style={{
             position: 'fixed',
             left: submenuPosition.left,
             top: submenuPosition.top,
             zIndex: 10030,
+            overflow: activeSubmenu.kind === 'templateList' ? 'visible' : undefined,
           }}
           onMouseEnter={onMouseEnter}
           onMouseLeave={e => closeSubmenuByPointer(e.relatedTarget)}
@@ -234,7 +264,8 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
               <TemplatePicker
                 onPick={template => {
                   onBeforeSelect?.();
-                  insertTemplateContent(editor, template.content);
+                  insertTemplateContent(editor, template.content, templateInsertRangeRef.current);
+                  templateInsertRangeRef.current = null;
                   (editor as any).__plusInsertRange = null;
                   onClose();
                 }}

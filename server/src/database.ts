@@ -65,18 +65,18 @@ function getDefaultTemplates(): TemplateRecord[] {
   const t = (offsetSeconds: number) => new Date(baseTime - offsetSeconds * 1000).toISOString();
   return [
     {
-      id: 'tpl-reading-notes',
-      title: '读书笔记',
-      author: '系统',
-      created_at: t(0),
-      content: `<h1>📚 读书笔记</h1><p>在此记录你阅读书籍后的收获、思考与行动指南。</p><div class="feishu-columns-node" data-local-block="columns"><div class="feishu-columns-block__col-wrap" data-width-ratio="50" data-local-column="true"><div class="feishu-columns-block__col"><h3>💡 核心观点</h3><ul><li>核心观点 1</li><li>核心观点 2</li></ul></div></div><div class="feishu-columns-block__col-wrap" data-width-ratio="50" data-local-column="true"><div class="feishu-columns-block__col"><h3>✍️ 金句摘录</h3><blockquote>“这里是书中让你产生强烈共鸣的一句话。”</blockquote></div></div></div><h3>🎯 行动清单</h3><ul data-type="taskList"><li data-block-id="task-reading-1" id="task-reading-1" data-type="taskItem" data-checked="false"><label><input type="checkbox"><span></span></label><div><p>转化书中知识，制定个人的具体行动步骤</p></div></li></ul>`
-    },
-    {
       id: 'tpl-personal-summary',
       title: '个人总结',
       author: '系统',
-      created_at: t(1),
+      created_at: t(0),
       content: `<h1>📝 个人阶段总结</h1><p>回顾过去一期的工作，总结经验，反思不足，规划未来。</p><h3>🌟 工作业绩与核心贡献</h3><table class="feishu-table" style="min-width: 600px;"><colgroup><col style="width: 150px;"><col><col style="width: 100px;"></colgroup><tbody><tr><th class="feishu-table__header-cell" colspan="1" rowspan="1"><p>关键任务</p></th><th class="feishu-table__header-cell" colspan="1" rowspan="1"><p>完成情况与成果</p></th><th class="feishu-table__header-cell" colspan="1" rowspan="1"><p>自我评分</p></th></tr><tr><td class="feishu-table__cell" colspan="1" rowspan="1"><p>核心项目 A</p></td><td class="feishu-table__cell" colspan="1" rowspan="1"><p>按时交付，数据提升 20%</p></td><td class="feishu-table__cell" colspan="1" rowspan="1"><p>⭐⭐⭐⭐⭐</p></td></tr><tr><td class="feishu-table__cell" colspan="1" rowspan="1"><p>日常运营</p></td><td class="feishu-table__cell" colspan="1" rowspan="1"><p>优化了工作流，减少 30% 耗时</p></td><td class="feishu-table__cell" colspan="1" rowspan="1"><p>⭐⭐⭐⭐</p></td></tr></tbody></table><h3>🔍 反思与待改进点</h3><ul><li>时间管理上需要更合理地安排优先级。</li><li>跨部门协作时应更早进行沟通对齐。</li></ul><h3>🚀 下一阶段工作规划</h3><ol><li>全力保障项目 B 的顺利上线。</li><li>持续优化系统性能与用户体验。</li></ol>`
+    },
+    {
+      id: 'tpl-reading-notes',
+      title: '读书笔记',
+      author: '系统',
+      created_at: t(1),
+      content: `<h1>📚 读书笔记</h1><p>在此记录你阅读书籍后的收获、思考与行动指南。</p><div class="feishu-columns-node" data-local-block="columns"><div class="feishu-columns-block__col-wrap" data-width-ratio="50" data-local-column="true"><div class="feishu-columns-block__col"><h3>💡 核心观点</h3><ul><li>核心观点 1</li><li>核心观点 2</li></ul></div></div><div class="feishu-columns-block__col-wrap" data-width-ratio="50" data-local-column="true"><div class="feishu-columns-block__col"><h3>✍️ 金句摘录</h3><blockquote>“这里是书中让你产生强烈共鸣的一句话。”</blockquote></div></div></div><h3>🎯 行动清单</h3><ul data-type="taskList"><li data-block-id="task-reading-1" id="task-reading-1" data-type="taskItem" data-checked="false"><label><input type="checkbox"><span></span></label><div><p>转化书中知识，制定个人的具体行动步骤</p></div></li></ul>`
     },
     {
       id: 'tpl-swot-analysis',

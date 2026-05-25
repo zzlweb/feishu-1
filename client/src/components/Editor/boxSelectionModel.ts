@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/react';
+import type { Node as ProseNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import { getBlockAtPos } from './blockOperations';
 import { resolveTableHostFromElement } from './tableDom';
@@ -61,28 +62,72 @@ const INTERACTIVE_CONTROL_SELECTOR =
 const WIDGET_BLOCK_SELECTOR =
   '[data-local-block], [contenteditable="false"], img, video, audio, iframe, .feishu-image-block, .feishu-local-card, .feishu-button-block, .feishu-formula-editor, .feishu-bitable-block, .feishu-sync-block, .feishu-media-preview, .feishu-file-actions, .feishu-divider, .feishu-code-block__toolbar, .feishu-highlight-block-wrap';
 
-const WIDGET_BLOCK_MATCHERS = WIDGET_BLOCK_SELECTOR.split(',').map(item => item.trim());
-
-/** 判断 li 是否为任务列表项（含 checkbox 控件，整行视为控件占位区域） */
-function isTaskListItem(li: Element): boolean {
+/** 判断 li 是否为任务列表项 */
+export function isTaskListItem(li: Element | null): boolean {
+  if (!li) return false;
   return Boolean(li.closest('ul[data-type="taskList"]'));
+}
+
+/** 待办项正文区域（不含 checkbox），允许从此处发起框选 / 点选 */
+export function isTaskItemTextArea(element: Element): boolean {
+  const li = element.closest('ul[data-type="taskList"] > li');
+  if (!(li instanceof HTMLElement)) return false;
+  if (element.closest('ul[data-type="taskList"] > li > label')) return false;
+  return li.contains(element);
+}
+
+/** 列表项正文区域（有序 / 无序 / 待办），允许从此处发起框选 */
+export function isListItemTextArea(element: Element): boolean {
+  if (isTaskItemTextArea(element)) return true;
+  const li = element.closest('ul:not([data-type="taskList"]) > li, ol > li');
+  if (!(li instanceof HTMLElement)) return false;
+  return li.contains(element);
+}
+
+export function isListTextPoint(element: Element, clientX: number, clientY: number): boolean {
+  if (!isListItemTextArea(element)) return false;
+  const li = element.closest('li');
+  if (!li) return false;
+
+  const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const text = walker.currentNode;
+    if (!text.textContent?.trim()) continue;
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    for (const rect of Array.from(range.getClientRects())) {
+      if (
+        clientX >= rect.left - 1
+        && clientX <= rect.right + 1
+        && clientY >= rect.top
+        && clientY <= rect.bottom
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function isListSelectableUnit(unit: SelectableUnit): boolean {
+  return unit.kind === 'listItem';
+}
+
+/** @deprecated 使用 isListSelectableUnit */
+export function isTaskSelectableUnit(unit: SelectableUnit): boolean {
+  return isListSelectableUnit(unit);
+}
+
+export function isListItemEmpty(li: HTMLElement): boolean {
+  const text = li.textContent?.replace(/\u200b/g, '').trim() ?? '';
+  return text.length === 0;
 }
 
 /** 控件或块级 widget 已占位的区域，不允许作为框选起点 */
 export function isControlOccupiedElement(element: Element): boolean {
+  if (element.closest('ul[data-type="taskList"] > li > label')) return true;
   if (element.closest(INTERACTIVE_CONTROL_SELECTOR)) return true;
   if (element.closest(WIDGET_BLOCK_SELECTOR)) return true;
-  // taskItem（任务列表 li）整行由 checkbox 控件占据，不允许从该区域发起框选
-  const li = element.closest('li');
-  if (li && isTaskListItem(li)) return true;
-  return false;
-}
-
-/** 框选时排除控件块 / 待办项，避免选中 checkbox、卡片、图片等占位区域 */
-function isMarqueeExcludedUnit(unit: SelectableUnit): boolean {
-  const { dom } = unit;
-  if (unit.kind === 'listItem' && isTaskListItem(dom)) return true;
-  if (WIDGET_BLOCK_MATCHERS.some(selector => dom.matches(selector))) return true;
   return false;
 }
 
@@ -153,6 +198,34 @@ function resolveListItemRange(editor: Editor, li: HTMLElement): { from: number; 
 function resolveBlockRange(editor: Editor, dom: HTMLElement): { from: number; to: number } | null {
   try {
     const pos = editor.view.posAtDOM(dom, 0);
+    const preferredType =
+      dom.closest('.feishu-table-host, .tableWrapper') ? 'table'
+      : dom.closest('.feishu-sync-block') ? 'localSyncBlock'
+      : dom.closest('.feishu-bitable-block') ? 'localBitableBlock'
+      : dom.closest('.feishu-div-table') ? 'localDivTableBlock'
+      : dom.closest('.feishu-button-block') ? 'localButtonBlock'
+      : dom.closest('.feishu-formula-editor') ? 'localFormulaBlock'
+      : dom.closest('.feishu-file-block') ? 'localFileBlock'
+      : dom.closest('.feishu-local-card') ? 'localEmbedBlock'
+      : dom.closest('.feishu-divider') ? 'horizontalRule'
+      : dom.closest('.feishu-highlight-block-wrap') ? 'highlightBlock'
+      : null;
+
+    if (preferredType) {
+      const directNode = editor.state.doc.nodeAt(pos);
+      if (directNode?.type.name === preferredType) {
+        return { from: pos, to: pos + directNode.nodeSize };
+      }
+
+      const $pos = editor.state.doc.resolve(Math.min(pos, editor.state.doc.content.size));
+      for (let depth = $pos.depth; depth > 0; depth -= 1) {
+        const node = $pos.node(depth);
+        if (node.type.name !== preferredType) continue;
+        const from = $pos.before(depth);
+        return { from, to: from + node.nodeSize };
+      }
+    }
+
     const block = getBlockAtPos(editor, pos);
     if (!block) return null;
     return { from: block.from, to: block.to };
@@ -169,6 +242,44 @@ function pushUnit(
   if (!unit || seen.has(unit.id)) return;
   seen.add(unit.id);
   units.push(unit);
+}
+
+function collectListItemsFromLists(
+  editor: Editor,
+  lists: Iterable<Element>,
+  units: SelectableUnit[],
+  seen: Set<string>,
+): void {
+  for (const list of lists) {
+    if (!(list instanceof HTMLElement)) continue;
+    Array.from(list.querySelectorAll(':scope > li')).forEach((li, itemIndex) => {
+      if (!(li instanceof HTMLElement)) return;
+      const range = resolveListItemRange(editor, li);
+      if (!range) return;
+      pushUnit(units, seen, {
+        id: `li-${range.from}-${itemIndex}`,
+        from: range.from,
+        to: range.to,
+        dom: li,
+        kind: 'listItem',
+      });
+    });
+  }
+}
+
+/** 表格内已选中列表项时，不再选中整张表，避免误删 */
+export function normalizeSelectedUnits(units: SelectableUnit[]): SelectableUnit[] {
+  const listItems = units.filter(unit => unit.kind === 'listItem');
+  if (listItems.length === 0) return units;
+
+  return units.filter(unit => {
+    if (unit.kind !== 'block') return true;
+    const tableHost = unit.dom.matches('.feishu-table-host, .tableWrapper')
+      ? unit.dom
+      : resolveTableHostFromElement(unit.dom);
+    if (!tableHost) return true;
+    return !listItems.some(item => tableHost.contains(item.dom));
+  });
 }
 
 /** 从 DOM 顶层块收集可框选项（比 nodeDOM 更稳定） */
@@ -188,6 +299,7 @@ function collectFromContainer(editor: Editor, container: HTMLElement, units: Sel
         dom: tableHost,
         kind: 'block',
       });
+      collectListItemsFromLists(editor, tableHost.querySelectorAll('ul, ol'), units, seen);
       continue;
     }
 
@@ -200,18 +312,7 @@ function collectFromContainer(editor: Editor, container: HTMLElement, units: Sel
 
     const tag = child.tagName.toLowerCase();
     if (tag === 'ul' || tag === 'ol') {
-      Array.from(child.querySelectorAll(':scope > li')).forEach((li, itemIndex) => {
-        if (!(li instanceof HTMLElement)) return;
-        const range = resolveListItemRange(editor, li);
-        if (!range) return;
-        pushUnit(units, seen, {
-          id: `li-${range.from}-${itemIndex}`,
-          from: range.from,
-          to: range.to,
-          dom: li,
-          kind: 'listItem',
-        });
-      });
+      collectListItemsFromLists(editor, [child], units, seen);
       continue;
     }
 
@@ -219,6 +320,7 @@ function collectFromContainer(editor: Editor, container: HTMLElement, units: Sel
       child.classList.contains('feishu-code-block') ? child
       : child.classList.contains('feishu-highlight-block-wrap') ? child
       : child.classList.contains('feishu-divider') ? child
+      : child.matches('.feishu-image-block-wrap, .feishu-file-block, .feishu-button-block, .feishu-formula-editor, .feishu-bitable-block, .feishu-sync-block, .feishu-local-card, [data-local-block]') ? child
       : child;
 
     const range = resolveBlockRange(editor, blockEl);
@@ -260,17 +362,17 @@ export function findUnitsInClientRect(editor: Editor, rect: ClientRect): Selecta
   const height = rect.bottom - rect.top;
   if (width < 2 && height < 2) return [];
 
-  return collectSelectableUnits(editor).filter(unit => {
+  const matched = collectSelectableUnits(editor).filter(unit => {
     if (!unit.dom.isConnected) return false;
-    if (isMarqueeExcludedUnit(unit)) return false;
     const bounds = unit.dom.getBoundingClientRect();
     return bounds.width > 0 && bounds.height > 0 && clientRectsIntersect(rect, bounds);
   });
+  return normalizeSelectedUnits(matched);
 }
 
 export function findSelectableUnitAtPoint(editor: Editor, clientX: number, clientY: number): SelectableUnit | null {
   const hits = collectSelectableUnits(editor).filter(unit => {
-    if (!unit.dom.isConnected || isMarqueeExcludedUnit(unit)) return false;
+    if (!unit.dom.isConnected) return false;
     const rect = unit.dom.getBoundingClientRect();
     return (
       clientX >= rect.left
@@ -287,6 +389,40 @@ export function findSelectableUnitAtPoint(editor: Editor, clientX: number, clien
   })[0];
 }
 
+function expandListDeleteRange(doc: ProseNode, from: number, to: number): { from: number; to: number } {
+  try {
+    const clamped = Math.max(0, Math.min(from, doc.content.size));
+    const $from = doc.resolve(clamped);
+
+    const parentType = $from.parent.type.name;
+    const nodeAfter = $from.nodeAfter;
+    if (
+      (parentType === 'bulletList' || parentType === 'orderedList' || parentType === 'taskList')
+      && (nodeAfter?.type.name === 'listItem' || nodeAfter?.type.name === 'taskItem')
+      && clamped + nodeAfter.nodeSize === to
+      && $from.parent.childCount === 1
+      && $from.depth > 0
+    ) {
+      const parentFrom = $from.before($from.depth);
+      return { from: parentFrom, to: parentFrom + $from.parent.nodeSize };
+    }
+
+    for (let depth = $from.depth; depth > 0; depth -= 1) {
+      const node = $from.node(depth);
+      if (node.type.name !== 'listItem' && node.type.name !== 'taskItem') continue;
+      const parent = $from.node(depth - 1);
+      if (parent.childCount === 1) {
+        const parentFrom = $from.before(depth - 1);
+        return { from: parentFrom, to: parentFrom + parent.nodeSize };
+      }
+      return { from, to };
+    }
+  } catch {
+    /* keep range */
+  }
+  return { from, to };
+}
+
 export function deleteSelectableUnits(editor: Editor, units: SelectableUnit[]): boolean {
   if (units.length === 0) return false;
 
@@ -296,8 +432,9 @@ export function deleteSelectableUnits(editor: Editor, units: SelectableUnit[]): 
 
   let tr = editor.state.tr;
   for (const { from, to } of ranges) {
-    if (from >= 0 && to <= tr.doc.content.size && from < to) {
-      tr = tr.delete(from, to);
+    const expanded = expandListDeleteRange(tr.doc, from, to);
+    if (expanded.from >= 0 && expanded.to <= tr.doc.content.size && expanded.from < expanded.to) {
+      tr = tr.delete(expanded.from, expanded.to);
     }
   }
 
@@ -375,7 +512,7 @@ export function moveSelectableUnits(editor: Editor, units: SelectableUnit[], dir
   return true;
 }
 
-/** 文档编辑区域：仅块间空白 / 编辑区边距可按下左键拖动框选 */
+/** 文档编辑区域：仅从块间空白或编辑区边距按下左键拖动框选。 */
 export function canStartBoxSelect(
   target: EventTarget | null,
   editorArea: HTMLElement,

@@ -66,6 +66,12 @@ function deriveBlockId(node: ProseNode): string {
   return makeFeishuBlockId(node.type.name);
 }
 
+function makeUniqueBlockId(typeName: string, seen: Set<string>): string {
+  let id = makeFeishuBlockId(typeName);
+  while (seen.has(id)) id = makeFeishuBlockId(typeName);
+  return id;
+}
+
 function renderBlockIdAttrs(attributes: Record<string, unknown>) {
   const blockId = sanitizeFeishuBlockId(attributes.blockId);
   if (!blockId) return {};
@@ -101,16 +107,26 @@ export const FeishuBlockId = Extension.create({
       new Plugin({
         key: new PluginKey('feishuBlockIdAssign'),
         appendTransaction(transactions, _oldState, newState) {
-          if (!transactions.some(tr => tr.docChanged)) return null;
+          if (!transactions.some(tr => tr.docChanged || tr.getMeta('feishu-normalize-block-ids'))) return null;
           const tr = newState.tr;
           let modified = false;
+          const seen = new Set<string>();
 
           newState.doc.descendants((node, pos) => {
             if (!FEISHU_BLOCK_ID_TYPES.includes(node.type.name)) return;
-            if (readFeishuBlockId(node.attrs)) return;
+            const existing = readFeishuBlockId(node.attrs);
+            const candidate = existing ?? deriveBlockId(node);
+            const blockId = seen.has(candidate)
+              ? makeUniqueBlockId(node.type.name, seen)
+              : candidate;
+            seen.add(blockId);
+            if (existing === blockId) return;
+
+            const nextAttrs: Record<string, unknown> = { ...node.attrs, blockId };
+            if (node.type.name === 'heading') nextAttrs.headingId = blockId;
+            if (node.type.name === 'table') nextAttrs.tableId = blockId;
             tr.setNodeMarkup(pos, undefined, {
-              ...node.attrs,
-              blockId: deriveBlockId(node),
+              ...nextAttrs,
             });
             modified = true;
           });

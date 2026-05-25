@@ -12,8 +12,12 @@ import {
   collectSelectableUnits,
   findSelectableUnitAtPoint,
   findUnitsInClientRect,
+  isListItemTextArea,
+  isListSelectableUnit,
+  isListTextPoint,
   measureUnitBand,
   normalizeClientRect,
+  normalizeSelectedUnits,
   setBoxSelectionStore,
   type ClientRect,
   type SelectableUnit,
@@ -119,10 +123,11 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
   }, [editorAreaRef]);
 
   const selectUnits = useCallback((units: SelectableUnit[]) => {
-    selectedRef.current = units;
-    if (units.length > 0) shiftAnchorIdRef.current = units[0].id;
-    setSelectedUnits(units);
-    syncSelectionBands(units);
+    const normalized = normalizeSelectedUnits(units);
+    selectedRef.current = normalized;
+    if (normalized.length > 0) shiftAnchorIdRef.current = normalized[0].id;
+    setSelectedUnits(normalized);
+    syncSelectionBands(normalized);
   }, [syncSelectionBands]);
 
   const finalizeSelection = useCallback((clientRect: ClientRect) => {
@@ -310,7 +315,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
       document.body.classList.remove('feishu-box-select-dragging');
       stopAutoScroll();
     };
-  }, [beginDrag, editorAreaRef, ensureAutoScroll, finalizeSelection, readOnly, stopAutoScroll, syncSelectionBands, updateDragOverlay]);
+  }, [beginDrag, clearSelection, editorAreaRef, ensureAutoScroll, finalizeSelection, readOnly, selectUnits, stopAutoScroll, syncSelectionBands, updateDragOverlay]);
 
   useEffect(() => {
     if (readOnly || !editor) return;
@@ -333,6 +338,24 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
           editor.view.focus();
           return;
         }
+      }
+
+      const unitAtPoint = findSelectableUnitAtPoint(editor, e.clientX, e.clientY);
+      const targetElement = e.target instanceof Element
+        ? e.target
+        : e.target instanceof Text ? e.target.parentElement : null;
+      if (
+        unitAtPoint
+        && isListSelectableUnit(unitAtPoint)
+        && targetElement
+        && isListItemTextArea(targetElement)
+        && !isListTextPoint(targetElement, e.clientX, e.clientY)
+      ) {
+        if (selectedRef.current.length > 0) clearSelection();
+        e.preventDefault();
+        area.setPointerCapture?.(e.pointerId);
+        pendingDragRef.current = { startX: e.clientX, startY: e.clientY, pointerId: e.pointerId };
+        return;
       }
 
       const canStart = canStartBoxSelect(e.target, area, e.clientX, e.clientY);

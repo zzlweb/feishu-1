@@ -10,6 +10,9 @@ import {
   SlashGlyphTable,
   SlashGlyphImage,
   SlashGlyphSubDoc,
+  SlashGlyphButton,
+  SlashGlyphLink,
+  SlashGlyphFormula,
 } from '../../icons/slashMenuGlyphs';
 
 const S = 16;
@@ -54,6 +57,8 @@ export default function BlockGutterGlyph({ type }: { type: string }) {
     case 'hr':
       return <SlashGlyphDivider size={S} fill={n1} />;
     case 'table':
+    case 'bitable':
+    case 'div-table':
       return <SlashGlyphTable size={S} fill="#52c41a" />;
     case 'image':
       return <SlashGlyphImage size={S} fill={b500} />;
@@ -61,9 +66,18 @@ export default function BlockGutterGlyph({ type }: { type: string }) {
       return <SlashGlyphSubDoc size={S} fill={g500} />;
     case 'embed':
     case 'subdoc':
+    case 'sync':
       return <SlashGlyphSubDoc size={S} fill={b500} />;
     case 'paragraph':
       return <ContextGlyphText size={S} fill={b500} />;
+    case 'button':
+    case 'button-duplicate':
+    case 'button-follow':
+      return <SlashGlyphButton size={S} fill="#597ef7" />;
+    case 'button-link':
+      return <SlashGlyphLink size={S} fill={b500} />;
+    case 'formula':
+      return <SlashGlyphFormula size={S} fill="#8f959e" />;
     default:
       return null;
   }

@@ -180,11 +180,7 @@ export function insertSlashItemAt(editor: Editor, sectionTitle: string, item: Sl
       });
       return;
     case '表格':
-      if (sectionTitle === '多维表格') {
-        chain.insertContentAt(pos, { type: 'localBitableBlock' }).run();
-      } else {
-        insertFeishuTableAt(editor, pos, 3, 3);
-      }
+      insertFeishuTableAt(editor, pos, 3, 3);
       return;
     case '分栏':
       insertFeishuColumnsAt(editor, pos, 2);

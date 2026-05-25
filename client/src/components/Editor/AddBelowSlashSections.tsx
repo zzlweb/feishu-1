@@ -7,6 +7,10 @@ import ColumnsCountPicker from './ColumnsCountPicker';
 import TemplatePicker from './TemplatePicker';
 import ButtonTypePicker from './ButtonTypePicker';
 import { computeSubmenuFlyoutPosition } from './contextSubmenuFlyout';
+import {
+  TEMPLATE_PICKER_LIST_HEIGHT,
+  TEMPLATE_PICKER_LIST_WIDTH,
+} from './templatePickerConfig';
 import type { Template } from '../../types';
 import type { ButtonActionType } from './slashMenuConfig';
 
@@ -40,8 +44,24 @@ export default function AddBelowSlashSections({
   const submenuPosition = activeSubmenu
     ? computeSubmenuFlyoutPosition({
         trigger: activeSubmenu.rect,
-        panelWidth: activeSubmenu.kind === 'tableGrid' ? 304 : activeSubmenu.kind === 'columnsCount' ? 184 : activeSubmenu.kind === 'buttonType' ? 230 : 264,
-        panelHeight: activeSubmenu.kind === 'tableGrid' ? 334 : activeSubmenu.kind === 'columnsCount' ? 164 : activeSubmenu.kind === 'buttonType' ? 144 : 340,
+        panelWidth: activeSubmenu.kind === 'tableGrid'
+          ? 304
+          : activeSubmenu.kind === 'columnsCount'
+            ? 184
+            : activeSubmenu.kind === 'buttonType'
+              ? 230
+              : activeSubmenu.kind === 'templateList'
+                ? TEMPLATE_PICKER_LIST_WIDTH
+                : 264,
+        panelHeight: activeSubmenu.kind === 'tableGrid'
+          ? 334
+          : activeSubmenu.kind === 'columnsCount'
+            ? 164
+            : activeSubmenu.kind === 'buttonType'
+              ? 144
+              : activeSubmenu.kind === 'templateList'
+                ? TEMPLATE_PICKER_LIST_HEIGHT
+                : 340,
         gap: 8,
         pad: 8,
       })
@@ -133,12 +153,13 @@ export default function AddBelowSlashSections({
       ))}
       {activeSubmenu && submenuPosition && createPortal(
         <div
-          className="slash-submenu-portal"
+          className={`slash-submenu-portal${activeSubmenu.kind === 'templateList' ? ' slash-submenu-portal--template' : ''}`}
           style={{
             position: 'fixed',
             left: submenuPosition.left,
             top: submenuPosition.top,
             zIndex: 10080,
+            overflow: activeSubmenu.kind === 'templateList' ? 'visible' : undefined,
           }}
           onMouseDown={e => e.preventDefault()}
         >

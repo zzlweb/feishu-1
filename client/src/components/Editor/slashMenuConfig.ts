@@ -28,7 +28,6 @@ import {
   SlashGlyphFormula,
   SlashGlyphTemplate,
   SlashGlyphSubDoc,
-  SlashGlyphBitableGrid,
 } from '../../icons/slashMenuGlyphs';
 
 export type DocIcon = ComponentType<{
@@ -207,13 +206,28 @@ async function createChildDocument(editor: Editor) {
   });
 }
 
-export function insertTemplateContent(editor: Editor, content: string) {
-  const plusRange = consumePlusInsertRange(editor);
-  if (plusRange) {
-    editor.chain().focus().deleteRange(plusRange).insertContentAt(plusRange.from, content || '<p></p>').run();
-  } else {
-    editor.chain().focus().deleteRange(getSlashRange(editor)).insertContent(content || '<p></p>').run();
+export function resolveSlashInsertRange(editor: Editor): { from: number; to: number } {
+  const plusRange = (editor as any).__plusInsertRange as { from: number; to: number } | null | undefined;
+  if (plusRange && plusRange.from < plusRange.to) {
+    return { from: plusRange.from, to: plusRange.to };
   }
+  return getSlashRange(editor);
+}
+
+export function insertTemplateContent(
+  editor: Editor,
+  content: string,
+  savedRange?: { from: number; to: number } | null,
+) {
+  const plusRange = consumePlusInsertRange(editor);
+  const range = plusRange ?? savedRange ?? getSlashRange(editor);
+  const insertPos = range.from;
+  editor
+    .chain()
+    .focus()
+    .deleteRange(range)
+    .insertContentAt(insertPos, content || '<p></p>')
+    .run();
 }
 
 function insertHighlightBlockFromSlash(editor: Editor) {
@@ -298,13 +312,6 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
       { Icon: SlashGlyphFormula, iconColor: '#8f959e', label: '公式', matchText: 'formula latex math 公式', action: e => replacePlusOrSlash(e, { type: 'localFormulaBlock' }) },
       { Icon: SlashGlyphTemplate, iconColor: '#f5222d', label: '模板', matchText: '模板 template', hasArrow: true, submenu: 'templateList', action: noopSlash },
       { Icon: SlashGlyphSubDoc, iconColor: '#3370ff', label: '子文档', matchText: '子文档 subdoc page', action: e => void createChildDocument(e) },
-    ],
-  },
-  {
-    title: '多维表格',
-    layout: 'list',
-    items: [
-      { Icon: SlashGlyphBitableGrid, iconColor: '#3370ff', label: '表格', matchText: '多维表格 bitable grid', action: e => replacePlusOrSlash(e, { type: 'localBitableBlock' }) },
     ],
   },
 ];

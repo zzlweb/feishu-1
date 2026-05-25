@@ -133,7 +133,7 @@ const Sidebar = forwardRef<HTMLDivElement, SidebarProps>(function Sidebar(
 
                 return (
                   <li
-                    key={heading.id}
+                    key={`${heading.id}-${idx}`}
                     className={`catalogue__list-item indent-level-${heading.level}${
                       activeId === heading.id ? ' active' : ''
                     }${isCollapsed ? ' catalogue__list-item--collapsed' : ''}`}

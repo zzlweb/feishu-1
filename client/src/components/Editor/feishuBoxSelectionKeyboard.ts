@@ -1,4 +1,6 @@
 import { Extension, type Editor } from '@tiptap/core';
+import { NodeSelection } from '@tiptap/pm/state';
+import { OPERABLE_BLOCK_TYPES } from './blockOperations';
 import { boxSelectionStore, collectSelectableUnits, copySelectableUnits, deleteSelectableUnits, moveSelectableUnits } from './boxSelectionModel';
 
 function deleteBoxSelection(editor: Editor): boolean {
@@ -11,6 +13,18 @@ function deleteBoxSelection(editor: Editor): boolean {
   return true;
 }
 
+/** 单击选中的控件块（NodeSelection）也支持 Delete / Backspace 删除 */
+function deleteSelectedControlBlock(editor: Editor): boolean {
+  const { selection } = editor.state;
+  if (!(selection instanceof NodeSelection)) return false;
+  if (!OPERABLE_BLOCK_TYPES.has(selection.node.type.name)) return false;
+  return editor.chain().focus().deleteSelection().run();
+}
+
+function deleteSelectedBlocks(editor: Editor): boolean {
+  return deleteBoxSelection(editor) || deleteSelectedControlBlock(editor);
+}
+
 /** 框选多块后 Enter / Delete / Backspace 批量删除 */
 export const FeishuBoxSelectionKeyboard = Extension.create({
   name: 'feishuBoxSelectionKeyboard',
@@ -19,8 +33,8 @@ export const FeishuBoxSelectionKeyboard = Extension.create({
   addKeyboardShortcuts() {
     return {
       Enter: ({ editor }) => deleteBoxSelection(editor),
-      Delete: ({ editor }) => deleteBoxSelection(editor),
-      Backspace: ({ editor }) => deleteBoxSelection(editor),
+      Delete: ({ editor }) => deleteSelectedBlocks(editor),
+      Backspace: ({ editor }) => deleteSelectedBlocks(editor),
       Escape: ({ editor }) => {
         if (!boxSelectionStore?.isActive()) return false;
         boxSelectionStore.clearSelection();

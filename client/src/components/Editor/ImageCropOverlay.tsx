@@ -175,46 +175,56 @@ export default function ImageCropOverlay({
         className="feishu-image-crop-layer__shade feishu-image-crop-layer__shade--top"
         style={{ height: activeCrop.y }}
       />
-      <div className="feishu-image-crop-layer__middle" style={{ height: activeCrop.height }}>
+      <div
+        className="feishu-image-crop-layer__shade feishu-image-crop-layer__shade--left"
+        style={{
+          top: activeCrop.y,
+          width: activeCrop.x,
+          height: activeCrop.height,
+        }}
+      />
+      <div
+        className="feishu-image-crop-layer__box"
+        style={{
+          left: activeCrop.x,
+          top: activeCrop.y,
+          width: activeCrop.width,
+          height: activeCrop.height,
+        }}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
         <div
-          className="feishu-image-crop-layer__shade feishu-image-crop-layer__shade--left"
-          style={{ width: activeCrop.x }}
+          className="feishu-image-crop-layer__move"
+          onPointerDown={event => startDrag('move', event)}
         />
-        <div
-          className="feishu-image-crop-layer__box"
-          style={{
-            left: activeCrop.x,
-            top: activeCrop.y,
-            width: activeCrop.width,
-            height: activeCrop.height,
-          }}
-          onPointerMove={onPointerMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-        >
+        {(['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'] as DragHandle[]).map(handle => (
           <div
-            className="feishu-image-crop-layer__move"
-            onPointerDown={event => startDrag('move', event)}
+            key={handle}
+            className={`feishu-image-crop-layer__handle feishu-image-crop-layer__handle--${handle}`}
+            onPointerDown={event => startDrag(handle, event)}
+            onPointerMove={onPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
           />
-          {(['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'] as DragHandle[]).map(handle => (
-            <div
-              key={handle}
-              className={`feishu-image-crop-layer__handle feishu-image-crop-layer__handle--${handle}`}
-              onPointerDown={event => startDrag(handle, event)}
-              onPointerMove={onPointerMove}
-              onPointerUp={endDrag}
-              onPointerCancel={endDrag}
-            />
-          ))}
-        </div>
-        <div
-          className="feishu-image-crop-layer__shade feishu-image-crop-layer__shade--right"
-          style={{ width: Math.max(0, rendered.width - activeCrop.x - activeCrop.width) }}
-        />
+        ))}
       </div>
       <div
+        className="feishu-image-crop-layer__shade feishu-image-crop-layer__shade--right"
+        style={{
+          left: activeCrop.x + activeCrop.width,
+          top: activeCrop.y,
+          width: Math.max(0, rendered.width - activeCrop.x - activeCrop.width),
+          height: activeCrop.height,
+        }}
+      />
+      <div
         className="feishu-image-crop-layer__shade feishu-image-crop-layer__shade--bottom"
-        style={{ height: Math.max(0, rendered.height - activeCrop.y - activeCrop.height) }}
+        style={{
+          top: activeCrop.y + activeCrop.height,
+          height: Math.max(0, rendered.height - activeCrop.y - activeCrop.height),
+        }}
       />
     </div>
   );

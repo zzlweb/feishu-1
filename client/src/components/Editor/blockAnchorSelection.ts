@@ -1,4 +1,4 @@
-import { TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/react';
 import { syncImageNodeSelection } from './imageBlockUtils';
 import { getTableElementFromHost, resolveTableHostFromElement } from './tableDom';
@@ -124,6 +124,30 @@ export function syncEditorSelectionToAnchoredBlock(editor: Editor, blockEl: HTML
   }
 
   if (syncImageNodeSelection(editor, blockEl)) return;
+
+  const selectableAtom = blockEl.closest(
+    '.feishu-button-block, .feishu-formula-editor, .feishu-local-card, .feishu-bitable-block, .feishu-div-table, .feishu-file-block, .feishu-sync-block',
+  );
+  if (selectableAtom instanceof HTMLElement && view.dom.contains(selectableAtom)) {
+    try {
+      const pos = view.posAtDOM(selectableAtom, 0);
+      if (selectableAtom.classList.contains('feishu-sync-block')) {
+        const $pos = editor.state.doc.resolve(Math.min(pos, editor.state.doc.content.size));
+        for (let depth = $pos.depth; depth > 0; depth -= 1) {
+          if ($pos.node(depth).type.name !== 'localSyncBlock') continue;
+          editor.chain().focus().setNodeSelection($pos.before(depth)).run();
+          return;
+        }
+      }
+      const node = editor.state.doc.nodeAt(pos);
+      if (node && NodeSelection.isSelectable(node)) {
+        editor.chain().focus().setNodeSelection(pos).run();
+        return;
+      }
+    } catch {
+      /* keep selection */
+    }
+  }
 
   const divider =
     blockEl.classList.contains('feishu-divider')

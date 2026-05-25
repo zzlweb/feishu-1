@@ -60,6 +60,7 @@ test('shows block menu (not table menu) after leaving table hover for text below
 
   const tableHost = page.locator('.feishu-table-host, .tableWrapper').first();
   const tableHandle = page.locator('.feishu-table-chrome__handle').first();
+  await tableHost.hover();
   await tableHandle.hover();
   await expect(page.locator('.context-menu')).toBeVisible();
 

@@ -15,7 +15,6 @@ import Image from '@tiptap/extension-image';
 import HorizontalRule from '@tiptap/extension-horizontal-rule';
 import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { common, createLowlight } from 'lowlight';
-import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { MessagePlugin } from 'tdesign-react';
@@ -1221,19 +1220,18 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
   const color = getButtonColor(colorName);
   const text = node.attrs.text || '按钮';
   const url = node.attrs.url || '';
-  const [panelOpen, setPanelOpen] = useState(selected);
+  const [panelOpen, setPanelOpen] = useState(() => selected && editor.isEditable);
+  const [panelPlacement, setPanelPlacement] = useState<'above' | 'below'>('below');
   const [draftText, setDraftText] = useState(text);
   const [draftActionType, setDraftActionType] = useState<ButtonActionType>(actionType);
   const [draftUrl, setDraftUrl] = useState(url);
   const [draftColor, setDraftColor] = useState<ButtonColorName>(colorName);
+  const previewButtonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLFormElement>(null);
   const documentId = String((editor as any).__documentId || '');
   const isFollowed = actionType === 'follow' && documentId
     ? window.localStorage.getItem(`feishu-follow-doc:${documentId}`) === 'true'
     : false;
-
-  useEffect(() => {
-    if (selected) setPanelOpen(true);
-  }, [selected]);
 
   useEffect(() => {
     if (!panelOpen) return;
@@ -1242,6 +1240,29 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
     setDraftUrl(url);
     setDraftColor(colorName);
   }, [actionType, colorName, panelOpen, text, url]);
+
+  useLayoutEffect(() => {
+    if (!panelOpen) return;
+
+    const updatePlacement = () => {
+      const trigger = previewButtonRef.current;
+      const panel = panelRef.current;
+      if (!trigger || !panel) return;
+      const triggerRect = trigger.getBoundingClientRect();
+      const panelHeight = panel.getBoundingClientRect().height;
+      const spaceAbove = triggerRect.top - 12;
+      const spaceBelow = window.innerHeight - triggerRect.bottom - 12;
+      setPanelPlacement(spaceBelow >= panelHeight || spaceBelow >= spaceAbove ? 'below' : 'above');
+    };
+
+    updatePlacement();
+    window.addEventListener('resize', updatePlacement);
+    window.addEventListener('scroll', updatePlacement, true);
+    return () => {
+      window.removeEventListener('resize', updatePlacement);
+      window.removeEventListener('scroll', updatePlacement, true);
+    };
+  }, [draftActionType, panelOpen]);
 
   const runButtonAction = async () => {
     const href = normalizeBlockUrl(url);
@@ -1281,7 +1302,7 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
   const selectThisButton = () => {
     const pos = typeof getPos === 'function' ? getPos() : null;
     if (typeof pos === 'number') {
-      editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, pos)));
+      editor.chain().focus().setNodeSelection(pos).run();
     }
   };
 
@@ -1291,6 +1312,10 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
   };
 
   const confirmPanel = () => {
+    if (draftActionType === 'link' && !draftUrl.trim()) {
+      void MessagePlugin.warning('请填写链接地址');
+      return;
+    }
     const nextText = draftText.trim() || BUTTON_ACTION_LABELS[draftActionType];
     updateAttributes({
       text: nextText,
@@ -1299,6 +1324,7 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
       color: draftColor,
     });
     setPanelOpen(false);
+    window.requestAnimationFrame(() => editor.view.focus());
   };
 
   const cancelPanel = () => {
@@ -1307,6 +1333,7 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
     setDraftUrl(url);
     setDraftColor(colorName);
     setPanelOpen(false);
+    window.requestAnimationFrame(() => editor.view.focus());
   };
 
   const buttonStyle = {
@@ -1323,24 +1350,35 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
     >
       <div className="feishu-button-block__preview">
         <button
+          ref={previewButtonRef}
           type="button"
           className="feishu-action-button"
           style={buttonStyle}
           onMouseDown={event => event.preventDefault()}
-          onClick={() => {
-            if (editor.isEditable) {
+          onClick={event => {
+            if (!editor.isEditable) {
+              void runButtonAction();
+              return;
+            }
+            if (event.shiftKey || (actionType === 'link' && !url.trim())) {
               openPanel();
+              return;
+            }
+            if (!selected) {
+              selectThisButton();
               return;
             }
             void runButtonAction();
           }}
+          title={editor.isEditable && url.trim() ? '首次点击选中按钮，再次点击执行；Shift + 点击编辑按钮' : undefined}
         >
           {text}
         </button>
       </div>
       {panelOpen && editor.isEditable && (
         <form
-          className="button-panel"
+          ref={panelRef}
+          className={`button-panel button-panel--${panelPlacement}`}
           onMouseDown={event => event.stopPropagation()}
           onSubmit={event => {
             event.preventDefault();
@@ -1481,17 +1519,29 @@ const LocalButtonBlock = TiptapNode.create({
         parseHTML: element => element.getAttribute('data-url') || '',
         renderHTML: attributes => ({ 'data-url': attributes.url }),
       },
+      color: {
+        default: 'blue',
+        parseHTML: element => normalizeButtonColor(element.getAttribute('data-color')),
+        renderHTML: attributes => ({ 'data-color': normalizeButtonColor(attributes.color) }),
+      },
     };
   },
   parseHTML() {
     return [{ tag: 'div[data-local-block="button"]' }, { tag: 'button[data-local-block="button"]' }];
   },
-  renderHTML({ HTMLAttributes }) {
-    const href = normalizeBlockUrl(String(HTMLAttributes.url || ''));
-    const actionType = normalizeButtonActionType(HTMLAttributes.actionType);
-    const button = ['span', { class: 'feishu-action-button' }, HTMLAttributes.text || '按钮'];
+  renderHTML({ node, HTMLAttributes }) {
+    const { text, url, actionType: rawActionType, color: rawColor } = node.attrs;
+    const href = normalizeBlockUrl(String(url || ''));
+    const actionType = normalizeButtonActionType(rawActionType);
+    const color = getButtonColor(rawColor);
+    const button = ['span', {
+      class: 'feishu-action-button',
+      style: `--button-bg: ${color.bg}; --button-color: ${color.text}; --button-border: ${color.border};`,
+    }, text || '按钮'];
     return ['div', { ...HTMLAttributes, 'data-local-block': 'button', class: `feishu-button-block feishu-button-block--${actionType}` },
-      actionType === 'link' && href ? ['a', { href, class: 'feishu-button-block__link' }, button] : button,
+      actionType === 'link' && href
+        ? ['a', { href, target: '_blank', rel: 'noopener noreferrer', class: 'feishu-button-block__link' }, button]
+        : button,
     ];
   },
   addNodeView() {
@@ -1499,38 +1549,7 @@ const LocalButtonBlock = TiptapNode.create({
   },
 });
 
-function LocalFormulaBlockView({ node, updateAttributes, selected }: NodeViewProps) {
-  const formula = node.attrs.formula || '';
-  let formulaHtml = '';
-  let formulaError = '';
-  try {
-    formulaHtml = katex.renderToString(formula || 'E = mc^2', {
-      displayMode: true,
-      throwOnError: false,
-      strict: false,
-    });
-  } catch (error) {
-    formulaError = error instanceof Error ? error.message : '公式渲染失败';
-    formulaHtml = katex.renderToString('E = mc^2', { displayMode: true, throwOnError: false });
-  }
-
-  return (
-    <NodeViewWrapper className={`feishu-formula-editor${selected ? ' is-selected' : ''}`} {...blockDomAttrs(node.attrs)} contentEditable={false}>
-      <div
-        className={`feishu-formula-block${formulaError ? ' feishu-formula-block--error' : ''}`}
-        dangerouslySetInnerHTML={{ __html: formulaHtml }}
-      />
-      {formulaError && <div className="feishu-formula-error">{formulaError}</div>}
-      <textarea
-        className="feishu-formula-editor__input"
-        value={formula}
-        placeholder="输入 LaTeX，例如 E = mc^2"
-        rows={2}
-        onChange={e => updateAttributes({ formula: e.target.value })}
-      />
-    </NodeViewWrapper>
-  );
-}
+import { FormulaBlockView } from './FormulaBlockView';
 
 const LocalFormulaBlock = TiptapNode.create({
   name: 'localFormulaBlock',
@@ -1539,9 +1558,9 @@ const LocalFormulaBlock = TiptapNode.create({
   addAttributes() {
     return {
       formula: {
-        default: 'E = mc^2',
-        parseHTML: element => element.getAttribute('data-formula') || element.textContent || 'E = mc^2',
-        renderHTML: attributes => ({ 'data-formula': attributes.formula }),
+        default: '',
+        parseHTML: element => element.getAttribute('data-formula') || element.textContent || '',
+        renderHTML: attributes => ({ 'data-formula': attributes.formula || '' }),
       },
     };
   },
@@ -1549,10 +1568,10 @@ const LocalFormulaBlock = TiptapNode.create({
     return [{ tag: 'div[data-local-block="formula"]' }];
   },
   renderHTML({ HTMLAttributes }) {
-    return ['div', { ...HTMLAttributes, 'data-local-block': 'formula', class: 'feishu-formula-block' }, HTMLAttributes.formula || 'E = mc^2'];
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'formula', class: 'feishu-formula-block' }, HTMLAttributes.formula || ''];
   },
   addNodeView() {
-    return ReactNodeViewRenderer(LocalFormulaBlockView);
+    return ReactNodeViewRenderer(FormulaBlockView);
   },
 });
 
@@ -1579,7 +1598,7 @@ function normalizeBitableRows(rows: BitableRows, columnCount: number): BitableRo
   return rows.map(row => Array.from({ length: columnCount }, (_, index) => row[index] ?? ''));
 }
 
-function LocalBitableBlockView({ node, updateAttributes, selected }: NodeViewProps) {
+function LocalBitableBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const title = node.attrs.title || '多维表格';
   const columns = parseJsonArray<string[]>(node.attrs.columns, DEFAULT_BITABLE_COLUMNS);
   const rows = normalizeBitableRows(parseJsonArray<BitableRows>(node.attrs.rows, DEFAULT_BITABLE_ROWS), columns.length);
@@ -1626,8 +1645,21 @@ function LocalBitableBlockView({ node, updateAttributes, selected }: NodeViewPro
     );
   };
 
+  const selectThisBlock = (event: React.MouseEvent) => {
+    if ((event.target as Element).closest('input, button, a')) return;
+    const pos = typeof getPos === 'function' ? getPos() : null;
+    if (typeof pos === 'number') {
+      editor.chain().focus().setNodeSelection(pos).run();
+    }
+  };
+
   return (
-    <NodeViewWrapper className={`feishu-bitable-block${selected ? ' is-selected' : ''}`} {...blockDomAttrs(node.attrs)} contentEditable={false}>
+    <NodeViewWrapper
+      className={`feishu-bitable-block${selected ? ' is-selected' : ''}`}
+      {...blockDomAttrs(node.attrs)}
+      contentEditable={false}
+      onMouseDown={selectThisBlock}
+    >
       <div className="feishu-bitable-block__header">
         <input
           className="feishu-bitable-block__title"
@@ -1739,13 +1771,20 @@ const EMBED_KIND_META: Record<string, { icon: string; title: string; desc: strin
   embed: { icon: '+', title: '内容块', desc: '' },
 };
 
-function LocalEmbedBlockView({ node, updateAttributes, selected, deleteNode }: NodeViewProps) {
+function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const kind = String(node.attrs.kind || 'embed');
   const meta = EMBED_KIND_META[kind] || EMBED_KIND_META.embed;
   const title = node.attrs.title || meta.title;
   const desc = node.attrs.desc || meta.desc;
   const href = node.attrs.href || '';
   const normalizedHref = normalizeBlockUrl(href);
+  const selectThisBlock = (event: React.MouseEvent) => {
+    if ((event.target as Element).closest('input, button, a')) return;
+    const pos = typeof getPos === 'function' ? getPos() : null;
+    if (typeof pos === 'number') {
+      editor.chain().focus().setNodeSelection(pos).run();
+    }
+  };
 
   return (
     <NodeViewWrapper
@@ -1753,6 +1792,7 @@ function LocalEmbedBlockView({ node, updateAttributes, selected, deleteNode }: N
       data-local-block="embed"
       {...blockDomAttrs(node.attrs)}
       contentEditable={false}
+      onMouseDown={selectThisBlock}
     >
       <div className="feishu-local-card__icon">{meta.icon}</div>
       <div className="feishu-local-card__body">
@@ -1942,6 +1982,8 @@ function getBlockDomFromEditor(editorInstance: {
   try {
     const nodeEl = editorInstance.view.nodeDOM?.(from);
     if (nodeEl instanceof Element && root.contains(nodeEl)) {
+      const atomBlock = nodeEl.closest?.('.feishu-button-block, .feishu-formula-editor, .feishu-local-card, .feishu-bitable-block, .feishu-div-table, .feishu-file-block, .feishu-sync-block') as HTMLElement | null;
+      if (atomBlock && root.contains(atomBlock)) return atomBlock;
       const divider = (nodeEl as HTMLElement).classList?.contains('feishu-divider')
         ? (nodeEl as HTMLElement)
         : (nodeEl.querySelector?.('.feishu-divider') as HTMLElement | null);
@@ -2183,6 +2225,7 @@ export default function Editor({
   const [blockGutterHovered, setBlockGutterHovered] = useState(false);
   const [rowHighlightBand, setRowHighlightBand] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const [blockDragIndicator, setBlockDragIndicator] = useState<{ top: number; left: number; width: number } | null>(null);
+  const blockDragPreviewRef = useRef<HTMLElement | null>(null);
   const blockDragStateRef = useRef<{
     source: HTMLElement;
     startX: number;
@@ -2287,6 +2330,38 @@ export default function Editor({
     if (imageBlock && editorAreaRef.current.contains(imageBlock)) {
       return { element: imageBlock, type: 'image', isEmpty: false };
     }
+    const buttonBlock = target.closest('.feishu-button-block') as HTMLElement | null;
+    if (buttonBlock && editorAreaRef.current.contains(buttonBlock)) {
+      let type = 'button';
+      if (buttonBlock.classList.contains('feishu-button-block--link')) type = 'button-link';
+      else if (buttonBlock.classList.contains('feishu-button-block--duplicate')) type = 'button-duplicate';
+      else if (buttonBlock.classList.contains('feishu-button-block--follow')) type = 'button-follow';
+      return { element: buttonBlock, type, isEmpty: false };
+    }
+    const formulaBlock = target.closest('.feishu-formula-editor') as HTMLElement | null;
+    if (formulaBlock && editorAreaRef.current.contains(formulaBlock)) {
+      return { element: formulaBlock, type: 'formula', isEmpty: false };
+    }
+    const bitableBlock = target.closest('.feishu-bitable-block') as HTMLElement | null;
+    if (bitableBlock && editorAreaRef.current.contains(bitableBlock)) {
+      return { element: bitableBlock, type: 'bitable', isEmpty: false };
+    }
+    const divTableBlock = target.closest('.feishu-div-table') as HTMLElement | null;
+    if (divTableBlock && editorAreaRef.current.contains(divTableBlock)) {
+      return { element: divTableBlock, type: 'div-table', isEmpty: false };
+    }
+    const embedBlock = target.closest('.feishu-local-card') as HTMLElement | null;
+    if (embedBlock && editorAreaRef.current.contains(embedBlock)) {
+      return { element: embedBlock, type: 'embed', isEmpty: false };
+    }
+    const fileBlock = target.closest('.feishu-file-block') as HTMLElement | null;
+    if (fileBlock && editorAreaRef.current.contains(fileBlock)) {
+      return { element: fileBlock, type: 'file', isEmpty: false };
+    }
+    const syncBlock = target.closest('.feishu-sync-block') as HTMLElement | null;
+    if (syncBlock && editorAreaRef.current.contains(syncBlock)) {
+      return { element: syncBlock, type: 'sync', isEmpty: false };
+    }
     const block = target.closest('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre') as HTMLElement | null;
     if (!block || !editorAreaRef.current.contains(block)) return null;
 
@@ -2322,6 +2397,12 @@ export default function Editor({
       if (String(attrs.mediaKind || '') === 'image') return 'image';
       return 'file';
     }
+    if (editorInstance.isActive('localFormulaBlock')) return 'formula';
+    if (editorInstance.isActive('localButtonBlock')) return 'button';
+    if (editorInstance.isActive('localBitableBlock')) return 'bitable';
+    if (editorInstance.isActive('localDivTableBlock')) return 'div-table';
+    if (editorInstance.isActive('localEmbedBlock')) return 'embed';
+    if (editorInstance.isActive('localSyncBlock')) return 'sync';
     return 'paragraph';
   }, []);
 
@@ -2617,6 +2698,7 @@ export default function Editor({
     },
     onCreate: ({ editor: ed }) => {
       ed.commands.fixTables();
+      ed.view.dispatch(ed.state.tr.setMeta('feishu-normalize-block-ids', true));
     },
     onUpdate: ({ editor }) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -2643,6 +2725,7 @@ export default function Editor({
           setSlashQuery(query);
           setSlashMenuFromPlus(false);
           setSlashMenuFromTableCellPlus(false);
+          (editor as any).__plusInsertRange = null;
           setSlashMenuVisible(true);
         } else {
           closeSlashMenu();
@@ -2807,9 +2890,9 @@ export default function Editor({
     revealBlockToolsFromInfo,
   ]);
 
-  const beginBlockDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+  const beginBlockDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>, sourceOverride?: HTMLElement) => {
     if (!editor || readOnly) return;
-    const source = activeBlockElRef.current;
+    const source = sourceOverride ?? activeBlockElRef.current;
     if (!source?.isConnected || !resolveDraggableBlockPos(editor, source)) return;
 
     event.preventDefault();
@@ -2825,13 +2908,41 @@ export default function Editor({
       placement: 'before',
     };
 
+    const clearDragPreview = () => {
+      blockDragPreviewRef.current?.remove();
+      blockDragPreviewRef.current = null;
+      document.body.classList.remove('feishu-block-dragging');
+    };
+
+    const syncDragPreview = (clientY: number) => {
+      const area = editorAreaRef.current;
+      if (!area) return;
+      const sourceRect = source.getBoundingClientRect();
+      const areaRect = area.getBoundingClientRect();
+      let preview = blockDragPreviewRef.current;
+      if (!preview) {
+        preview = source.cloneNode(true) as HTMLElement;
+        preview.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+        preview.querySelectorAll('.feishu-table-chrome-mount, .docx-menu-container').forEach(node => node.remove());
+        preview.classList.add('block-drag-preview');
+        preview.setAttribute('aria-hidden', 'true');
+        preview.style.width = `${sourceRect.width}px`;
+        area.appendChild(preview);
+        blockDragPreviewRef.current = preview;
+        document.body.classList.add('feishu-block-dragging');
+      }
+      preview.style.left = `${sourceRect.left - areaRect.left}px`;
+      preview.style.top = `${clientY - areaRect.top + 12}px`;
+    };
+
     const resolveDrop = (clientX: number, clientY: number) => {
       const dragState = blockDragStateRef.current;
       const area = editorAreaRef.current;
       if (!dragState || !area) return;
-      const hit = document.elementFromPoint(clientX, clientY);
-      const resolved = resolveHoveredBlockInfo(hit);
-      if (!resolved || resolved === 'keep' || resolved.type === 'table') {
+      const resolved = document.elementsFromPoint(clientX, clientY)
+        .map(hit => resolveHoveredBlockInfo(hit))
+        .find(candidate => candidate && candidate !== 'keep') ?? null;
+      if (!resolved || resolved === 'keep') {
         dragState.dropTarget = null;
         setBlockDragIndicator(null);
         return;
@@ -2863,8 +2974,14 @@ export default function Editor({
       const dx = Math.abs(moveEvent.clientX - dragState.startX);
       const dy = Math.abs(moveEvent.clientY - dragState.startY);
       if (!dragState.dragging && dx < 4 && dy < 4) return;
+      if (!dragState.dragging) {
+        setContextMenu(null);
+        closeSlashMenu();
+        setRowHighlightBand(null);
+      }
       dragState.dragging = true;
       moveEvent.preventDefault();
+      syncDragPreview(moveEvent.clientY);
       resolveDrop(moveEvent.clientX, moveEvent.clientY);
     };
 
@@ -2875,6 +2992,7 @@ export default function Editor({
       document.removeEventListener('pointercancel', finish, true);
       blockDragStateRef.current = null;
       setBlockDragIndicator(null);
+      clearDragPreview();
       if (dragState?.dragging && dragState.dropTarget) {
         const moved = moveDraggableBlock(editor, dragState.source, dragState.dropTarget, dragState.placement);
         if (moved) {
@@ -2888,6 +3006,7 @@ export default function Editor({
     document.addEventListener('pointercancel', finish, true);
   }, [
     editor,
+    closeSlashMenu,
     getColumnContentFromBlock,
     hideBlockTools,
     readOnly,
@@ -3422,11 +3541,14 @@ export default function Editor({
       return;
     }
     cancelContextMenuClose();
-    // For atom blocks (divider), ensure a NodeSelection so context menu actions target the right node
-    if (blockTools.type === 'hr' && activeBlockElRef.current && editor) {
+    // Atom blocks must remain node-selected so block menu actions target the block itself.
+    if (
+      ['hr', 'button', 'button-link', 'button-duplicate', 'button-follow', 'formula', 'bitable', 'div-table', 'embed', 'file', 'sync'].includes(blockTools.type)
+      && activeBlockElRef.current
+      && editor
+    ) {
       try {
-        const pos = editor.view.posAtDOM(activeBlockElRef.current, 0);
-        editor.commands.setNodeSelection(pos);
+        syncEditorSelectionToAnchoredBlock(editor, activeBlockElRef.current);
       } catch {
         editor.commands.focus();
       }
@@ -3751,7 +3873,7 @@ export default function Editor({
                     type="button"
                     className="block-drag-row"
                     onMouseDown={e => e.preventDefault()}
-                    onPointerDown={beginBlockDrag}
+                    onPointerDown={event => beginBlockDrag(event)}
                     onPointerEnter={blockTools.type === 'table' ? undefined : () => {
                       blockHoverFloatingGroup.cancelClose();
                       openBlockConfigMenu({ skipCooldown: true });
@@ -3812,6 +3934,7 @@ export default function Editor({
                 pinChrome={pinTableChrome}
                 onTableHandleActiveChange={setTableHandleHovered}
                 onOpenBlockMenu={() => openBlockConfigMenu({ skipCooldown: true })}
+                onBlockDragStart={(event, source) => beginBlockDrag(event, source)}
                 onScheduleCloseBlockMenu={scheduleContextMenuClose}
                 onCancelCloseBlockMenu={cancelContextMenuClose}
               />

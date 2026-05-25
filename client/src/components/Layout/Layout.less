@@ -16,7 +16,7 @@
 /** 与 Editor.less 版心一致（正文列宽）；顶图横贯工作区时不再受此宽度约束 */
 @editor-page-width: 860px;
 /** 左侧目录轨宽（固定占位，展开/收起目录不改变正文列位置） */
-@catalogue-rail-width: 200px;
+@catalogue-rail-width: 128px;
 @font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
   "Microsoft YaHei", sans-serif;
 
@@ -33,6 +33,7 @@
 
   // ---- Header ----
   .doc-page-header {
+    position: relative;
     border-bottom: 1px solid @border-light;
     background: #fff;
     flex-shrink: 0;
@@ -43,6 +44,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
       padding: 5px 14px 5px 12px;
       min-height: 42px;
     }
@@ -54,12 +56,22 @@
       font-size: 12px;
       color: #8f959e;
       line-height: 1.4;
+      white-space: nowrap;
+      overflow: hidden;
     }
 
     .header-meta-item {
       display: inline-flex;
       align-items: center;
       gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .header-meta-cloud {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 1;
     }
 
     .header-meta-vsep {
@@ -93,6 +105,7 @@
       gap: 2px;
       flex: 1;
       min-width: 0;
+      container: document-header-left / inline-size;
     }
 
     .header-right {
@@ -103,7 +116,9 @@
     }
 
     .header-title-stack {
+      flex: 1;
       min-width: 0;
+      overflow: hidden;
     }
 
     .doc-header-search {
@@ -170,11 +185,13 @@
       font-size: 13px;
       min-width: 0;
       overflow: hidden;
+      width: 100%;
 
       .bc-sep {
         color: @text-placeholder;
         margin: 0 3px;
         font-size: 14px;
+        flex-shrink: 0;
       }
 
       .bc-item {
@@ -186,6 +203,7 @@
         background: none;
         border: none;
         font-size: 13px;
+        flex-shrink: 0;
 
         &:hover {
           background: @bg-hover;
@@ -198,12 +216,18 @@
         font-weight: 500;
         padding: 3px 5px;
         max-width: 200px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
         display: inline-flex;
         align-items: center;
         gap: 2px;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .bc-current-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
     }
 
@@ -273,6 +297,7 @@
       font-size: 12px;
       font-weight: 600;
       cursor: pointer;
+      flex-shrink: 0;
     }
 
     // Save status
@@ -292,6 +317,68 @@
       }
     }
 
+  }
+
+  @container document-header-left (max-width: 250px) {
+    .doc-page-header .header-row-meta {
+      display: none;
+    }
+  }
+
+  @container document-header-left (max-width: 190px) {
+    .doc-page-header {
+      .bc-space-item,
+      .bc-sep-root {
+        display: none;
+      }
+    }
+  }
+
+  @container document-header-left (max-width: 125px) {
+    .doc-page-header {
+      .bc-home-item,
+      .bc-sep-current {
+        display: none;
+      }
+    }
+  }
+
+  @media (max-width: 680px) {
+    .doc-page-header {
+      .header-notification-btn,
+      .header-create-btn {
+        display: none;
+      }
+
+      .doc-header-search {
+        position: absolute;
+        top: 44px;
+        right: 12px;
+        z-index: 1;
+      }
+    }
+  }
+
+  @media (max-width: 410px) {
+    .doc-page-header {
+      .header-row-primary {
+        padding-right: 8px;
+        padding-left: 8px;
+      }
+
+      .btn-share,
+      .btn-edit-mode {
+        width: 30px;
+        justify-content: center;
+        padding: 0;
+      }
+
+      .header-btn-label,
+      .mode-arrow,
+      .header-avatar-divider {
+        display: none;
+      }
+    }
   }
 
   .doc-search-hit {
@@ -388,11 +475,11 @@
 
   .doc-page-workspace-inner {
     display: flex;
-    flex: 1;
+    flex: 1 0 auto;
     flex-direction: row;
     align-items: stretch;
     min-width: 0;
-    min-height: 0;
+    min-height: 100%;
     width: 100%;
   }
 
@@ -431,7 +518,11 @@
   // ========================
 
   .comment-sidebar-positioned {
-    position: relative;
+    position: sticky;
+    top: 0;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
     width: 280px;
     min-width: 280px;
     flex-shrink: 0;
@@ -493,6 +584,7 @@
 
   .comment-sidebar-pos__panels {
     position: relative;
+    flex: 1;
     padding: 0 8px;
   }
 

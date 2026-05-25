@@ -20,6 +20,7 @@ export const OPERABLE_BLOCK_TYPES = new Set([
   'localSyncBlock',
   'localButtonBlock',
   'localFormulaBlock',
+  'localBitableBlock',
   'localEmbedBlock',
 ]);
 

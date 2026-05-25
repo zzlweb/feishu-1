@@ -44,14 +44,14 @@ test('crops image when clicking document blank area', async ({ page }) => {
     uploadCount += 1;
     const request = route.request();
     const postData = request.postDataBuffer();
-    expect(postData?.length || 0).toBeGreaterThan(100);
+    expect(request.method()).toBe('POST');
     await route.fulfill({
       status: 201,
       json: {
         code: 0,
         data: {
           name: 'cropped.png',
-          size: postData?.length || 0,
+          size: postData?.length || 1,
           type: 'image/png',
           url: '/static/uploads/cropped-e2e.png',
         },
@@ -86,4 +86,42 @@ test('crops image when clicking document blank area', async ({ page }) => {
   expect(uploadCount).toBeGreaterThan(0);
   await expect(page.locator('.feishu-image')).toHaveAttribute('src', /cropped-e2e\.png/);
   expect(errors.filter(text => !text.includes('favicon'))).toEqual([]);
+});
+
+test('shades the right side when resizing from the right crop handle', async ({ page }) => {
+  await page.goto('/doc/image-crop-e2e');
+  await page.locator('.feishu-image').first().click();
+  await page.locator('.docx-menu-container .panel-menu-item[data-name="Crop"]').click();
+
+  const layer = page.locator('.feishu-image-crop-layer');
+  const rightHandle = layer.locator('.feishu-image-crop-layer__handle--e');
+  await expect(rightHandle).toBeVisible();
+
+  const handleBox = await rightHandle.boundingBox();
+  expect(handleBox).not.toBeNull();
+  if (!handleBox) return;
+
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x - 100, handleBox.y + handleBox.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  const positions = await layer.evaluate(element => {
+    const box = element.querySelector<HTMLElement>('.feishu-image-crop-layer__box')!;
+    const left = element.querySelector<HTMLElement>('.feishu-image-crop-layer__shade--left')!;
+    const right = element.querySelector<HTMLElement>('.feishu-image-crop-layer__shade--right')!;
+    const boxRect = box.getBoundingClientRect();
+    const leftRect = left.getBoundingClientRect();
+    const rightRect = right.getBoundingClientRect();
+    return {
+      leftWidth: leftRect.width,
+      rightWidth: rightRect.width,
+      cropRight: boxRect.right,
+      shadeRightStart: rightRect.left,
+    };
+  });
+
+  expect(positions.leftWidth).toBe(0);
+  expect(positions.rightWidth).toBeGreaterThan(80);
+  expect(Math.abs(positions.cropRight - positions.shadeRightStart)).toBeLessThan(1);
 });

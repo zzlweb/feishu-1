@@ -120,44 +120,73 @@ test('does not start marquee from blank padding inside a block row', async ({ pa
   await expect(page.locator('.feishu-box-selection-band')).toHaveCount(0);
 });
 
-test('does not select task items when marquee passes over them', async ({ page }) => {
+test('selects and deletes multiple task controls with a marquee', async ({ page }) => {
+  await page.route('**/api/documents/block-marquee-e2e', route =>
+    route.fulfill({
+      json: {
+        code: 0,
+        data: {
+          ...richDocument,
+          content: '<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><div><p>Task one</p></div></li><li data-type="taskItem" data-checked="false"><div><p>Task two</p></div></li><li data-type="taskItem" data-checked="false"><div><p>Keep task</p></div></li></ul>',
+        },
+      },
+    }),
+  );
   await page.goto('/doc/block-marquee-e2e');
 
-  await page.locator('.ProseMirror').click();
-  await page.keyboard.type('/todo');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('Task one');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('/todo');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('Task two');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('Plain paragraph below');
+  const first = page.locator('ul[data-type="taskList"] li').nth(0).locator('p');
+  const second = page.locator('ul[data-type="taskList"] li').nth(1).locator('p');
+  const firstBox = await first.boundingBox();
+  const secondBox = await second.boundingBox();
+  expect(firstBox).not.toBeNull();
+  expect(secondBox).not.toBeNull();
+  if (!firstBox || !secondBox) return;
 
-  const taskList = page.locator('ul[data-type="taskList"]').first();
-  const paragraph = page.locator('.ProseMirror p', { hasText: 'Plain paragraph below' });
-  await expect(taskList).toBeVisible();
-  await expect(paragraph).toBeVisible();
-
-  const taskBox = await taskList.boundingBox();
-  const paraBox = await paragraph.boundingBox();
-  expect(taskBox).not.toBeNull();
-  expect(paraBox).not.toBeNull();
-  if (!taskBox || !paraBox) return;
-
-  const startX = paraBox.x + paraBox.width / 2;
-  const startY = taskBox.y + taskBox.height + (paraBox.y - (taskBox.y + taskBox.height)) / 2;
-  const endX = taskBox.x + taskBox.width / 2;
-  const endY = taskBox.y + 4;
-
-  await page.mouse.move(startX, startY);
+  await page.mouse.move(firstBox.x + firstBox.width - 16, firstBox.y + firstBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(endX, endY, { steps: 12 });
+  await page.mouse.move(secondBox.x + 120, secondBox.y + secondBox.height / 2, { steps: 12 });
   await page.mouse.up();
 
-  await expect(page.locator('ul[data-type="taskList"] .feishu-box-selection-band')).toHaveCount(0);
+  await expect(page.locator('.feishu-box-selection-band')).toHaveCount(2);
+  await page.keyboard.press('Delete');
+  await expect(page.locator('ul[data-type="taskList"] li')).toHaveCount(1);
+  await expect(page.locator('ul[data-type="taskList"] li')).toHaveText('Keep task');
 });
 
+test('deletes ordered, bullet and task controls selected together', async ({ page }) => {
+  await page.route('**/api/documents/block-marquee-e2e', route =>
+    route.fulfill({
+      json: {
+        code: 0,
+        data: {
+          ...richDocument,
+          content: '<ol><li><p>Ordered control</p></li></ol><ul><li><p>Bullet control</p></li></ul><ul data-type="taskList"><li data-type="taskItem" data-checked="false"><div><p>Task control</p></div></li></ul><p>Keep paragraph</p>',
+        },
+      },
+    }),
+  );
+  await page.goto('/doc/block-marquee-e2e');
+
+  const first = page.locator('ol li').first();
+  const last = page.locator('ul[data-type="taskList"] li').first();
+  const firstBox = await first.boundingBox();
+  const lastBox = await last.boundingBox();
+  const areaBox = await page.locator('.editor-content-area').boundingBox();
+  expect(firstBox).not.toBeNull();
+  expect(lastBox).not.toBeNull();
+  expect(areaBox).not.toBeNull();
+  if (!firstBox || !lastBox || !areaBox) return;
+
+  await page.mouse.move(firstBox.x + firstBox.width - 16, firstBox.y + firstBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(areaBox.x + areaBox.width - 12, lastBox.y + lastBox.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  await expect(page.locator('.feishu-box-selection-band')).toHaveCount(3);
+  await page.keyboard.press('Delete');
+  await expect(page.locator('.ProseMirror > ol, .ProseMirror > ul')).toHaveCount(0);
+  await expect(page.locator('.ProseMirror > p')).toHaveText('Keep paragraph');
+});
 test('does not start marquee from task checkbox', async ({ page }) => {
   await page.goto('/doc/block-marquee-e2e');
 
@@ -181,6 +210,86 @@ test('does not start marquee from task checkbox', async ({ page }) => {
 
   await expect(page.locator('.feishu-box-selection-rect')).toBeHidden();
   await expect(page.locator('.feishu-box-selection-band')).toHaveCount(0);
+});
+
+test('deletes a task control selected from blank space in its row', async ({ page }) => {
+  await page.route('**/api/documents/block-marquee-e2e', route =>
+    route.fulfill({
+      json: {
+        code: 0,
+        data: {
+          ...richDocument,
+          content: '<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><div><p>Delete this control</p></div></li><li data-type="taskItem" data-checked="false"><div><p>Keep this control</p></div></li></ul>',
+        },
+      },
+    }),
+  );
+  await page.goto('/doc/block-marquee-e2e');
+
+  const target = page.locator('ul[data-type="taskList"] li').first().locator('p');
+  const box = await target.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+
+  await page.mouse.move(box.x + box.width - 16, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 120, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.locator('.feishu-box-selection-band')).toHaveCount(1);
+  await page.keyboard.press('Delete');
+  await expect(page.locator('ul[data-type="taskList"] li')).toHaveCount(1);
+  await expect(page.locator('ul[data-type="taskList"] li')).toHaveText('Keep this control');
+});
+
+test('keeps native text selection when dragging inside a list control', async ({ page }) => {
+  await page.route('**/api/documents/block-marquee-e2e', route =>
+    route.fulfill({
+      json: {
+        code: 0,
+        data: {
+          ...richDocument,
+          content: '<ol><li><p>Selectable ordered control text</p></li></ol><ul><li><p>Bullet control text</p></li></ul>',
+        },
+      },
+    }),
+  );
+  await page.goto('/doc/block-marquee-e2e');
+
+  const text = page.locator('ol li p').first();
+  const box = await text.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+
+  await page.mouse.move(box.x + 8, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 150, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.locator('.feishu-box-selection-band')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).not.toBe('');
+});
+
+test('removes the last empty task control with Backspace or Delete', async ({ page }) => {
+  for (const key of ['Backspace', 'Delete']) {
+    await page.route('**/api/documents/block-marquee-e2e', route =>
+      route.fulfill({
+        json: {
+          code: 0,
+          data: {
+            ...richDocument,
+            content: '<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><div><p></p></div></li></ul>',
+          },
+        },
+      }),
+    );
+    await page.goto('/doc/block-marquee-e2e');
+
+    await page.locator('ul[data-type="taskList"] p').click();
+    await page.keyboard.press(key);
+    await expect(page.locator('ul[data-type="taskList"]')).toHaveCount(0);
+    await expect(page.locator('.ProseMirror > p')).toHaveCount(1);
+  }
 });
 
 test('supports reverse drag selection', async ({ page }) => {

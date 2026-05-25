@@ -129,6 +129,65 @@ test('selects and highlights a full row from the row rail', async ({ page }) => 
   await expect(secondRowRail).toHaveClass(/is-selected/);
 });
 
+test('does not reorder rows when dragging the row rail', async ({ page }) => {
+  await openRichTable(page);
+
+  const host = page.locator('.feishu-table-host, .tableWrapper').first();
+  await host.hover();
+  const firstRowRail = page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--row').first();
+  const thirdRowRail = page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--row').nth(2);
+  const firstBox = await firstRowRail.boundingBox();
+  const thirdBox = await thirdRowRail.boundingBox();
+  expect(firstBox).not.toBeNull();
+  expect(thirdBox).not.toBeNull();
+
+  await page.mouse.move(firstBox!.x + firstBox!.width / 2, firstBox!.y + firstBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(thirdBox!.x + thirdBox!.width / 2, thirdBox!.y + thirdBox!.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.locator('td[data-table-cell="true"]').first()).toContainText('Alpha');
+  await expect(page.locator('.feishu-table-chrome__drag-line--row')).toHaveCount(0);
+});
+
+test('clips a selected column outline to the horizontal table viewport', async ({ page }) => {
+  const wideTableDocument = {
+    ...tableDocument,
+    content: `
+      <table>
+        <tbody>
+          <tr>${Array.from({ length: 8 }, (_, i) => `<td><p>C${i + 1}</p></td>`).join('')}</tr>
+          <tr>${Array.from({ length: 8 }, (_, i) => `<td><p>R2C${i + 1}</p></td>`).join('')}</tr>
+        </tbody>
+      </table>
+    `,
+  };
+  await page.route('**/api/documents/rich-table-docs-e2e', route =>
+    route.fulfill({ json: { code: 0, data: wideTableDocument } }),
+  );
+  await openRichTable(page);
+
+  const host = page.locator('.feishu-table-host, .tableWrapper').first();
+  await host.hover();
+  await page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--col').first().click();
+  await page.waitForTimeout(150);
+
+  const surface = page.locator('.feishu-table-scroll').first();
+  await surface.evaluate(el => {
+    el.scrollLeft = 100;
+    el.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+  await expect.poll(() => surface.evaluate(el => el.scrollLeft)).toBeGreaterThan(0);
+
+  const outline = page.locator('.feishu-table-chrome__selection-outline--col');
+  await expect(outline).toBeVisible();
+  const surfaceBox = await surface.boundingBox();
+  const outlineBox = await outline.boundingBox();
+  expect(surfaceBox).not.toBeNull();
+  expect(outlineBox).not.toBeNull();
+  expect(outlineBox!.x).toBeGreaterThanOrEqual(surfaceBox!.x - 1);
+});
+
 test('opens the table-cell insert menu at the cursor-positioned plus button', async ({ page }) => {
   await openRichTable(page);
 
@@ -166,6 +225,22 @@ test('opens block context menu from the text cell handle', async ({ page }) => {
   await expect(handle).toBeVisible();
   await handle.hover();
   await expect(page.locator('.context-menu').first()).toBeVisible();
+});
+
+test('deletes the whole table from its block menu', async ({ page }) => {
+  await openRichTable(page);
+
+  const host = page.locator('.feishu-table-host, .tableWrapper').first();
+  await host.hover();
+  const handle = page.locator('.feishu-table-chrome__handle').first();
+  await expect(handle).toBeVisible();
+  await handle.hover();
+
+  const menu = page.locator('.context-menu').first();
+  await expect(menu).toBeVisible();
+  await menu.locator('.context-menu-item--danger').click();
+
+  await expect(page.locator('.feishu-table-host, .tableWrapper')).toHaveCount(0);
 });
 
 test('deletes embedded block content inside a table cell with Backspace', async ({ page }) => {
@@ -206,7 +281,7 @@ test('deletes embedded block content inside a table cell with Backspace', async 
   await expect(page.locator('td .feishu-local-card')).toHaveCount(0);
 });
 
-test('resizes columns and rows without creating native text selection', async ({ page }) => {
+test('resizes columns without exposing row resize handles', async ({ page }) => {
   await openRichTable(page);
 
   const host = page.locator('.feishu-table-host, .tableWrapper').first();
@@ -226,19 +301,5 @@ test('resizes columns and rows without creating native text selection', async ({
   expect(afterWidth).not.toBe(beforeWidth);
   const selectedText = await page.evaluate(() => window.getSelection()?.toString() || '');
   expect(selectedText).toBe('');
-
-  const rowHandle = page.locator('[data-table-resize-handle="true"].feishu-table-chrome__resize-row').first();
-  await expect(rowHandle).toBeVisible();
-  const rowBox = await rowHandle.boundingBox();
-  expect(rowBox).not.toBeNull();
-  const firstRow = page.locator('tr[data-row-id]').first();
-  const beforeHeight = await firstRow.evaluate(el => getComputedStyle(el).height);
-
-  await page.mouse.move(rowBox!.x + rowBox!.width / 2, rowBox!.y + rowBox!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(rowBox!.x + rowBox!.width / 2, rowBox!.y + 36, { steps: 8 });
-  await page.mouse.up();
-
-  const afterHeight = await firstRow.evaluate(el => getComputedStyle(el).height);
-  expect(afterHeight).not.toBe(beforeHeight);
+  await expect(page.locator('[data-table-resize-handle="true"].feishu-table-chrome__resize-row')).toHaveCount(0);
 });

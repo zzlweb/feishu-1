@@ -11,6 +11,16 @@ const DRAGGABLE_BLOCK_TYPES = new Set([
   'codeBlock',
   'horizontalRule',
   'highlightBlock',
+  'image',
+  'table',
+  'localFileBlock',
+  'localColumnsBlock',
+  'localDivTableBlock',
+  'localSyncBlock',
+  'localButtonBlock',
+  'localFormulaBlock',
+  'localBitableBlock',
+  'localEmbedBlock',
 ]);
 
 interface BlockPos {
@@ -32,27 +42,44 @@ function readDirectNode(editor: Editor, pos: number): BlockPos | null {
   };
 }
 
+function resolvePreferredNodeType(blockEl: HTMLElement): string | null {
+  if (blockEl.closest('.feishu-table-host, .tableWrapper')) return 'table';
+  if (blockEl.closest('.feishu-file-block')) return 'localFileBlock';
+  if (blockEl.closest('.feishu-image-block-wrap')) return 'image';
+  if (blockEl.closest('.feishu-bitable-block')) return 'localBitableBlock';
+  if (blockEl.closest('.feishu-div-table')) return 'localDivTableBlock';
+  if (blockEl.closest('.feishu-sync-block')) return 'localSyncBlock';
+  if (blockEl.closest('.feishu-button-block')) return 'localButtonBlock';
+  if (blockEl.closest('.feishu-formula-editor')) return 'localFormulaBlock';
+  if (blockEl.closest('.feishu-local-card')) return 'localEmbedBlock';
+  if (blockEl.closest('.feishu-columns-block')) return 'localColumnsBlock';
+  return null;
+}
+
 export function resolveDraggableBlockPos(editor: Editor, blockEl: HTMLElement | null): BlockPos | null {
   if (!blockEl?.isConnected || !editor.view.dom.contains(blockEl)) return null;
 
+  const preferredType = resolvePreferredNodeType(blockEl);
   const candidates = [0, 1];
   for (const offset of candidates) {
     try {
       const rawPos = editor.view.posAtDOM(blockEl, offset);
       const direct = readDirectNode(editor, rawPos);
-      if (direct) return direct;
+      if (direct && (!preferredType || direct.node.type.name === preferredType)) return direct;
 
       const $pos = editor.state.doc.resolve(Math.max(0, Math.min(rawPos, editor.state.doc.content.size)));
       for (let depth = $pos.depth; depth >= 1; depth -= 1) {
         const node = $pos.node(depth);
+        if (preferredType && node.type.name !== preferredType) continue;
         if (!DRAGGABLE_BLOCK_TYPES.has(node.type.name)) continue;
         return {
           pos: $pos.before(depth),
           node,
           depth,
-          parentPos: $pos.before(depth - 1),
+          parentPos: depth > 1 ? $pos.before(depth - 1) : 0,
         };
       }
+      if (direct) return direct;
     } catch {
       /* try the next DOM offset */
     }

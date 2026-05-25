@@ -149,16 +149,16 @@ export default function DocumentHeader({
           <span className="header-left-divider" />
           <div className="header-title-stack">
             <nav className="breadcrumb">
-              <button type="button" className="bc-item" onClick={() => navigate('/')}>
+              <button type="button" className="bc-item bc-home-item" onClick={() => navigate('/')}>
                 UIH
               </button>
-              <span className="bc-sep">&gt;</span>
-              <button type="button" className="bc-item" onClick={() => navigate('/')}>
+              <span className="bc-sep bc-sep-root">&gt;</span>
+              <button type="button" className="bc-item bc-space-item" onClick={() => navigate('/')}>
                 {doc.author || '我的空间'}
               </button>
-              <span className="bc-sep">&gt;</span>
+              <span className="bc-sep bc-sep-current">&gt;</span>
               <span className="bc-current">
-                {displayTitle(doc)}
+                <span className="bc-current-title">{displayTitle(doc)}</span>
                 <button type="button" className="header-pin-btn" title="置顶">
                   <IconChatPinOutlined size={16} color="currentColor" />
                 </button>
@@ -194,16 +194,16 @@ export default function DocumentHeader({
 
           <button type="button" className="btn-share" onClick={() => void handleShare()}>
             <Notes theme="outline" size={14} strokeWidth={3} fill="#ffffff" />
-            分享
+            <span className="header-btn-label">分享</span>
           </button>
 
           <button type="button" className="btn-edit-mode" onClick={() => onReadOnlyChange(!readOnly)}>
             <Edit theme="outline" size={14} strokeWidth={3} fill="#646a73" className="mode-icon" />
-            {readOnly ? '阅读' : '编辑'}
+            <span className="header-btn-label">{readOnly ? '阅读' : '编辑'}</span>
             <span className="mode-arrow">▾</span>
           </button>
 
-          <button type="button" className="header-icon-btn" title="通知">
+          <button type="button" className="header-icon-btn header-notification-btn" title="通知">
             <BellRing theme="outline" size={18} strokeWidth={3} fill="#646a73" />
           </button>
 
@@ -242,17 +242,17 @@ export default function DocumentHeader({
             )}
           </div>
 
-          <span className="header-right-divider" aria-hidden />
+          <span className="header-right-divider header-search-divider" aria-hidden />
 
-          <button type="button" className="header-icon-btn" title="搜索" onClick={() => setSearchVisible(v => !v)}>
+          <button type="button" className="header-icon-btn header-search-btn" title="搜索" onClick={() => setSearchVisible(v => !v)}>
             <Search theme="outline" size={18} strokeWidth={3} fill="#646a73" />
           </button>
 
-          <button type="button" className="header-icon-btn header-add-circle-btn" title="新建子文档" onClick={handleCreateChild}>
+          <button type="button" className="header-icon-btn header-add-circle-btn header-create-btn" title="新建子文档" onClick={handleCreateChild}>
             <Plus theme="outline" size={15} strokeWidth={2.5} fill="#646a73" />
           </button>
 
-          <span className="header-right-divider" aria-hidden />
+          <span className="header-right-divider header-avatar-divider" aria-hidden />
 
           <div className="user-avatar">{(doc.author || '我').charAt(0)}</div>
         </div>
