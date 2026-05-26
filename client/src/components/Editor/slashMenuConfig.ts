@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/react';
 import { TextSelection } from '@tiptap/pm/state';
 import { insertFeishuTable } from './tableInsert';
 import { insertFeishuColumns } from './columnsInsert';
+import { createBaseTable, serializeBaseTable } from './bitableModel';
 import {
   SlashGlyphHeading1,
   SlashGlyphHeading2,
@@ -28,6 +29,9 @@ import {
   SlashGlyphFormula,
   SlashGlyphTemplate,
   SlashGlyphSubDoc,
+  SlashGlyphBitableGrid,
+  SlashGlyphGallery,
+  SlashGlyphGantt,
 } from '../../icons/slashMenuGlyphs';
 
 export type DocIcon = ComponentType<{
@@ -257,6 +261,18 @@ function insertHighlightBlockFromSlash(editor: Editor) {
   }).run();
 }
 
+function insertBitableBlockFromSlash(editor: Editor, view: 'grid' | 'gallery' | 'gantt') {
+  const table = createBaseTable(view);
+  replacePlusOrSlash(editor, {
+    type: 'localBitableBlock',
+    attrs: {
+      title: table.name,
+      view,
+      model: serializeBaseTable(table),
+    },
+  });
+}
+
 export const SLASH_MENU_WIDTH = 252;
 export const SLASH_MENU_MAX_HEIGHT = 646;
 
@@ -312,6 +328,15 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
       { Icon: SlashGlyphFormula, iconColor: '#8f959e', label: '公式', matchText: 'formula latex math 公式', action: e => replacePlusOrSlash(e, { type: 'localFormulaBlock' }) },
       { Icon: SlashGlyphTemplate, iconColor: '#f5222d', label: '模板', matchText: '模板 template', hasArrow: true, submenu: 'templateList', action: noopSlash },
       { Icon: SlashGlyphSubDoc, iconColor: '#3370ff', label: '子文档', matchText: '子文档 subdoc page', action: e => void createChildDocument(e) },
+    ],
+  },
+  {
+    title: '多维表格',
+    layout: 'list',
+    items: [
+      { Icon: SlashGlyphBitableGrid, iconColor: '#34c759', label: '表格', matchText: '多维表格 bitable database grid', action: e => insertBitableBlockFromSlash(e, 'grid') },
+      { Icon: SlashGlyphGallery, iconColor: '#7b61ff', label: '画册', matchText: '多维表格 gallery album 画册', action: e => insertBitableBlockFromSlash(e, 'gallery') },
+      { Icon: SlashGlyphGantt, iconColor: '#e9519f', label: '甘特图', matchText: '多维表格 gantt 甘特图 时间轴', action: e => insertBitableBlockFromSlash(e, 'gantt') },
     ],
   },
 ];

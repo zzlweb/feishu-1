@@ -198,18 +198,25 @@ function cellHtml(node: ProseMirrorNode, schema: ProseMirrorNode['type']['schema
   return wrap.innerHTML || '<p></p>';
 }
 
-function matrixFromClipboard(html: string, text: string): string[][] | null {
+interface ClipboardMatrixCell {
+  text: string;
+  json?: unknown;
+}
+
+type ClipboardMatrix = ClipboardMatrixCell[][];
+
+function matrixFromClipboard(html: string, text: string): ClipboardMatrix | null {
   if (html && /<table[\s>]/i.test(html)) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const table = doc.querySelector('table');
     if (table) {
-      const rows: string[][] = [];
+      const rows: ClipboardMatrix = [];
       table.querySelectorAll('tr').forEach(tr => {
-        const row: string[] = [];
+        const row: ClipboardMatrixCell[] = [];
         tr.querySelectorAll('th,td').forEach(cell => {
           const colspan = Math.max(1, Number(cell.getAttribute('colspan') || 1));
           const value = (cell.textContent || '').replace(/\r\n?/g, '\n').trim();
-          for (let i = 0; i < colspan; i += 1) row.push(i === 0 ? value : '');
+          for (let i = 0; i < colspan; i += 1) row.push({ text: i === 0 ? value : '' });
         });
         if (row.length) rows.push(row);
       });
@@ -219,16 +226,16 @@ function matrixFromClipboard(html: string, text: string): string[][] | null {
 
   const normalized = text.replace(/\r\n?/g, '\n').trimEnd();
   if (!normalized || (!normalized.includes('\t') && !normalized.includes('\n'))) return null;
-  return normalized.split('\n').map(row => row.split('\t'));
+  return normalized.split('\n').map(row => row.split('\t').map(value => ({ text: value })));
 }
 
-function matrixFromCustomClipboard(raw: string): string[][] | null {
+function matrixFromCustomClipboard(raw: string): ClipboardMatrix | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { type?: string; rows?: Array<Array<{ text?: string }>> };
+    const parsed = JSON.parse(raw) as { type?: string; rows?: Array<Array<{ text?: string; json?: unknown }>> };
     if (parsed.type !== 'table-cell-range' || !Array.isArray(parsed.rows)) return null;
     const rows = parsed.rows.map(row =>
-      Array.isArray(row) ? row.map(cell => cell?.text ?? '') : [],
+      Array.isArray(row) ? row.map(cell => ({ text: cell?.text ?? '', json: cell?.json })) : [],
     );
     return rows.length ? rows : null;
   } catch {
@@ -245,7 +252,7 @@ function paragraphFragmentFromText(editor: any, value: string) {
   ));
 }
 
-function writeCellMatrix(editor: any, matrix: string[][]): boolean {
+function writeCellMatrix(editor: any, matrix: ClipboardMatrix): boolean {
   const { selection, doc } = editor.state;
   const tableDepth = selection instanceof CellSelection
     ? selection.$anchorCell.depth - 1
@@ -289,11 +296,17 @@ function writeCellMatrix(editor: any, matrix: string[][]): boolean {
       const cellPos = tableStart + cellOffset;
       const cell = table.nodeAt(cellOffset);
       if (!cell) continue;
-      const nextCell = cell.type.createChecked(
-        cell.attrs,
-        paragraphFragmentFromText(editor, matrix[r][c] ?? ''),
-        cell.marks,
-      );
+      const source = matrix[r][c] ?? { text: '' };
+      let content = paragraphFragmentFromText(editor, source.text);
+      if (source.json) {
+        try {
+          const copiedCell = editor.schema.nodeFromJSON(source.json);
+          if (copiedCell.type.name === 'tableCell' || copiedCell.type.name === 'tableHeader') content = copiedCell.content;
+        } catch {
+          // Invalid structured clipboard data falls back to its plain text form.
+        }
+      }
+      const nextCell = cell.type.createChecked(cell.attrs, content, cell.marks);
       tr = tr.replaceWith(cellPos, cellPos + cell.nodeSize, nextCell);
     }
   }

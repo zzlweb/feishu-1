@@ -41,6 +41,18 @@ async function openRichTable(page: import('@playwright/test').Page) {
   await expect(page.locator('td[data-table-cell="true"][data-cell-id]').first()).toBeVisible();
 }
 
+async function dragCellRange(page: import('@playwright/test').Page, from: number, to: number) {
+  const cells = page.locator('td[data-table-cell="true"]');
+  const start = await cells.nth(from).boundingBox();
+  const end = await cells.nth(to).boundingBox();
+  expect(start).not.toBeNull();
+  expect(end).not.toBeNull();
+  await page.mouse.move(start!.x + start!.width - 6, start!.y + start!.height - 6);
+  await page.mouse.down();
+  await page.mouse.move(end!.x + end!.width - 6, end!.y + end!.height - 6, { steps: 10 });
+  await page.mouse.up();
+}
+
 test('edits a rich text cell without selecting the table block', async ({ page }) => {
   await openRichTable(page);
 
@@ -127,6 +139,48 @@ test('selects and highlights a full row from the row rail', async ({ page }) => 
   await expect(host).toHaveClass(/feishu-table-host--rail-row-selected|tableWrapper.*feishu-table-host--rail-row-selected/);
   await expect(page.locator('.feishu-table-chrome__selection-outline--row')).toBeVisible();
   await expect(secondRowRail).toHaveClass(/is-selected/);
+});
+
+test('merges and splits a rectangular rich table selection', async ({ page }) => {
+  await openRichTable(page);
+  await dragCellRange(page, 0, 4);
+  await expect(page.locator('td.selectedCell')).toHaveCount(4);
+
+  const merge = page.locator('.feishu-table-selection-toolbar button[title="合并单元格"]').first();
+  await expect(merge).toBeVisible();
+  await merge.click();
+  const merged = page.locator('td[data-table-cell="true"]').first();
+  await expect(merged).toHaveAttribute('rowspan', '2');
+  await expect(merged).toHaveAttribute('colspan', '2');
+  await expect(merged).toContainText('Alpha');
+  await expect(merged).toContainText('Epsilon');
+
+  await expect(page.locator('.feishu-table-selection-toolbar button[title="拆分单元格"]').first()).toBeVisible();
+  await page.locator('.feishu-table-selection-toolbar button[title="拆分单元格"]').first().click();
+  await expect(page.locator('td[data-table-cell="true"]')).toHaveCount(9);
+});
+
+test('inserts and deletes rows and columns from a cell selection toolbar', async ({ page }) => {
+  await openRichTable(page);
+  await dragCellRange(page, 0, 1);
+  const insert = page.locator('.feishu-table-selection-toolbar button[title="更多"]').first();
+  await expect(insert).toBeVisible();
+  await insert.click();
+  await page.locator('.feishu-table-selection-toolbar').getByText('下方插入行', { exact: true }).click();
+  await expect(page.locator('tr[data-row-index]')).toHaveCount(4);
+
+  await dragCellRange(page, 0, 1);
+  await page.locator('.feishu-table-selection-toolbar button[title="更多"]').first().click();
+  await page.locator('.feishu-table-selection-toolbar').getByText('右侧插入列', { exact: true }).click();
+  await expect(page.locator('tr[data-row-index="0"] td[data-table-cell="true"]')).toHaveCount(4);
+
+  await openRichTable(page);
+  const columnRail = page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--col').first();
+  await page.locator('.feishu-table-host, .tableWrapper').first().hover();
+  await columnRail.click();
+  await page.locator('.feishu-table-selection-toolbar button[title="删除列"]').click();
+  await expect(page.locator('tr[data-row-index="0"] td[data-table-cell="true"]')).toHaveCount(2);
+  await expect(page.locator('tr[data-row-index]')).toHaveCount(3);
 });
 
 test('does not reorder rows when dragging the row rail', async ({ page }) => {
@@ -281,7 +335,7 @@ test('deletes embedded block content inside a table cell with Backspace', async 
   await expect(page.locator('td .feishu-local-card')).toHaveCount(0);
 });
 
-test('resizes columns without exposing row resize handles', async ({ page }) => {
+test('resizes columns and rows without selecting text', async ({ page }) => {
   await openRichTable(page);
 
   const host = page.locator('.feishu-table-host, .tableWrapper').first();
@@ -301,5 +355,17 @@ test('resizes columns without exposing row resize handles', async ({ page }) => 
   expect(afterWidth).not.toBe(beforeWidth);
   const selectedText = await page.evaluate(() => window.getSelection()?.toString() || '');
   expect(selectedText).toBe('');
-  await expect(page.locator('[data-table-resize-handle="true"].feishu-table-chrome__resize-row')).toHaveCount(0);
+
+  const rowHandle = page.locator('[data-table-resize-handle="true"].feishu-table-chrome__resize-row').first();
+  await expect(rowHandle).toBeVisible();
+  const rowBox = await rowHandle.boundingBox();
+  expect(rowBox).not.toBeNull();
+  const beforeHeight = await page.locator('tr[data-row-index="0"]').evaluate(el => getComputedStyle(el).height);
+  await page.mouse.move(rowBox!.x + rowBox!.width / 2, rowBox!.y + rowBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(rowBox!.x + rowBox!.width / 2, rowBox!.y + 34, { steps: 8 });
+  await page.mouse.up();
+  const afterHeight = await page.locator('tr[data-row-index="0"]').evaluate(el => getComputedStyle(el).height);
+  expect(afterHeight).not.toBe(beforeHeight);
+  expect(await page.evaluate(() => window.getSelection()?.toString() || '')).toBe('');
 });

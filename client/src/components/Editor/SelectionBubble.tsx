@@ -307,7 +307,11 @@ function resolveTableBubbleAnchor(editor: Editor): TableBubbleAnchor {
     };
   }
 
-  return { placement: 'top', offset: [0, 12], getRect: null };
+  return {
+    placement: 'top',
+    offset: [0, 12],
+    getRect: () => resolveSelectedTableCellsRect(tableHost, anchorEl, headEl),
+  };
 }
 
 export default function SelectionBubble({ editor, documentId }: SelectionBubbleProps) {

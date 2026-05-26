@@ -81,7 +81,7 @@ const ALIGN_OPTIONS = [
 
 interface Props {
   editor: Editor;
-  pinnedRail: TableRailPin;
+  pinnedRail?: TableRailPin | null;
   left: number;
   top: number;
 }
@@ -552,19 +552,22 @@ export default function TableSelectionToolbar({ editor, pinnedRail, left, top }:
         <SelGlyphShare size={GLYPH} fill={PRIMARY} />
       </button>
 
-      <span className="feishu-table-selection-toolbar__divider" aria-hidden />
-
-      <button
-        type="button"
-        className="feishu-table-selection-toolbar__btn feishu-table-selection-toolbar__btn--danger"
-        title={pinnedRail.kind === 'col' ? '删除列' : '删除行'}
-        onClick={() => runWithCellSelection(() => {
-          if (pinnedRail.kind === 'col') removeSelectedTableColumn(editor);
-          else removeSelectedTableRow(editor);
-        })}
-      >
-        <SelGlyphDelete size={GLYPH} fill={DANGER} />
-      </button>
+      {pinnedRail && (
+        <>
+          <span className="feishu-table-selection-toolbar__divider" aria-hidden />
+          <button
+            type="button"
+            className="feishu-table-selection-toolbar__btn feishu-table-selection-toolbar__btn--danger"
+            title={pinnedRail.kind === 'col' ? '删除列' : '删除行'}
+            onClick={() => runWithCellSelection(() => {
+              if (pinnedRail.kind === 'col') removeSelectedTableColumn(editor);
+              else removeSelectedTableRow(editor);
+            })}
+          >
+            <SelGlyphDelete size={GLYPH} fill={DANGER} />
+          </button>
+        </>
+      )}
     </div>
   );
 }

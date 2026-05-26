@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/react';
 import type { ButtonActionType, SlashMenuItem } from './slashMenuConfig';
 import { insertFeishuTableAt } from './tableInsert';
 import { insertFeishuColumnsAt } from './columnsInsert';
+import { createBaseTable, serializeBaseTable } from './bitableModel';
 
 function pickFile(accept: string, onPick: (file: File) => void) {
   const input = document.createElement('input');
@@ -101,6 +102,20 @@ export function getInsertAbovePosition(editor: Editor): number {
 
 export function insertSlashItemAt(editor: Editor, sectionTitle: string, item: SlashMenuItem, pos: number): void {
   const chain = editor.chain().focus();
+
+  if (sectionTitle === '多维表格') {
+    const view = item.label === '画册' ? 'gallery' : item.label === '甘特图' ? 'gantt' : 'grid';
+    const table = createBaseTable(view);
+    chain.insertContentAt(pos, {
+      type: 'localBitableBlock',
+      attrs: {
+        title: table.name,
+        view,
+        model: serializeBaseTable(table),
+      },
+    }).run();
+    return;
+  }
 
   switch (item.label) {
     case '一级标题':

@@ -65,6 +65,7 @@ import {
 } from './headingCollapse';
 import { insertTableFromClipboardData } from './tableInsert';
 import { registerMediaUploadFile } from './mediaUploadRegistry';
+import BitableBlockView from './BitableBlockView';
 import './Editor.less';
 
 const Notebook = wrapIcon(BookOpenIcon);
@@ -1575,143 +1576,6 @@ const LocalFormulaBlock = TiptapNode.create({
   },
 });
 
-type BitableRows = string[][];
-
-function parseJsonArray<T>(raw: unknown, fallback: T): T {
-  if (typeof raw !== 'string') return fallback;
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed as T : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-const DEFAULT_BITABLE_COLUMNS = ['字段 1', '字段 2', '字段 3'];
-const DEFAULT_BITABLE_ROWS: BitableRows = [
-  ['', '', ''],
-  ['', '', ''],
-  ['', '', ''],
-];
-
-function normalizeBitableRows(rows: BitableRows, columnCount: number): BitableRows {
-  return rows.map(row => Array.from({ length: columnCount }, (_, index) => row[index] ?? ''));
-}
-
-function LocalBitableBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
-  const title = node.attrs.title || '多维表格';
-  const columns = parseJsonArray<string[]>(node.attrs.columns, DEFAULT_BITABLE_COLUMNS);
-  const rows = normalizeBitableRows(parseJsonArray<BitableRows>(node.attrs.rows, DEFAULT_BITABLE_ROWS), columns.length);
-
-  const commit = (nextColumns: string[], nextRows: BitableRows, nextTitle = title) => {
-    updateAttributes({
-      title: nextTitle,
-      columns: JSON.stringify(nextColumns),
-      rows: JSON.stringify(normalizeBitableRows(nextRows, nextColumns.length)),
-    });
-  };
-
-  const updateCell = (rowIndex: number, colIndex: number, value: string) => {
-    const nextRows = rows.map(row => [...row]);
-    nextRows[rowIndex][colIndex] = value;
-    commit(columns, nextRows);
-  };
-
-  const updateColumn = (colIndex: number, value: string) => {
-    const nextColumns = [...columns];
-    nextColumns[colIndex] = value;
-    commit(nextColumns, rows);
-  };
-
-  const addRow = () => {
-    commit(columns, [...rows, Array.from({ length: columns.length }, () => '')]);
-  };
-
-  const addColumn = () => {
-    if (columns.length >= 8) return;
-    commit([...columns, `字段 ${columns.length + 1}`], rows.map(row => [...row, '']));
-  };
-
-  const removeRow = (rowIndex: number) => {
-    const nextRows = rows.filter((_, index) => index !== rowIndex);
-    commit(columns, nextRows.length > 0 ? nextRows : [Array.from({ length: columns.length }, () => '')]);
-  };
-
-  const removeColumn = (colIndex: number) => {
-    if (columns.length <= 1) return;
-    commit(
-      columns.filter((_, index) => index !== colIndex),
-      rows.map(row => row.filter((_, index) => index !== colIndex)),
-    );
-  };
-
-  const selectThisBlock = (event: React.MouseEvent) => {
-    if ((event.target as Element).closest('input, button, a')) return;
-    const pos = typeof getPos === 'function' ? getPos() : null;
-    if (typeof pos === 'number') {
-      editor.chain().focus().setNodeSelection(pos).run();
-    }
-  };
-
-  return (
-    <NodeViewWrapper
-      className={`feishu-bitable-block${selected ? ' is-selected' : ''}`}
-      {...blockDomAttrs(node.attrs)}
-      contentEditable={false}
-      onMouseDown={selectThisBlock}
-    >
-      <div className="feishu-bitable-block__header">
-        <input
-          className="feishu-bitable-block__title"
-          value={title}
-          onChange={event => commit(columns, rows, event.target.value)}
-        />
-        <div className="feishu-bitable-block__actions">
-          <button type="button" onClick={addRow}>新增记录</button>
-          <button type="button" onClick={addColumn} disabled={columns.length >= 8}>新增字段</button>
-        </div>
-      </div>
-      <div className="feishu-bitable-block__scroll">
-        <table className="feishu-bitable-block__table">
-          <thead>
-            <tr>
-              <th className="feishu-bitable-block__index">#</th>
-              {columns.map((column, colIndex) => (
-                <th key={`bitable-col-${colIndex}`}>
-                  <div className="feishu-bitable-block__field">
-                    <input value={column} onChange={event => updateColumn(colIndex, event.target.value)} />
-                    {columns.length > 1 && (
-                      <button type="button" onClick={() => removeColumn(colIndex)} aria-label="删除字段">×</button>
-                    )}
-                  </div>
-                </th>
-              ))}
-              <th className="feishu-bitable-block__tail" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr key={`bitable-row-${rowIndex}`}>
-                <td className="feishu-bitable-block__index">
-                  <button type="button" onClick={() => removeRow(rowIndex)} title="删除记录">
-                    {rowIndex + 1}
-                  </button>
-                </td>
-                {columns.map((_, colIndex) => (
-                  <td key={`bitable-cell-${rowIndex}-${colIndex}`}>
-                    <input value={row[colIndex] ?? ''} onChange={event => updateCell(rowIndex, colIndex, event.target.value)} />
-                  </td>
-                ))}
-                <td className="feishu-bitable-block__tail" />
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </NodeViewWrapper>
-  );
-}
-
 const LocalBitableBlock = TiptapNode.create({
   name: 'localBitableBlock',
   group: 'block',
@@ -1724,14 +1588,32 @@ const LocalBitableBlock = TiptapNode.create({
         renderHTML: attributes => ({ 'data-title': attributes.title }),
       },
       columns: {
-        default: JSON.stringify(DEFAULT_BITABLE_COLUMNS),
-        parseHTML: element => element.getAttribute('data-columns') || JSON.stringify(DEFAULT_BITABLE_COLUMNS),
+        default: '',
+        parseHTML: element => element.getAttribute('data-columns') || '',
         renderHTML: attributes => ({ 'data-columns': attributes.columns }),
       },
       rows: {
-        default: JSON.stringify(DEFAULT_BITABLE_ROWS),
-        parseHTML: element => element.getAttribute('data-rows') || JSON.stringify(DEFAULT_BITABLE_ROWS),
+        default: '',
+        parseHTML: element => element.getAttribute('data-rows') || '',
         renderHTML: attributes => ({ 'data-rows': attributes.rows }),
+      },
+      view: {
+        default: '',
+        parseHTML: element => {
+          const value = element.getAttribute('data-view');
+          return value === 'gallery' || value === 'grid' || value === 'gantt' ? value : '';
+        },
+        renderHTML: attributes => ({ 'data-view': ['gallery', 'gantt'].includes(attributes.view) ? attributes.view : 'grid' }),
+      },
+      covers: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-covers') || '',
+        renderHTML: attributes => ({ 'data-covers': attributes.covers || '' }),
+      },
+      model: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-model') || '',
+        renderHTML: attributes => ({ 'data-model': attributes.model || '' }),
       },
     };
   },
@@ -1739,18 +1621,12 @@ const LocalBitableBlock = TiptapNode.create({
     return [{ tag: 'div[data-local-block="bitable"]' }];
   },
   renderHTML({ HTMLAttributes }) {
-    const columns = parseJsonArray<string[]>(HTMLAttributes.columns, DEFAULT_BITABLE_COLUMNS);
-    const rows = normalizeBitableRows(parseJsonArray<BitableRows>(HTMLAttributes.rows, DEFAULT_BITABLE_ROWS), columns.length);
-    return ['div', { ...HTMLAttributes, 'data-local-block': 'bitable', class: 'feishu-bitable-block' },
-      ['div', { class: 'feishu-bitable-block__static-title' }, HTMLAttributes.title || '多维表格'],
-      ['table', { class: 'feishu-bitable-block__table' },
-        ['thead', {}, ['tr', {}, ...columns.map(column => ['th', {}, column || '字段'])]],
-        ['tbody', {}, ...rows.map(row => ['tr', {}, ...row.map(cell => ['td', {}, cell || ''])])],
-      ],
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'bitable', class: 'feishu-bitable-block feishu-base-block' },
+      ['div', { class: 'base-viewbar' }, HTMLAttributes.title || '多维表格'],
     ];
   },
   addNodeView() {
-    return ReactNodeViewRenderer(LocalBitableBlockView);
+    return ReactNodeViewRenderer(BitableBlockView);
   },
 });
 
