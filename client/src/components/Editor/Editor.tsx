@@ -1964,6 +1964,13 @@ function getBlockToolsAnchorTop(
   if (blockEl.classList.contains('tableWrapper') || blockEl.classList.contains('feishu-table-host')) {
     return rr.top + 20 - areaRectTop;
   }
+  if (blockEl.classList.contains('feishu-bitable-block')) {
+    const viewbar = blockEl.querySelector('.base-viewbar') as HTMLElement | null;
+    const viewbarRect = viewbar?.getBoundingClientRect();
+    return viewbarRect
+      ? viewbarRect.top + viewbarRect.height / 2 - areaRectTop
+      : rr.top + 20 - areaRectTop;
+  }
   if (
     blockEl.classList.contains('feishu-image-block-wrap')
     || blockEl.classList.contains('feishu-file-block--image')
@@ -1971,6 +1978,14 @@ function getBlockToolsAnchorTop(
     return rr.top + 20 - areaRectTop;
   }
   return rr.top + rr.height / 2 - areaRectTop;
+}
+
+function getBlockToolsAnchorLeft(blockEl: HTMLElement, areaRectLeft: number, columnContent: HTMLElement | null): number {
+  if (columnContent) return columnContent.getBoundingClientRect().left - areaRectLeft;
+  if (blockEl.classList.contains('feishu-bitable-block')) {
+    return blockEl.getBoundingClientRect().left - areaRectLeft;
+  }
+  return 0;
 }
 
 function computePlusMenuPosition(
@@ -2301,7 +2316,7 @@ export default function Editor({
     const areaRect = editorAreaRef.current.getBoundingClientRect();
     const top = getBlockToolsAnchorTop(editorInstance, row, areaRect.top);
     const columnContent = getColumnContentFromBlock(row);
-    const left = columnContent ? columnContent.getBoundingClientRect().left - areaRect.left : 0;
+    const left = getBlockToolsAnchorLeft(row, areaRect.left, columnContent);
     const blockType = getCurrentBlockType(editorInstance);
 
     setBlockTools(prev => {
@@ -2423,7 +2438,7 @@ export default function Editor({
       }
       const centerY = getBlockToolsAnchorTop(editorInstance, info.element, areaRect.top);
       const columnContent = getColumnContentFromBlock(info.element);
-      const left = columnContent ? columnContent.getBoundingClientRect().left - areaRect.left : 0;
+      const left = getBlockToolsAnchorLeft(info.element, areaRect.left, columnContent);
       setBlockTools({
         visible: true,
         top: centerY,

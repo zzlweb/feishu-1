@@ -167,7 +167,7 @@ export function createGanttConfig(fields: BaseField[], primaryFieldId: string): 
     titleFieldId: primaryFieldId,
     startDateFieldId: dateFields[0]?.id,
     endDateFieldId: dateFields[1]?.id || dateFields[0]?.id,
-    dayWidth: 58,
+    dayWidth: 60,
   };
 }
 
@@ -282,7 +282,7 @@ function normalizeTable(raw: BaseTable): BaseTable {
           endDateFieldId: fields.some(field => field.id === config.endDateFieldId && field.type === 'date')
             ? config.endDateFieldId
             : defaults.endDateFieldId,
-          dayWidth: Math.max(36, Math.min(96, Number(config.dayWidth) || defaults.dayWidth)),
+          dayWidth: Math.max(24, Math.min(60, Number(config.dayWidth) || defaults.dayWidth)),
         },
       };
     }

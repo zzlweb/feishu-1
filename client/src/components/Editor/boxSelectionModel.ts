@@ -316,12 +316,16 @@ function collectFromContainer(editor: Editor, container: HTMLElement, units: Sel
       continue;
     }
 
-    const blockEl =
+    const renderedBitableBlock = child.matches('.feishu-bitable-block')
+      ? child
+      : child.querySelector(':scope > .feishu-bitable-block[data-node-view-wrapper]') as HTMLElement | null;
+    const blockEl = renderedBitableBlock ?? (
       child.classList.contains('feishu-code-block') ? child
       : child.classList.contains('feishu-highlight-block-wrap') ? child
       : child.classList.contains('feishu-divider') ? child
       : child.matches('.feishu-image-block-wrap, .feishu-file-block, .feishu-button-block, .feishu-formula-editor, .feishu-bitable-block, .feishu-sync-block, .feishu-local-card, [data-local-block]') ? child
-      : child;
+      : child
+    );
 
     const range = resolveBlockRange(editor, blockEl);
     if (!range) continue;

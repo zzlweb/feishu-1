@@ -52,6 +52,10 @@ function daysBetween(from: Date, to: Date) {
   return Math.round((to.getTime() - from.getTime()) / DAY_MS);
 }
 
+function formatMonth(date: Date) {
+  return `${date.getFullYear()}年${date.getMonth() + 1}月`;
+}
+
 function ViewIcon({ type }: { type: BaseView['type'] }) {
   if (type === 'gallery') return <SlashGlyphGallery size={15} />;
   if (type === 'gantt') return <SlashGlyphGantt size={15} />;
@@ -116,6 +120,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [dropActive, setDropActive] = useState(false);
   const [ganttDraft, setGanttDraft] = useState<{ recordId: string; start: string; end: string } | null>(null);
+  const ganttDraftRef = useRef<{ recordId: string; start: string; end: string } | null>(null);
   const ganttDragRef = useRef<{
     recordId: string;
     mode: 'move' | 'start' | 'end';
@@ -491,13 +496,21 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const ganttDates = records.flatMap(record => {
     const start = readDate(record.fields[ganttConfig.startDateFieldId || '']);
     const end = readDate(record.fields[ganttConfig.endDateFieldId || '']);
-    return start && end ? [start, end] : [];
+    return start && end && daysBetween(start, end) >= 0 ? [start, end] : [];
   });
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const ganttOrigin = offsetDate(ganttDates.length ? new Date(Math.min(...ganttDates.map(date => date.getTime()))) : today, -2);
-  const ganttLimit = offsetDate(ganttDates.length ? new Date(Math.max(...ganttDates.map(date => date.getTime()))) : today, 14);
-  const ganttDays = Array.from({ length: Math.max(18, daysBetween(ganttOrigin, ganttLimit) + 3) }, (_, index) => offsetDate(ganttOrigin, index));
+  const ganttExtent = [...ganttDates, today];
+  const ganttOrigin = offsetDate(new Date(Math.min(...ganttExtent.map(date => date.getTime()))), -2);
+  const ganttLimit = offsetDate(new Date(Math.max(...ganttExtent.map(date => date.getTime()))), 14);
+  const ganttDays = Array.from({ length: Math.max(22, daysBetween(ganttOrigin, ganttLimit) + 3) }, (_, index) => offsetDate(ganttOrigin, index));
+  const ganttMonthSpans = ganttDays.reduce<Array<{ key: string; label: string; days: number }>>((items, day) => {
+    const key = `${day.getFullYear()}-${day.getMonth()}`;
+    const last = items[items.length - 1];
+    if (last?.key === key) last.days += 1;
+    else items.push({ key, label: formatMonth(day), days: 1 });
+    return items;
+  }, []);
 
   const startGanttDrag = (event: ReactPointerEvent<HTMLElement>, record: BaseRecord, mode: 'move' | 'start' | 'end') => {
     if (activeView.locked || !ganttConfig.startDateFieldId || !ganttConfig.endDateFieldId) return;
@@ -508,7 +521,9 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     ganttDragRef.current = { recordId: record.id, mode, pointerId: event.pointerId, originX: event.clientX, start, end };
-    setGanttDraft({ recordId: record.id, start: dateValue(start), end: dateValue(end) });
+    const draft = { recordId: record.id, start: dateValue(start), end: dateValue(end) };
+    ganttDraftRef.current = draft;
+    setGanttDraft(draft);
   };
 
   const moveGanttDrag = (event: ReactPointerEvent<HTMLElement>) => {
@@ -526,15 +541,18 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     } else {
       end = offsetDate(end, Math.max(delta, -daysBetween(start, end)));
     }
-    setGanttDraft({ recordId: drag.recordId, start: dateValue(start), end: dateValue(end) });
+    const draft = { recordId: drag.recordId, start: dateValue(start), end: dateValue(end) };
+    ganttDraftRef.current = draft;
+    setGanttDraft(draft);
   };
 
   const endGanttDrag = (event: ReactPointerEvent<HTMLElement>) => {
     const drag = ganttDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
-    const draft = ganttDraft;
+    const draft = ganttDraftRef.current;
     ganttDragRef.current = null;
+    ganttDraftRef.current = null;
     setGanttDraft(null);
     if (!draft || !ganttConfig.startDateFieldId || !ganttConfig.endDateFieldId) return;
     mutate(current => updateRecord(current, draft.recordId, record => {
@@ -543,38 +561,71 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     }));
   };
 
+  const scheduleRecordAt = (recordId: string, start: Date) => {
+    if (!ganttConfig.startDateFieldId || !ganttConfig.endDateFieldId || activeView.locked) return;
+    mutate(current => updateRecord(current, recordId, record => {
+      const next = withUpdatedValue(record, ganttConfig.startDateFieldId!, dateValue(start));
+      return withUpdatedValue(next, ganttConfig.endDateFieldId!, dateValue(offsetDate(start, 3)));
+    }));
+  };
+
   const renderGantt = () => (
     <div className="base-gantt">
+      <div className="base-gantt__toolbar">
+        <div className="base-gantt__legend">
+          任务排期
+        </div>
+        <div className="base-gantt__scale">
+          <button type="button" className={ganttConfig.dayWidth >= 48 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 60 })}>周</button>
+          <button type="button" className={ganttConfig.dayWidth >= 30 && ganttConfig.dayWidth < 48 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 40 })}>月</button>
+          <button type="button" className={ganttConfig.dayWidth < 30 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 24 })}>季</button>
+        </div>
+      </div>
       <div className="base-gantt__scroll">
         <div className="base-gantt__header">
-          <div className="base-gantt__record-column">任务名称</div>
-          <div className="base-gantt__timeline" style={{ width: ganttDays.length * ganttConfig.dayWidth }}>
-            {ganttDays.map(day => (
-              <span key={dateValue(day)} className={dateValue(day) === dateValue(today) ? 'is-today' : ''} style={{ width: ganttConfig.dayWidth }}>
-                {day.getMonth() + 1}/{day.getDate()}
-              </span>
-            ))}
+          <div className="base-gantt__record-column"><span className="base-gantt__field-icon">A</span>任务名</div>
+          <div className="base-gantt__timeline-head" style={{ width: ganttDays.length * ganttConfig.dayWidth }}>
+            <div className="base-gantt__months">
+              {ganttMonthSpans.map(month => <span key={month.key} style={{ width: month.days * ganttConfig.dayWidth }}>{month.label}</span>)}
+            </div>
+            <div className="base-gantt__days">
+              {ganttDays.map(day => (
+                <span key={dateValue(day)} className={dateValue(day) === dateValue(today) ? 'is-today' : ''} style={{ width: ganttConfig.dayWidth }}>
+                  {day.getDate()}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
-        {records.map((record, index) => {
+        {records.map(record => {
           const title = valueText(record.fields[ganttConfig.titleFieldId || table.primaryFieldId]) || '未命名记录';
           const draft = ganttDraft?.recordId === record.id ? ganttDraft : null;
           const start = readDate(draft?.start ?? record.fields[ganttConfig.startDateFieldId || '']);
           const end = readDate(draft?.end ?? record.fields[ganttConfig.endDateFieldId || '']);
+          const scheduled = Boolean(start && end && daysBetween(start, end) >= 0);
           return (
             <div className="base-gantt__row" key={record.id}>
               <button type="button" className="base-gantt__record" onClick={() => setDetailRecordId(record.id)}>
-                <em>{index + 1}</em>{title}
+                {title}
               </button>
-              <div className="base-gantt__timeline base-gantt__lane" style={{ width: ganttDays.length * ganttConfig.dayWidth }}>
+              <div
+                className={`base-gantt__timeline base-gantt__lane${scheduled ? '' : ' is-unscheduled'}`}
+                style={{ width: ganttDays.length * ganttConfig.dayWidth }}
+                onClick={event => {
+                  if (scheduled || (event.target instanceof Element && event.target.closest('.base-gantt__schedule'))) return;
+                  const cell = Math.max(0, Math.min(ganttDays.length - 1, Math.floor((event.clientX - event.currentTarget.getBoundingClientRect().left) / ganttConfig.dayWidth)));
+                  scheduleRecordAt(record.id, ganttDays[cell]);
+                }}
+                title={scheduled ? undefined : '点击日期设置排期'}
+              >
                 {ganttDays.map(day => <span key={dateValue(day)} className={dateValue(day) === dateValue(today) ? 'is-today' : ''} style={{ width: ganttConfig.dayWidth }} />)}
-                {start && end ? (
+                {scheduled ? (
                   <div
                     className="base-gantt__bar"
                     data-record-id={record.id}
                     style={{
-                      left: daysBetween(ganttOrigin, start) * ganttConfig.dayWidth + 3,
-                      width: (daysBetween(start, end) + 1) * ganttConfig.dayWidth - 6,
+                      left: daysBetween(ganttOrigin, start!) * ganttConfig.dayWidth + 3,
+                      width: (daysBetween(start!, end!) + 1) * ganttConfig.dayWidth - 6,
                     }}
                     onPointerDown={event => startGanttDrag(event, record, 'move')}
                     onPointerMove={moveGanttDrag}
@@ -586,11 +637,12 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                     <i className="base-gantt__resize base-gantt__resize--end" onPointerDown={event => startGanttDrag(event, record, 'end')} />
                   </div>
                 ) : (
-                  <button type="button" className="base-gantt__schedule" onClick={() => {
-                    if (!ganttConfig.startDateFieldId || !ganttConfig.endDateFieldId) return;
-                    changeCell(record.id, ganttConfig.startDateFieldId, dateValue(today));
-                    changeCell(record.id, ganttConfig.endDateFieldId, dateValue(offsetDate(today, 3)));
-                  }}>+ 设置排期</button>
+                  <button
+                    type="button"
+                    className="base-gantt__schedule"
+                    style={{ left: daysBetween(ganttOrigin, today) * ganttConfig.dayWidth + 5 }}
+                    onClick={() => scheduleRecordAt(record.id, today)}
+                  >+ 设置排期</button>
                 )}
               </div>
             </div>
@@ -649,8 +701,9 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           )}
         </div>
         <div className="base-viewbar__actions">
-          {activeView.type === 'gallery' && <button type="button" aria-label="画册设置" onClick={() => setShowSettings(open => !open)}>⚙</button>}
-          {activeView.type === 'gantt' && <button type="button" aria-label="甘特设置" onClick={() => setShowSettings(open => !open)}>⚙</button>}
+          <button type="button" className="base-viewbar__action-btn" aria-label="添加记录" onClick={() => addRecord()}>+</button>
+          {activeView.type === 'gallery' && <button type="button" className="base-viewbar__action-btn" aria-label="画册设置" onClick={() => setShowSettings(open => !open)}>⚙</button>}
+          {activeView.type === 'gantt' && <button type="button" className="base-viewbar__action-btn" aria-label="甘特设置" onClick={() => setShowSettings(open => !open)}>⚙</button>}
         </div>
         {selectedIds.size > 0 && <button type="button" className="base-selection-delete base-danger" onClick={() => removeRecords(Array.from(selectedIds), true)}>删除已选 {selectedIds.size} 项</button>}
       </header>
@@ -830,9 +883,9 @@ function GanttSettings({
       </div>
       <label>时间刻度
         <select disabled={view.locked} value={config.dayWidth} onChange={event => onConfig({ dayWidth: Number(event.target.value) })}>
-          <option value={42}>紧凑</option>
-          <option value={58}>标准</option>
-          <option value={76}>宽松</option>
+          <option value={60}>周</option>
+          <option value={40}>月</option>
+          <option value={24}>季</option>
         </select>
       </label>
       <label>排序字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
