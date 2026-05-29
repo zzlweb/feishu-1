@@ -77,6 +77,20 @@ const MEDIA_UPLOAD_MAX_SIZE = 200 * 1024 * 1024;
 const BLOCKED_FILE_EXTENSIONS = new Set(['exe', 'bat', 'cmd', 'sh', 'msi', 'com', 'scr', 'ps1']);
 const mediaUploadFiles = new Map<string, { file: File; objectUrl?: string; controller?: AbortController }>();
 
+function bitableToolTypeFromView(view: unknown) {
+  if (view === 'gallery') return 'bitable-gallery';
+  if (view === 'gantt') return 'bitable-gantt';
+  return 'bitable';
+}
+
+function bitableToolTypeFromElement(element: HTMLElement) {
+  return bitableToolTypeFromView(element.getAttribute('data-base-view-type') || element.getAttribute('data-view'));
+}
+
+function isBitableToolType(type: string) {
+  return type === 'bitable' || type === 'bitable-gallery' || type === 'bitable-gantt';
+}
+
 function blockDomAttrs(attrs: Record<string, unknown> | null | undefined) {
   const blockId = typeof attrs?.blockId === 'string' && attrs.blockId ? attrs.blockId : '';
   return blockId ? { id: blockId, 'data-block-id': blockId } : {};
@@ -2235,7 +2249,7 @@ export default function Editor({
     }
     const bitableBlock = target.closest('.feishu-bitable-block') as HTMLElement | null;
     if (bitableBlock && editorAreaRef.current.contains(bitableBlock)) {
-      return { element: bitableBlock, type: 'bitable', isEmpty: false };
+      return { element: bitableBlock, type: bitableToolTypeFromElement(bitableBlock), isEmpty: false };
     }
     const divTableBlock = target.closest('.feishu-div-table') as HTMLElement | null;
     if (divTableBlock && editorAreaRef.current.contains(divTableBlock)) {
@@ -2290,7 +2304,10 @@ export default function Editor({
     }
     if (editorInstance.isActive('localFormulaBlock')) return 'formula';
     if (editorInstance.isActive('localButtonBlock')) return 'button';
-    if (editorInstance.isActive('localBitableBlock')) return 'bitable';
+    if (editorInstance.isActive('localBitableBlock')) {
+      const attrs = editorInstance.getAttributes('localBitableBlock');
+      return bitableToolTypeFromView(attrs.view);
+    }
     if (editorInstance.isActive('localDivTableBlock')) return 'div-table';
     if (editorInstance.isActive('localEmbedBlock')) return 'embed';
     if (editorInstance.isActive('localSyncBlock')) return 'sync';
@@ -2317,7 +2334,9 @@ export default function Editor({
     const top = getBlockToolsAnchorTop(editorInstance, row, areaRect.top);
     const columnContent = getColumnContentFromBlock(row);
     const left = getBlockToolsAnchorLeft(row, areaRect.left, columnContent);
-    const blockType = getCurrentBlockType(editorInstance);
+    const blockType = row.classList.contains('feishu-bitable-block')
+      ? bitableToolTypeFromElement(row)
+      : getCurrentBlockType(editorInstance);
 
     setBlockTools(prev => {
       if (!prev.visible) return prev;
@@ -2681,6 +2700,10 @@ export default function Editor({
     const row = activeBlockElRef.current;
     const area = editorAreaRef.current;
     if (!row?.isConnected || !area) {
+      setRowHighlightBand(null);
+      return;
+    }
+    if (row.classList.contains('feishu-bitable-block')) {
       setRowHighlightBand(null);
       return;
     }
@@ -3414,6 +3437,27 @@ export default function Editor({
     };
   }, [activeTableHost, tableHandleHovered, contextMenu?.variant]);
 
+  useLayoutEffect(() => {
+    const block = activeBlockElRef.current;
+    if (!block?.isConnected || !block.classList.contains('feishu-bitable-block')) return;
+    const highlighted =
+      !readOnly &&
+      blockTools.visible &&
+      (blockGutterHovered || plusHovered || Boolean(contextMenu) || (slashMenuVisible && slashMenuFromPlus));
+    block.classList.toggle('is-block-gutter-active', highlighted);
+    return () => {
+      block.classList.remove('is-block-gutter-active');
+    };
+  }, [
+    readOnly,
+    blockTools.visible,
+    blockGutterHovered,
+    plusHovered,
+    contextMenu,
+    slashMenuVisible,
+    slashMenuFromPlus,
+  ]);
+
   const openBlockConfigMenu = (options?: { skipCooldown?: boolean }) => {
     if (slashMenuVisible && slashMenuFromPlus) return;
     const isTableTarget = blockTools.type === 'table';
@@ -3434,7 +3478,7 @@ export default function Editor({
     cancelContextMenuClose();
     // Atom blocks must remain node-selected so block menu actions target the block itself.
     if (
-      ['hr', 'button', 'button-link', 'button-duplicate', 'button-follow', 'formula', 'bitable', 'div-table', 'embed', 'file', 'sync'].includes(blockTools.type)
+      ['hr', 'button', 'button-link', 'button-duplicate', 'button-follow', 'formula', 'bitable', 'bitable-gallery', 'bitable-gantt', 'div-table', 'embed', 'file', 'sync'].includes(blockTools.type)
       && activeBlockElRef.current
       && editor
     ) {
@@ -3831,7 +3875,7 @@ export default function Editor({
               />
               ) : null;
             })()}
-            {rowHighlightBand && blockTools.type !== 'table' && (
+            {rowHighlightBand && blockTools.type !== 'table' && !isBitableToolType(blockTools.type) && (
               <div
                 className="block-row-gutter-highlight-band"
                 style={{

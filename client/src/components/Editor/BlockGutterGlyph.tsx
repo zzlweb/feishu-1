@@ -13,6 +13,9 @@ import {
   SlashGlyphButton,
   SlashGlyphLink,
   SlashGlyphFormula,
+  SlashGlyphBitableGrid,
+  SlashGlyphGallery,
+  SlashGlyphGantt,
 } from '../../icons/slashMenuGlyphs';
 
 const S = 16;
@@ -58,6 +61,11 @@ export default function BlockGutterGlyph({ type }: { type: string }) {
       return <SlashGlyphDivider size={S} fill={n1} />;
     case 'table':
     case 'bitable':
+      return <SlashGlyphBitableGrid size={S} fill="#34c759" />;
+    case 'bitable-gallery':
+      return <SlashGlyphGallery size={S} fill="#7b61ff" />;
+    case 'bitable-gantt':
+      return <SlashGlyphGantt size={S} fill="#e9519f" />;
     case 'div-table':
       return <SlashGlyphTable size={S} fill="#52c41a" />;
     case 'image':

@@ -172,6 +172,10 @@ function shouldShowBubble({
   if (document.querySelector('.slash-menu')) return false;
   if (editor.isActive('codeBlock')) return false;
   if (isImageBlockActive(editor)) return false;
+  // 多维表格（含其设置/详情面板）不展示正文格式气泡工具栏
+  if (editor.isActive('localBitableBlock')) return false;
+  const activeEl = document.activeElement;
+  if (activeEl instanceof Element && activeEl.closest('.feishu-base-block, .base-settings, .base-detail')) return false;
   return true;
 }
 

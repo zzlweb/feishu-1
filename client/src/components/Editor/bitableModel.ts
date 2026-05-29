@@ -176,9 +176,21 @@ export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' = 'gal
   const titleId = uid('fld_title');
   const attachmentId = uid('fld_attachment');
   const statusId = uid('fld_status');
+  const noteId = uid('fld_note');
   const startDateId = uid('fld_start_date');
   const endDateId = uid('fld_end_date');
-  const fields: BaseField[] = [
+  const fields: BaseField[] = initialView === 'grid' ? [
+    { id: titleId, name: '任务名', type: 'text', required: true },
+    {
+      id: statusId,
+      name: '任务状态',
+      type: 'single_select',
+      options: { choices: [{ id: 'todo', name: '未开始', color: '#dee8ff' }, { id: 'doing', name: '进行中', color: '#f8e6c2' }, { id: 'done', name: '已完成', color: '#c7effb' }] },
+    },
+    { id: noteId, name: '备注', type: 'text' },
+    { id: startDateId, name: '开始日期', type: 'date' },
+    { id: endDateId, name: '截止日期', type: 'date' },
+  ] : [
     { id: titleId, name: '名称', type: 'text', required: true },
     { id: attachmentId, name: '附件', type: 'attachment' },
     {
@@ -190,7 +202,18 @@ export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' = 'gal
     { id: startDateId, name: '开始日期', type: 'date' },
     { id: endDateId, name: '结束日期', type: 'date' },
   ];
-  const records = Array.from({ length: 3 }, (_, index) => createRecord(tableId, fields, titleId, `卡片 ${index + 1}`));
+  const records = Array.from({ length: 3 }, (_, index) => createRecord(tableId, fields, titleId, initialView === 'grid' ? `任务 ${index + 1}` : `卡片 ${index + 1}`));
+  if (initialView === 'grid') {
+    const statuses = ['未开始', '进行中', '已完成'];
+    const starts = ['2026/05/25', '2026/05/27', '2026/05/29'];
+    const ends = ['2026/05/28', '2026/05/30', '2026/06/01'];
+    records.forEach((record, index) => {
+      record.fields[statusId] = statuses[index] || '';
+      record.fields[noteId] = '';
+      record.fields[startDateId] = starts[index] || '';
+      record.fields[endDateId] = ends[index] || '';
+    });
+  }
   if (initialView === 'gantt') {
     const base = new Date();
     records.forEach((record, index) => {
@@ -452,7 +475,7 @@ export function groupRecords(table: BaseTable, view: BaseView, records: BaseReco
   return Array.from(groups.entries()).map(([label, group]) => ({ key: label, label, records: group }));
 }
 
-export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt') {
+export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt' | 'kanban') {
   if (type === 'gantt') {
     let fields = table.fields;
     const dateFields = fields.filter(field => field.type === 'date');
@@ -489,6 +512,8 @@ export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt') {
   }
   const view: BaseView = type === 'gallery'
     ? { id: uid('view_gallery'), tableId: table.id, name: '画册', type, config: createGalleryConfig(table.fields, table.primaryFieldId), filters: [], sorts: [] }
+    : type === 'kanban'
+    ? { id: uid('view_kanban'), tableId: table.id, name: '看板', type, config: createGalleryConfig(table.fields, table.primaryFieldId), filters: [], sorts: [] }
     : { id: uid('view_grid'), tableId: table.id, name: '表格', type, config: {}, filters: [], sorts: [] };
   return { ...table, views: [...table.views, view], activeViewId: view.id };
 }
