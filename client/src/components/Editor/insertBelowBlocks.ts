@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/react';
+import { parseJsonPayload } from '../../api/http';
 import type { ButtonActionType, SlashMenuItem } from './slashMenuConfig';
 import { insertFeishuTableAt } from './tableInsert';
 import { insertFeishuColumnsAt } from './columnsInsert';
@@ -19,7 +20,7 @@ async function uploadFile(file: File) {
   const body = new FormData();
   body.append('file', file);
   const res = await fetch('/api/uploads', { method: 'POST', body });
-  const json = await res.json();
+  const json = parseJsonPayload<{ name: string; size: number; type: string; url: string }>(await res.text());
   if (!res.ok || json.code !== 0) throw new Error(json.message || '上传失败');
   return json.data as { name: string; size: number; type: string; url: string };
 }
@@ -104,7 +105,13 @@ export function insertSlashItemAt(editor: Editor, sectionTitle: string, item: Sl
   const chain = editor.chain().focus();
 
   if (sectionTitle === '多维表格') {
-    const view = item.label === '画册' ? 'gallery' : item.label === '甘特图' ? 'gantt' : 'grid';
+    const view = item.label === '画册'
+      ? 'gallery'
+      : item.label === '甘特图'
+      ? 'gantt'
+      : item.label === '看板'
+      ? 'kanban'
+      : 'grid';
     const table = createBaseTable(view);
     chain.insertContentAt(pos, {
       type: 'localBitableBlock',

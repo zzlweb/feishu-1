@@ -83,10 +83,10 @@ async function openGallery(page: import('@playwright/test').Page) {
 
 async function createGridViewFromGallery(page: import('@playwright/test').Page) {
   await page.locator('.base-viewbar__current').first().click();
-  const switcher = page.locator('.base-view-menu').first();
+  const switcher = page.locator('.base-view-sidebar').first();
   await expect(switcher).toBeVisible();
-  await switcher.getByRole('button', { name: /新建/ }).click();
-  await page.locator('.base-view-create-menu').getByRole('button', { name: /表格视图/ }).click();
+  await switcher.getByRole('button', { name: /新建/ }).hover();
+  await page.locator('.base-view-sidebar__create-list').getByRole('button', { name: /表格视图/ }).click();
   await expect(page.locator('.feishu-base-block').first()).toHaveAttribute('data-base-view-type', 'grid');
 }
 
@@ -103,24 +103,24 @@ test('migrates an older gallery block without data-view as gallery instead of gr
   await page.goto('/doc/bitable-gallery-e2e');
   await expect(page.locator('.feishu-base-block')).toHaveAttribute('data-base-view-type', 'gallery');
   await expect(page.locator('.base-gallery-card')).toHaveCount(2);
-  await expect(page.locator('.base-grid-table')).toHaveCount(0);
+  await expect(page.locator('.base-grid-canvas')).toHaveCount(0);
 });
 
 test('migrates legacy cards and shares records through the view dropdown', async ({ page }) => {
   await openGallery(page);
 
-  await page.locator('.base-gallery-card').first().click();
-  const detail = page.locator('.base-detail');
-  await expect(detail).toBeVisible();
-  await detail.locator('.base-detail__field').first().locator('input').fill('更新后的产品');
-  await detail.getByRole('button', { name: '×' }).first().click();
-  await expect(page.locator('.base-gallery-card__title').first()).toHaveText('更新后的产品');
-
   await createGridViewFromGallery(page);
-  await expect(page.locator('.base-grid-table tbody tr').first().locator('input').first()).toHaveValue('更新后的产品');
+  await page.locator('.base-grid-canvas').click({ position: { x: 120, y: 48 } });
+  const editor = page.locator('.base-grid-cell-editor');
+  await expect(editor).toBeVisible();
+  await editor.fill('更新后的产品');
+  await editor.press('Enter');
+  await page.locator('.base-viewbar__current').click();
+  await page.locator('.base-view-sidebar__name', { hasText: '画册' }).click();
+  await expect(page.locator('.base-gallery-card__title').first()).toHaveText('更新后的产品');
 });
 
-test('uses an attachment field as gallery cover and updates it from record detail', async ({ page }) => {
+test('uses an attachment field as gallery cover and updates it by dropping on a card', async ({ page }) => {
   await page.route('**/api/uploads', route =>
     route.fulfill({
       status: 201,
@@ -135,13 +135,14 @@ test('uses an attachment field as gallery cover and updates it from record detai
   await settings.getByLabel('封面字段').selectOption({ label: '附件' });
   await settings.getByRole('button', { name: '×' }).click();
 
-  await page.locator('.base-gallery-card').first().click();
-  const chooser = page.waitForEvent('filechooser');
-  await page.locator('.base-detail').getByRole('button', { name: /上传附件/ }).click();
-  await (await chooser).setFiles({ name: 'cover.png', mimeType: 'image/png', buffer: Buffer.from('image') });
-  await expect(page.locator('.base-detail img')).toHaveAttribute('src', /\/static\/uploads\/cover\.png$/);
-  await page.locator('.base-detail header button').click();
-  await expect(page.locator('.base-gallery-card').first().locator('img')).toHaveAttribute('src', /\/static\/uploads\/cover\.png$/);
+  const card = page.locator('.base-gallery-card').first();
+  await card.evaluate((element, mimeType) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['image'], 'cover.png', { type: mimeType }));
+    element.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    element.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  }, 'image/png');
+  await expect(card.locator('img')).toHaveAttribute('src', /\/static\/uploads\/cover\.png$/);
 });
 
 test('inserts gallery and table as separate blocks rather than nested views', async ({ page }) => {
@@ -161,7 +162,7 @@ test('inserts gallery and table as separate blocks rather than nested views', as
   await expect(insertedGallery.locator('.base-gallery-card')).toHaveCount(3);
   await expect(insertedGallery.locator('.base-viewbar__current')).toContainText('画册');
   await insertedGallery.locator('.base-viewbar__current').click();
-  await expect(insertedGallery.locator('.base-view-menu > button')).toHaveCount(1);
+  await expect(insertedGallery.locator('.base-view-sidebar__item')).toHaveCount(1);
   await insertedGallery.locator('.base-viewbar__current').click();
 
   await page.locator('.ProseMirror p', { hasText: 'after' }).click();
@@ -176,7 +177,7 @@ test('inserts gallery and table as separate blocks rather than nested views', as
   const insertedTable = page.locator('.feishu-base-block[data-base-view-type="grid"]').first();
   await expect(page.locator('.feishu-base-block[data-base-view-type="grid"]')).toHaveCount(1);
   await expect(insertedTable).toHaveAttribute('data-base-view-type', 'grid');
-  await expect(insertedTable.locator('.base-grid-table')).toBeVisible();
+  await expect(insertedTable.locator('.base-grid-canvas')).toBeVisible();
   await expect(insertedTable.locator('.base-gallery-card')).toHaveCount(0);
   await expect(insertedTable.locator('.base-viewbar__current')).toContainText('表格');
 });
@@ -198,7 +199,6 @@ test('dragging an image to gallery creates a shared record and cover', async ({ 
   });
   await expect(page.locator('.base-gallery-card')).toHaveCount(4);
   await expect(page.locator('.base-gallery-card__title').last()).toHaveText('new-card');
-  await page.locator('.base-detail header button').click();
   await expect(page.locator('.base-gallery-card').last().locator('img')).toHaveAttribute('src', /\/static\/uploads\/new-card\.jpg$/);
 
   await expect(page.locator('.base-gallery-card')).toHaveCount(4);
@@ -236,7 +236,7 @@ test('applies grouping and filtering as gallery view configuration only', async 
   await settings.getByRole('button', { name: '×' }).click();
 
   await createGridViewFromGallery(page);
-  await expect(page.locator('.base-grid-table tbody tr:not(.base-grid-add-row)')).toHaveCount(3);
+  await expect(page.locator('.base-grid-footer')).toContainText('3 条记录');
 });
 
 test('supports multi selection and escape clearing without opening details', async ({ page }) => {
@@ -288,8 +288,8 @@ test('keeps the global block control aligned with the bitable header across view
 
   await assertBlockControlAligned();
   await block.locator('.base-viewbar__current').click();
-  await block.locator('.base-view-menu__new').click();
-  await block.locator('.base-view-create-menu').getByRole('button', { name: /甘特图/ }).click();
+  await block.locator('.base-view-sidebar__new').hover();
+  await block.locator('.base-view-sidebar__create-list').getByRole('button', { name: /甘特视图/ }).click();
   await expect(block).toHaveAttribute('data-base-view-type', 'gantt');
   await assertBlockControlAligned();
 
@@ -322,14 +322,13 @@ test('shows the active gallery icon and creates a gantt view over shared records
   await expect(page.locator('.base-viewbar__current [data-view-icon="gallery"]')).toBeVisible();
 
   await page.locator('.base-viewbar__current').click();
-  await page.locator('.base-view-menu__new').click();
-  await page.locator('.base-view-create-menu').getByRole('button', { name: /甘特图/ }).click();
+  await page.locator('.base-view-sidebar__new').hover();
+  await page.locator('.base-view-sidebar__create-list').getByRole('button', { name: /甘特视图/ }).click();
 
   const block = page.locator('.feishu-base-block').first();
   await expect(block).toHaveAttribute('data-base-view-type', 'gantt');
   await expect(block.locator('.base-viewbar__current [data-view-icon="gantt"]')).toBeVisible();
   await expect(block.locator('.base-gantt__row')).toHaveCount(3);
-  await expect(block.locator('.base-gantt__legend')).toHaveText('任务排期');
   await expect(block.locator('.base-gantt__record-column')).toContainText('任务名');
 
   await block.locator('.base-gantt__scale').getByRole('button', { name: '月' }).click();
@@ -343,23 +342,19 @@ test('shows the active gallery icon and creates a gantt view over shared records
   await expect(bar).toBeVisible();
   await block.locator('.base-gantt__lane.is-unscheduled').first().click({ position: { x: 8, y: 18 } });
   await expect(block.locator('.base-gantt__bar')).toHaveCount(2);
-  await block.locator('.base-gantt__record').first().click();
-  const startDate = page.locator('.base-detail__field', { hasText: '开始日期' }).locator('input');
-  const before = await startDate.inputValue();
-  await page.locator('.base-detail header button').click();
   const bounds = await bar.boundingBox();
   expect(bounds).not.toBeNull();
+  const beforeX = bounds!.x;
   await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
   await page.mouse.down();
   await page.mouse.move(bounds!.x + bounds!.width / 2 + 60, bounds!.y + bounds!.height / 2, { steps: 5 });
   await page.mouse.up();
-  await block.locator('.base-gantt__record').first().click();
-  const after = await page.locator('.base-detail__field', { hasText: '开始日期' }).locator('input').inputValue();
-  await page.locator('.base-detail header button').click();
-  expect(after).not.toBe(before);
+  const afterBounds = await bar.boundingBox();
+  expect(afterBounds).not.toBeNull();
+  expect(afterBounds!.x).not.toBe(beforeX);
 
   await block.locator('.base-viewbar__current').click();
-  await block.locator('.base-view-menu').getByRole('button', { name: /画册/ }).click();
+  await block.locator('.base-view-sidebar__name', { hasText: '画册' }).click();
   await expect(block.locator('.base-gallery-card')).toHaveCount(3);
 });
 

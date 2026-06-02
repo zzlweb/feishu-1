@@ -35,6 +35,7 @@ import { removeCommentHighlightsFromEditor } from './commentDocumentSync';
 import { DOC_TITLE_CATALOGUE_ID, type HeadingItem } from '../../types';
 import { HelpCircleIcon, BookOpenIcon } from 'tdesign-icons-react';
 import { wrapIcon } from '../../icons/wrap';
+import { parseJsonPayload, readApiPayload } from '../../api/http';
 import { IconAddOutlined, IconDragOutlined } from '../../icons/feishuDoc';
 import BlockGutterGlyph from './BlockGutterGlyph';
 import EmojiPicker from './EmojiPicker';
@@ -80,6 +81,7 @@ const mediaUploadFiles = new Map<string, { file: File; objectUrl?: string; contr
 function bitableToolTypeFromView(view: unknown) {
   if (view === 'gallery') return 'bitable-gallery';
   if (view === 'gantt') return 'bitable-gantt';
+  if (view === 'kanban') return 'bitable-kanban';
   return 'bitable';
 }
 
@@ -88,7 +90,7 @@ function bitableToolTypeFromElement(element: HTMLElement) {
 }
 
 function isBitableToolType(type: string) {
-  return type === 'bitable' || type === 'bitable-gallery' || type === 'bitable-gantt';
+  return type === 'bitable' || type === 'bitable-gallery' || type === 'bitable-gantt' || type === 'bitable-kanban';
 }
 
 function blockDomAttrs(attrs: Record<string, unknown> | null | undefined) {
@@ -336,8 +338,8 @@ function uploadMediaFile(file: File, signal: AbortSignal, onProgress: (progress:
     xhr.onload = () => {
       signal.removeEventListener('abort', abort);
       try {
-        const json = JSON.parse(xhr.responseText || '{}');
-        if (xhr.status >= 200 && xhr.status < 300 && json.code === 0) {
+        const json = parseJsonPayload<{ name: string; size: number; type: string; url: string }>(xhr.responseText || '');
+        if (xhr.status >= 200 && xhr.status < 300 && json.code === 0 && json.data) {
           resolve(json.data);
         } else {
           reject(new Error(json.message || `上传失败 (${xhr.status})`));
@@ -1294,7 +1296,7 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
       }
       try {
         const res = await fetch(`/api/documents/${documentId}/duplicate`, { method: 'POST' });
-        const json = await res.json();
+        const json = await readApiPayload<{ id: string }>(res);
         if (!res.ok || json.code !== 0 || !json.data?.id) throw new Error(json.message || '创建副本失败');
         void MessagePlugin.success('已创建副本');
         window.open(`/doc/${json.data.id}`, '_blank', 'noopener,noreferrer');
@@ -1615,9 +1617,9 @@ const LocalBitableBlock = TiptapNode.create({
         default: '',
         parseHTML: element => {
           const value = element.getAttribute('data-view');
-          return value === 'gallery' || value === 'grid' || value === 'gantt' ? value : '';
+          return value === 'gallery' || value === 'grid' || value === 'gantt' || value === 'kanban' ? value : '';
         },
-        renderHTML: attributes => ({ 'data-view': ['gallery', 'gantt'].includes(attributes.view) ? attributes.view : 'grid' }),
+        renderHTML: attributes => ({ 'data-view': ['gallery', 'gantt', 'kanban'].includes(attributes.view) ? attributes.view : 'grid' }),
       },
       covers: {
         default: '',
@@ -2752,6 +2754,7 @@ export default function Editor({
   const handleEditorContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (readOnly || !editor || !editorAreaRef.current) return;
     if (isBlockToolsOverlayElement(e.target as Element | null)) return;
+    if ((e.target as Element).closest('.feishu-bitable-block')) return;
 
     const resolved = resolveHoveredBlockInfo(e.target);
     if (!resolved || resolved === 'keep') return;
@@ -3478,7 +3481,7 @@ export default function Editor({
     cancelContextMenuClose();
     // Atom blocks must remain node-selected so block menu actions target the block itself.
     if (
-      ['hr', 'button', 'button-link', 'button-duplicate', 'button-follow', 'formula', 'bitable', 'bitable-gallery', 'bitable-gantt', 'div-table', 'embed', 'file', 'sync'].includes(blockTools.type)
+      ['hr', 'button', 'button-link', 'button-duplicate', 'button-follow', 'formula', 'bitable', 'bitable-gallery', 'bitable-gantt', 'bitable-kanban', 'div-table', 'embed', 'file', 'sync'].includes(blockTools.type)
       && activeBlockElRef.current
       && editor
     ) {

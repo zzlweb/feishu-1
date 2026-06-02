@@ -13,10 +13,16 @@ import {
   SlashGlyphButton,
   SlashGlyphLink,
   SlashGlyphFormula,
-  SlashGlyphBitableGrid,
-  SlashGlyphGallery,
-  SlashGlyphGantt,
 } from '../../icons/slashMenuGlyphs';
+
+function GlyphFileBitableColorful({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M2.5 2.5a1 1 0 0 1 1-1h12.865a5.24 5.24 0 0 1 3.631 1.447A4.848 4.848 0 0 1 21.5 6.441V21.5a1 1 0 0 1-1 1H7.635a5.24 5.24 0 0 1-3.63-1.447A4.849 4.849 0 0 1 2.5 17.559V2.5Z" fill="#8046F3" />
+      <path d="M12 8.26 15.74 12 12 15.735 8.26 12 12 8.26ZM8.26 12 6.5 14.275 9.725 17.5 12 15.735l2.275 1.765 3.225-3.225L15.74 12l1.76-2.275L14.275 6.5 12 8.26 9.725 6.5 6.5 9.725 8.26 12Z" fill="#fff" />
+    </svg>
+  );
+}
 
 const S = 16;
 const { b500, i500, g500, n1 } = FEISHU_TOOLBOX;
@@ -61,11 +67,10 @@ export default function BlockGutterGlyph({ type }: { type: string }) {
       return <SlashGlyphDivider size={S} fill={n1} />;
     case 'table':
     case 'bitable':
-      return <SlashGlyphBitableGrid size={S} fill="#34c759" />;
     case 'bitable-gallery':
-      return <SlashGlyphGallery size={S} fill="#7b61ff" />;
     case 'bitable-gantt':
-      return <SlashGlyphGantt size={S} fill="#e9519f" />;
+    case 'bitable-kanban':
+      return <GlyphFileBitableColorful size={S} />;
     case 'div-table':
       return <SlashGlyphTable size={S} fill="#52c41a" />;
     case 'image':

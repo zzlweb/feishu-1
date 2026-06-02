@@ -13,7 +13,7 @@
 @font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
   "Microsoft YaHei", sans-serif;
 
-/** 版心宽度：视口变窄时不缩小该宽度，超出部分由外层横向裁切，正文不因容器变窄而重排换�?*/
+/** 版心宽度：视口变窄时不缩小该宽度，超出部分由外层横向裁切，正文不因容器变窄而重排换行 */
 @editor-page-width: 860px;
 /** 目录轨与正文之间的固定间距（轨宽由 Layout 中 .doc-page-catalogue-rail 占位） */
 @editor-content-rail-gap: 24px;
@@ -55,7 +55,7 @@
       position: relative;
       padding-top: 34px;
 
-      // Hover meta bar �?absolutely positioned in the top padding, no layout push
+      // Hover meta bar 绝对定位在 top padding 内，不挤压布局
       .page-block-header-top {
         position: absolute;
         top: 6px;
@@ -326,21 +326,21 @@
         h5.is-empty::before { font-size: 14px; font-weight: 600; }
         h6.is-empty::before { font-size: 13px; font-weight: 600; }
 
-        // Lists
-        ul:not([data-type="taskList"]),
+        // Lists（排除多维表格等编辑器内 UI 组件的 ul）
+        ul:not([data-type="taskList"]):not(.base-view-sidebar__list):not(.base-view-sidebar__create-list),
         ol {
           margin: 2px 0;
           padding-left: 22px;
           list-style-position: outside;
         }
 
-        ul:not([data-type="taskList"]) li,
+        ul:not([data-type="taskList"]):not(.base-view-sidebar__list):not(.base-view-sidebar__create-list) li,
         ol li {
           padding-left: 2px;
           line-height: 26px;
         }
 
-        ul:not([data-type="taskList"]) li::marker,
+        ul:not([data-type="taskList"]):not(.base-view-sidebar__list):not(.base-view-sidebar__create-list) li::marker,
         ol li::marker {
           color: @primary;
           font-size: 14px;
@@ -1019,10 +1019,10 @@
         }
 
         hr {
-          display: none; // 安全备用：NodeView 已全量接管渲�?
+          display: none; // 安全备用：NodeView 已全量接管渲染
         }
 
-        // 飞书风格分割�?
+        // 飞书风格分割线
         .feishu-divider {
           display: flex;
           align-items: center;
@@ -1803,7 +1803,7 @@
           overflow-x: auto;
           overflow-y: hidden;
           -webkit-overflow-scrolling: touch;
-          /* Ĭ�����ع�����������ʱ��ɫ */
+          /* 默认隐藏滚动条，悬停时显色 */
           scrollbar-width: thin;
           scrollbar-color: #bfc4cc transparent;
 
@@ -1822,7 +1822,7 @@
           }
         }
 
-        /* 左右渐隐：独立层叠在 scroll 之上，避�?overflow 裁剪 */
+        /* 左右渐隐：独立层叠在 scroll 之上，避免 overflow 裁剪 */
         .feishu-table-edge-fades {
           position: absolute;
           top:  @feishu-table-chrome-gutter;
@@ -1981,7 +1981,7 @@
           overflow: visible;
         }
 
-        /* 无内�?scroll 的旧 DOM（兼容） */
+        /* 无内层 scroll 的旧 DOM（兼容） */
         .tableWrapper:not(:has(.feishu-table-scroll)),
         .feishu-table-host:not(:has(.feishu-table-scroll)) {
           overflow-x: auto;
@@ -2012,7 +2012,7 @@
           }
         }
 
-        // 飞书风格表格：细灰边框、首行浅灰表�?
+        // 飞书风格表格：细灰边框、首行浅灰表头
         table.feishu-table,
         .tableWrapper table.feishu-table,
         .feishu-table-host table.feishu-table {
@@ -2068,7 +2068,7 @@
             }
           }
 
-          /* 仅开启「标题行/列」时（th）：浅灰�?+ 正文加粗 */
+          /* 仅开启「标题行/列」时（th）：浅灰底 + 正文加粗 */
           th,
           .feishu-table__header-cell {
             font-weight: 600 !important;
@@ -2989,7 +2989,6 @@
         .feishu-bitable-block.is-selected,
         .feishu-bitable-block.is-block-gutter-active,
         .feishu-bitable-block.ProseMirror-selectednode {
-          box-shadow: inset 0 0 0 2px #3370ff;
           background: #fff;
           user-select: none;
         }

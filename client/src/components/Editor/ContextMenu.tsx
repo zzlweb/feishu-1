@@ -13,6 +13,7 @@ import {
   IndentRightIcon,
 } from 'tdesign-icons-react';
 import { wrapIcon } from '../../icons/wrap';
+import { readApiPayload } from '../../api/http';
 import {
   ContextGlyphAddBelow,
   ContextGlyphBlockLink,
@@ -180,7 +181,7 @@ async function uploadImageFile(file: File) {
   const body = new FormData();
   body.append('file', file);
   const res = await fetch('/api/uploads', { method: 'POST', body });
-  const json = await res.json();
+  const json = await readApiPayload<{ name: string; url: string }>(res);
   if (!res.ok || json.code !== 0) throw new Error(json.message || '上传失败');
   return json.data as { name: string; url: string };
 }
@@ -494,10 +495,10 @@ export default function ContextMenu({
     const title = editor.state.doc.textBetween(from, to, ' ').trim().slice(0, 30) || '未命名子文档';
     const res = await fetch(`/api/documents/${parentId}/children`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
       body: JSON.stringify({ title, content: html, author: (editor as any).__author || '张正亮' }),
     });
-    const json = await res.json();
+    const json = await readApiPayload<{ id: string; title?: string }>(res);
     const doc = json.data;
     if (!res.ok || json.code !== 0 || !doc?.id) {
       void MessagePlugin.error(json.message || '转换失败');

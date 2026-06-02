@@ -1,19 +1,27 @@
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react';
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
 import { SlashGlyphBitableGrid, SlashGlyphGallery, SlashGlyphGantt } from '../../icons/slashMenuGlyphs';
+import { BitableAddFieldPopover, BitableEditFieldPopover, buildNewFieldPayload, emptyDefaultValue, type CreateFieldInput, type UpdateFieldInput } from './BitableAddFieldPopover';
+import { FieldLockGlyph, fieldTypeGlyph } from './bitableFieldTypeIcons';
+import { parseJsonPayload } from '../../api/http';
 import {
   addView,
   attachmentFromUpload,
+  copyView,
   createGalleryConfig,
   createRecord,
+  deleteView,
+  duplicateFieldName,
   getActiveView,
   getAttachments,
   getGanttConfig,
   getGalleryConfig,
   groupRecords,
+  nextAutoFieldName,
   parseBaseTable,
+  reorderViews,
   selectCoverAttachment,
   serializeBaseTable,
   valueText,
@@ -27,6 +35,11 @@ import {
   type GalleryViewConfig,
   type GanttViewConfig,
 } from './bitableModel';
+import { BitableGalleryView } from './BitableGalleryView';
+import { BitableGanttView } from './BitableGanttView';
+import { BitableKanbanView } from './BitableKanbanView';
+import { BitableGridView, type GridFieldMenuAction, type GridFieldMenuPosition } from './BitableGridView';
+import { BitableRecordCardModal } from './BitableRecordCardModal';
 import './BitableBlock.less';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -64,7 +77,25 @@ function ViewIcon({ type, size = 16, fill = '#646a73' }: { type: BaseView['type'
   return <SlashGlyphBitableGrid size={size} fill={fill} />;
 }
 
+function viewSettingsLabel(type: BaseView['type']) {
+  if (type === 'gallery') return '画册设置';
+  if (type === 'gantt') return '甘特图设置';
+  if (type === 'grid') return '表格设置';
+  if (type === 'kanban') return '看板设置';
+  return '视图设置';
+}
+
+function toolbarPanelTitle(panel: ToolbarPanel) {
+  if (panel === 'filter') return '筛选';
+  if (panel === 'group') return '分组';
+  if (panel === 'sort') return '排序';
+  if (panel === 'comment') return '评论';
+  if (panel === 'share') return '打开方式';
+  return '字段配置';
+}
+
 type GlyphProps = { size?: number };
+type ToolbarPanel = 'fields' | 'filter' | 'group' | 'sort' | 'comment' | 'share';
 
 function svgProps(size: number) {
   return { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', xmlns: 'http://www.w3.org/2000/svg' } as const;
@@ -91,33 +122,53 @@ const ToolGlyphComment = ({ size = 18 }: GlyphProps) => (
 const ToolGlyphShare = ({ size = 18 }: GlyphProps) => (
   <svg {...svgProps(size)}><path d="M22 3a1 1 0 0 0-1-1h-7a1 1 0 0 0 0 2h4.586l-6.293 6.293a1 1 0 0 0 1.414 1.414L20 5.414V10a1 1 0 1 0 2 0V3Z" fill="currentColor"/><path d="M4 5h6v2H4v13h16v-5.5h2V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" fill="currentColor"/></svg>
 );
-
-const FieldTypeGlyphText = ({ size = 14 }: GlyphProps) => (
-  <svg {...svgProps(size)}><path d="M5 18 9.5 6h1L15 18M6.6 14h6.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M16 9h4M18 9v9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+const ToolGlyphRename = ({ size = 16 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="RenameOutlined">
+    <path d="M19.253 2.646a1.5 1.5 0 1 1 2.121 2.122l-1.06 1.06-2.122-2.121 1.061-1.06ZM17.14 4.76l2.12 2.122-7.817 7.818a1.417 1.417 0 0 1-.77.395l-1.89.315a.17.17 0 0 1-.196-.197l.336-1.882c.05-.281.185-.54.387-.741l7.83-7.83Z" fill="currentColor" />
+    <path d="M13.5 3H4a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h15a2 2 0 0 0 2-2V10l-2 2v8H4V5h7.5l2-2Z" fill="currentColor" />
+  </svg>
 );
-const FieldTypeGlyphSelect = ({ size = 14 }: GlyphProps) => (
-  <svg {...svgProps(size)}><circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.6"/><path d="m8.5 12 2.4 2.4L15.5 9.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const GlyphDrag = ({ size = 14 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="DragOutlined">
+    <path d="M8.25 6.5a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Zm0 7.25a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Zm1.75 5.5a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0ZM14.753 6.5a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5ZM16.5 12a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0Zm-1.747 9a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Z" fill="currentColor" />
+  </svg>
 );
-const FieldTypeGlyphDate = ({ size = 14 }: GlyphProps) => (
-  <svg {...svgProps(size)}><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" strokeWidth="1.6"/><path d="M4 9h16M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+const GlyphMore = ({ size = 14 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="MoreOutlined">
+    <path d="M5.5 11.75a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0Zm8.225 0a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0Zm8.275 0a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0Z" fill="currentColor" />
+  </svg>
 );
-const FieldTypeGlyphAttachment = ({ size = 14 }: GlyphProps) => (
-  <svg {...svgProps(size)}><path d="M20 12.5 12.5 20a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const GlyphCopy = ({ size = 16 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="CopyOutlined">
+    <path d="M9 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v12a1 1 0 1 1-2 0V4h-9a1 1 0 0 1-1-1Z" fill="currentColor" />
+    <path d="M5 6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2H5Zm0 2h10v12H5V8Z" fill="currentColor" />
+  </svg>
 );
-const FieldTypeGlyphNumber = ({ size = 14 }: GlyphProps) => (
-  <svg {...svgProps(size)}><path d="M9 4 7 20M17 4l-2 16M5 9h15M4 15h15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+const GlyphDelete = ({ size = 16 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="DeleteTrashOutlined">
+    <path d="M8 4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2h5a1 1 0 1 1 0 2h-1v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6H3a1 1 0 0 1 0-2h5ZM6 6v14h12V6H6Zm4 3a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1Zm4 0a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1Z" fill="currentColor" />
+  </svg>
 );
-const FieldLockGlyph = ({ size = 12 }: GlyphProps) => (
-  <svg {...svgProps(size)}><rect x="5" y="10.5" width="14" height="9.5" rx="2" stroke="currentColor" strokeWidth="1.6"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" stroke="currentColor" strokeWidth="1.6"/></svg>
+const GlyphAdd = ({ size = 14 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="AddOutlined">
+    <path d="M12 2a1 1 0 0 0-1 1v8H3a1 1 0 1 0 0 2h8v8a1 1 0 1 0 2 0v-8h8a1 1 0 1 0 0-2h-8V3a1 1 0 0 0-1-1Z" fill="currentColor" />
+  </svg>
 );
-
-function fieldTypeGlyph(type: BaseField['type'], size = 14) {
-  if (type === 'single_select' || type === 'multi_select' || type === 'checkbox') return <FieldTypeGlyphSelect size={size} />;
-  if (type === 'date' || type === 'created_time' || type === 'updated_time') return <FieldTypeGlyphDate size={size} />;
-  if (type === 'attachment') return <FieldTypeGlyphAttachment size={size} />;
-  if (type === 'number' || type === 'formula') return <FieldTypeGlyphNumber size={size} />;
-  return <FieldTypeGlyphText size={size} />;
-}
+const GlyphExpandDown = ({ size = 12 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="ExpandDownFilled">
+    <path d="M11.22 18.46a1 1 0 0 0 1.56 0l8.305-10.334a1 1 0 0 0-.78-1.626H3.696a1 1 0 0 0-.78 1.626L11.22 18.46Z" fill="currentColor" />
+  </svg>
+);
+const GlyphVisible = ({ size = 14 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="VisibleOutlined">
+    <path d="M11.985 18.5c3.238 0 6.236-2.06 9.015-6.513C18.292 7.55 15.3 5.5 11.985 5.5 8.67 5.5 5.689 7.549 3 11.987c2.76 4.454 5.748 6.513 8.985 6.513ZM1.502 12.89a1.782 1.782 0 0 1 .023-1.838C4.428 6.017 7.915 3.5 11.984 3.5c4.086 0 7.594 2.538 10.523 7.614l.028.048c.296.519.294 1.16-.01 1.675-3.006 5.108-6.52 7.663-10.541 7.663-4.007 0-7.501-2.537-10.482-7.61ZM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" fill="currentColor" />
+  </svg>
+);
+const GlyphHelp = ({ size = 14 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="MaybeOutlined">
+    <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 2C5.925 23 1 18.075 1 12S5.925 1 12 1s11 4.925 11 11-4.925 11-11 11Zm-1-6a1 1 0 1 1 2 0 1 1 0 0 1-2 0ZM8.05 9.282a5.17 5.17 0 0 1 .039-.28c.195-1.085.689-1.883 1.481-2.394.62-.405 1.383-.608 2.288-.608 1.189 0 2.176.288 2.962.864.787.575 1.18 1.428 1.18 2.558 0 .693-.17 1.277-.513 1.752-.2.287-.584.655-1.152 1.103l-.56.44c-.305.24-.507.52-.607.84a2.742 2.742 0 0 0-.072.486.5.5 0 0 1-.498.457h-1.12a.5.5 0 0 1-.498-.546c.065-.696.134-1.136.207-1.321.137-.344.49-.74 1.058-1.188l.575-.455c.19-.144 1.166-.831 1.166-1.44 0-.608-.106-.832-.412-1.166-.305-.333-.993-.44-1.613-.44-.61 0-1.132.161-1.387.572-.118.19-.215.393-.284.6a2.097 2.097 0 0 0-.073.307.5.5 0 0 1-.493.415H8.547a.5.5 0 0 1-.497-.556Z" fill="currentColor" />
+  </svg>
+);
 
 function blockAttrs(attrs: Record<string, unknown>) {
   const id = typeof attrs.blockId === 'string' ? attrs.blockId : '';
@@ -130,6 +181,306 @@ function updateRecord(table: BaseTable, recordId: string, update: (record: BaseR
 
 function updateView(table: BaseTable, viewId: string, update: (view: BaseView) => BaseView): BaseTable {
   return { ...table, views: table.views.map(view => view.id === viewId ? update(view) : view) };
+}
+
+const CREATE_VIEW_OPTIONS: Array<{ type: 'grid' | 'gantt' | 'gallery' | 'kanban'; label: string }> = [
+  { type: 'grid', label: '表格视图' },
+  { type: 'kanban', label: '看板视图' },
+  { type: 'gantt', label: '甘特视图' },
+  { type: 'gallery', label: '画册视图' },
+];
+
+function ViewSidebarMenu({
+  views,
+  activeViewId,
+  renamingViewId,
+  renameDraft,
+  renameInputRef,
+  dragOverIndex,
+  draggingViewIndex,
+  contextMenuViewId,
+  contextMenuRef,
+  canDeleteView,
+  onSelectView,
+  onCreateView,
+  onOpenContextMenu,
+  onRenameView,
+  onRemoveView,
+  onRenameDraftChange,
+  onCommitRename,
+  onCancelRename,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: {
+  views: BaseView[];
+  activeViewId: string;
+  renamingViewId: string | null;
+  renameDraft: string;
+  renameInputRef: RefObject<HTMLInputElement>;
+  dragOverIndex: number | null;
+  draggingViewIndex: number | null;
+  contextMenuViewId: string | null;
+  contextMenuRef: RefObject<HTMLDivElement>;
+  canDeleteView: boolean;
+  onSelectView: (viewId: string) => void;
+  onCreateView: (type: 'grid' | 'gallery' | 'gantt' | 'kanban') => void;
+  onOpenContextMenu: (btn: HTMLElement, viewId: string) => void;
+  onRenameView: (viewId: string) => void;
+  onRemoveView: (viewId: string) => void;
+  onRenameDraftChange: (value: string) => void;
+  onCommitRename: () => void;
+  onCancelRename: () => void;
+  onDragStart: (event: DragEvent, index: number) => void;
+  onDragOver: (event: DragEvent, index: number) => void;
+  onDrop: (event: DragEvent, index: number) => void;
+  onDragEnd: () => void;
+}) {
+  return (
+    <div className="base-view-sidebar">
+      <ul className={`base-view-sidebar__list${draggingViewIndex != null ? ' is-sorting' : ''}`}>
+        {views.map((view, index) => (
+          <li
+            key={view.id}
+            className={[
+              'base-view-sidebar__item',
+              view.id === activeViewId ? 'is-active' : '',
+              draggingViewIndex === index ? 'is-dragging' : '',
+              dragOverIndex === index && draggingViewIndex !== index ? 'is-drag-over' : '',
+            ].filter(Boolean).join(' ')}
+            onDragOver={event => onDragOver(event, index)}
+            onDrop={event => onDrop(event, index)}
+          >
+            <span
+              className="base-view-sidebar__drag"
+              draggable
+              aria-hidden
+              onDragStart={event => onDragStart(event, index)}
+              onDragEnd={onDragEnd}
+            >
+              <GlyphDrag />
+            </span>
+            <span className="base-view-sidebar__icon" aria-hidden data-view-icon={view.type}>
+              <ViewIcon type={view.type} size={15} />
+            </span>
+            {renamingViewId === view.id ? (
+              <input
+                ref={renameInputRef}
+                className="base-view-sidebar__rename-input"
+                value={renameDraft}
+                aria-label="视图名称"
+                onChange={event => onRenameDraftChange(event.target.value)}
+                onBlur={onCommitRename}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    onCommitRename();
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    onCancelRename();
+                  }
+                }}
+                onClick={event => event.stopPropagation()}
+                onMouseDown={event => event.stopPropagation()}
+              />
+            ) : (
+              <button
+                type="button"
+                className="base-view-sidebar__name"
+                onClick={() => onSelectView(view.id)}
+              >
+                {view.name}
+              </button>
+            )}
+            {!view.locked && renamingViewId !== view.id && (
+              <button
+                type="button"
+                className={`base-view-sidebar__more${contextMenuViewId === view.id ? ' is-open' : ''}`}
+                aria-label="鏇村鎿嶄綔"
+                onMouseDown={event => {
+                  event.stopPropagation();
+                  event.preventDefault();
+                  onOpenContextMenu(event.currentTarget, view.id);
+                }}
+              >
+                <GlyphMore />
+              </button>
+            )}
+            {contextMenuViewId === view.id && (
+              <ItemRowMenu
+                menuRef={contextMenuRef}
+                canDelete={canDeleteView}
+                onEdit={() => onRenameView(view.id)}
+                onDelete={() => onRemoveView(view.id)}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="base-view-sidebar__create">
+        <button type="button" className="base-view-sidebar__new">
+          <span className="base-view-sidebar__new-icon" aria-hidden><GlyphAdd /></span>
+          <span className="base-view-sidebar__new-text">新建</span>
+          <span className="base-view-sidebar__new-arrow" aria-hidden><GlyphExpandDown /></span>
+        </button>
+        <ul className="base-view-sidebar__create-list">
+          {CREATE_VIEW_OPTIONS.map(option => (
+            <li key={option.type}>
+              <button type="button" onClick={() => onCreateView(option.type)}>
+                <span className="base-view-sidebar__create-icon" aria-hidden data-view-icon={option.type}>
+                  <ViewIcon type={option.type} size={15} />
+                </span>
+                <span>{option.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function DeleteViewDialog({
+  viewName,
+  onCancel,
+  onConfirm,
+}: {
+  viewName: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel]);
+
+  return createPortal(
+    <div className="base-delete-view-overlay" data-no-marquee-selection="true" onMouseDown={onCancel}>
+      <div
+        className="base-delete-view-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="base-delete-view-title"
+        onMouseDown={event => event.stopPropagation()}
+      >
+        <header className="base-delete-view-dialog__header">
+          <h2 id="base-delete-view-title" className="base-delete-view-dialog__title">删除视图</h2>
+          <button type="button" className="base-delete-view-dialog__close" aria-label="关闭" onClick={onCancel}>
+            ×
+          </button>
+        </header>
+        <p className="base-delete-view-dialog__body">
+          确认要删除视图「{viewName}」吗？
+        </p>
+        <footer className="base-delete-view-dialog__footer">
+          <button type="button" className="base-delete-view-dialog__btn base-delete-view-dialog__btn--cancel" onClick={onCancel}>
+            取消
+          </button>
+          <button type="button" className="base-delete-view-dialog__btn base-delete-view-dialog__btn--danger" onClick={onConfirm}>
+            删除
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function ItemRowMenu({
+  menuRef,
+  canDelete,
+  onEdit,
+  onDelete,
+  style,
+  isPortal = false,
+}: {
+  menuRef: RefObject<HTMLDivElement>;
+  canDelete: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+  style?: CSSProperties;
+  isPortal?: boolean;
+}) {
+  return (
+    <div
+      ref={menuRef}
+      className={`base-view-contextmenu${isPortal ? ' base-view-contextmenu--portal' : ''}`}
+      style={style}
+      data-no-marquee-selection="true"
+      role="menu"
+      onMouseDown={event => event.stopPropagation()}
+    >
+      <button type="button" role="menuitem" onClick={onEdit}>
+        <ToolGlyphRename size={16} />
+        编辑
+      </button>
+      <button type="button" role="menuitem" className="is-danger" disabled={!canDelete} onClick={onDelete}>
+        <GlyphDelete />
+        删除
+      </button>
+    </div>
+  );
+}
+
+function FloatingItemRowMenu({
+  anchor,
+  menuRef,
+  canDelete,
+  onEdit,
+  onDelete,
+}: {
+  anchor: HTMLElement;
+  menuRef: RefObject<HTMLDivElement>;
+  canDelete: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({ visibility: 'hidden' });
+
+  const updatePosition = useCallback(() => {
+    const btnRect = anchor.getBoundingClientRect();
+    const row = anchor.closest<HTMLElement>('.base-view-sidebar__item');
+    const panel = anchor.closest<HTMLElement>('.base-field-panel');
+    const rowRect = row?.getBoundingClientRect() ?? btnRect;
+    const panelRect = panel?.getBoundingClientRect();
+    const left = (panelRect?.right ?? btnRect.right) + 4;
+    setMenuStyle({
+      position: 'fixed',
+      top: rowRect.top,
+      left,
+      zIndex: 10053,
+      visibility: 'visible',
+    });
+  }, [anchor]);
+
+  useLayoutEffect(() => {
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [updatePosition]);
+
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <ItemRowMenu
+      menuRef={menuRef}
+      canDelete={canDelete}
+      onEdit={onEdit}
+      onDelete={onDelete}
+      style={menuStyle}
+      isPortal
+    />,
+    document.body,
+  );
 }
 
 function withUpdatedValue(record: BaseRecord, fieldId: string, value: CellValue): BaseRecord {
@@ -167,207 +518,6 @@ const GRID_HEADER_HEIGHT = 36;
 const GRID_ROW_HEIGHT = 34;
 const GRID_ADD_ROW_HEIGHT = 36;
 
-function BitableCanvasGrid({
-  table,
-  activeView,
-  records,
-  changeCell,
-  pickFiles,
-  addRecord,
-  openRecord,
-  selectBlock,
-}: {
-  table: BaseTable;
-  activeView: BaseView;
-  records: BaseRecord[];
-  changeCell: (recordId: string, fieldId: string, value: CellValue) => void;
-  pickFiles: (recordId: string, fieldId?: string) => void;
-  addRecord: () => void;
-  openRecord: (recordId: string) => void;
-  selectBlock: () => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const [viewportWidth, setViewportWidth] = useState(0);
-  const fields = useMemo(
-    () => table.fields.filter(field => !(activeView.hiddenFieldIds || []).includes(field.id)),
-    [activeView.hiddenFieldIds, table.fields],
-  );
-  const baseColumns = useMemo(() => fields.map(field => ({
-    field,
-    width: field.id === table.primaryFieldId ? GRID_PRIMARY_WIDTH : GRID_FIELD_WIDTH,
-  })), [fields, table.primaryFieldId]);
-  const minContentWidth = GRID_INDEX_WIDTH + baseColumns.reduce((sum, column) => sum + column.width, 0) + GRID_TAIL_WIDTH;
-  const contentWidth = Math.max(viewportWidth, minContentWidth);
-  const extraWidth = Math.max(0, contentWidth - minContentWidth);
-  const baseFieldWidth = baseColumns.reduce((sum, column) => sum + column.width, 0);
-  const columns = useMemo(() => {
-    if (extraWidth <= 0 || baseFieldWidth <= 0) return baseColumns;
-    return baseColumns.map(column => ({
-      ...column,
-      width: column.width + Math.round((column.width / baseFieldWidth) * extraWidth),
-    }));
-  }, [baseColumns, baseFieldWidth, extraWidth]);
-  const contentHeight = GRID_HEADER_HEIGHT + records.length * GRID_ROW_HEIGHT + GRID_ADD_ROW_HEIGHT;
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const measure = () => setViewportWidth(viewport.clientWidth);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.max(1, Math.round(contentWidth * ratio));
-    canvas.height = Math.max(1, Math.round(contentHeight * ratio));
-    canvas.style.width = `${contentWidth}px`;
-    canvas.style.height = `${contentHeight}px`;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, contentWidth, contentHeight);
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 1;
-
-    const drawLine = (fromX: number, fromY: number, toX: number, toY: number) => {
-      ctx.beginPath();
-      ctx.moveTo(fromX + 0.5, fromY + 0.5);
-      ctx.lineTo(toX + 0.5, toY + 0.5);
-      ctx.stroke();
-    };
-    const drawText = (raw: string, x: number, y: number, width: number, color = '#1f2329', font = '13px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif') => {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(x, y, width, GRID_ROW_HEIGHT);
-      ctx.clip();
-      ctx.fillStyle = color;
-      ctx.font = font;
-      let label = raw || '';
-      while (label && ctx.measureText(label).width > width - 18) label = label.slice(0, -1);
-      if (label !== raw && label.length > 1) label = `${label.slice(0, -1)}...`;
-      ctx.fillText(label, x + 10, y + GRID_ROW_HEIGHT / 2);
-      ctx.restore();
-    };
-
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, contentWidth, contentHeight);
-    ctx.fillStyle = '#f7f8fa';
-    ctx.fillRect(0, 0, contentWidth, GRID_HEADER_HEIGHT);
-    ctx.fillStyle = '#fafbfc';
-    ctx.fillRect(0, 0, GRID_INDEX_WIDTH, contentHeight);
-    ctx.fillRect(contentWidth - GRID_TAIL_WIDTH, 0, GRID_TAIL_WIDTH, contentHeight);
-    ctx.strokeStyle = '#eff0f1';
-
-    drawLine(0, GRID_HEADER_HEIGHT, contentWidth, GRID_HEADER_HEIGHT);
-    let x = GRID_INDEX_WIDTH;
-    columns.forEach(({ field, width }) => {
-      drawLine(x, 0, x, contentHeight);
-      drawText(field.name, x, 1, width, '#646a73', '500 12px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif');
-      x += width;
-    });
-    drawLine(x, 0, x, contentHeight);
-    drawLine(contentWidth - GRID_TAIL_WIDTH, 0, contentWidth - GRID_TAIL_WIDTH, contentHeight);
-
-    records.forEach((record, rowIndex) => {
-      const y = GRID_HEADER_HEIGHT + rowIndex * GRID_ROW_HEIGHT;
-      drawLine(0, y + GRID_ROW_HEIGHT, contentWidth, y + GRID_ROW_HEIGHT);
-      drawText(String(rowIndex + 1), 0, y, GRID_INDEX_WIDTH, '#8f959e');
-      let cellX = GRID_INDEX_WIDTH;
-      columns.forEach(({ field, width }) => {
-        const attachments = field.type === 'attachment' ? getAttachments(record, field.id) : [];
-        const value = field.type === 'attachment'
-          ? (attachments.length ? `${attachments.length} 个附件` : '+ 添加附件')
-          : valueText(record.fields[field.id]);
-        drawText(value, cellX, y, width);
-        cellX += width;
-      });
-    });
-
-    const addY = GRID_HEADER_HEIGHT + records.length * GRID_ROW_HEIGHT;
-    drawLine(0, addY, contentWidth, addY);
-    drawText('+ 添加记录', GRID_INDEX_WIDTH, addY, contentWidth - GRID_INDEX_WIDTH - GRID_TAIL_WIDTH, '#646a73');
-  }, [columns, contentHeight, contentWidth, records]);
-
-  return (
-    <div className="base-grid-scroll base-grid-canvas-scroll" ref={viewportRef}>
-      <div className="base-grid-table base-grid-canvas-view" role="grid" style={{ width: contentWidth, height: contentHeight }}>
-        <canvas ref={canvasRef} className="base-grid-canvas" role="presentation" aria-hidden="true" />
-        <div className="faster-dom-over-layer base-grid-over-layer">
-          {records.map((record, rowIndex) => {
-            const top = GRID_HEADER_HEIGHT + rowIndex * GRID_ROW_HEIGHT;
-            let left = GRID_INDEX_WIDTH;
-            return (
-              <div className="base-grid-overlay-row" key={record.id}>
-                <button
-                  type="button"
-                  className="base-grid-index base-grid-overlay-index"
-                  style={{ left: 0, top, width: GRID_INDEX_WIDTH, height: GRID_ROW_HEIGHT }}
-                  onClick={() => openRecord(record.id)}
-                >
-                  {rowIndex + 1}
-                </button>
-                {columns.map(({ field, width }) => {
-                  const currentLeft = left;
-                  left += width;
-                  if (field.type === 'attachment') {
-                    const attachments = getAttachments(record, field.id);
-                    return (
-                      <button
-                        type="button"
-                        className="base-grid-attachment base-grid-overlay-control"
-                        key={field.id}
-                        style={{ left: currentLeft, top, width, height: GRID_ROW_HEIGHT }}
-                        onClick={() => pickFiles(record.id, field.id)}
-                      >
-                        {attachments.length ? `${attachments.length} 个附件` : '+ 添加附件'}
-                      </button>
-                    );
-                  }
-                  return (
-                    <input
-                      key={field.id}
-                      className="base-grid-overlay-control"
-                      style={{ left: currentLeft, top, width, height: GRID_ROW_HEIGHT }}
-                      value={valueText(record.fields[field.id])}
-                      onChange={event => changeCell(record.id, field.id, event.target.value)}
-                    />
-                  );
-                })}
-                <button
-                  type="button"
-                  className="feishu-bitable-block__tail base-grid-overlay-tail"
-                  style={{ left: contentWidth - GRID_TAIL_WIDTH, top, width: GRID_TAIL_WIDTH, height: GRID_ROW_HEIGHT }}
-                  aria-label="select table block"
-                  onClick={selectBlock}
-                />
-              </div>
-            );
-          })}
-          <button
-            type="button"
-            className="base-grid-add-row base-grid-overlay-add"
-            style={{
-              left: GRID_INDEX_WIDTH,
-              top: GRID_HEADER_HEIGHT + records.length * GRID_ROW_HEIGHT,
-              width: contentWidth - GRID_INDEX_WIDTH - GRID_TAIL_WIDTH,
-              height: GRID_ADD_ROW_HEIGHT,
-            }}
-            onClick={addRecord}
-          >
-            + 添加记录
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function BitableBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const parsedTable = useMemo(() => parseBaseTable(node.attrs), [node.attrs.model, node.attrs.columns, node.attrs.rows, node.attrs.covers, node.attrs.view]);
   const tableRef = useRef(parsedTable);
@@ -379,10 +529,20 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const ganttConfig = getGanttConfig(table, activeView);
   const groups = groupRecords(table, activeView, records);
   const [showViewMenu, setShowViewMenu] = useState(false);
-  const [showCreateViewMenu, setShowCreateViewMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
+  const [activeToolbarPanel, setActiveToolbarPanel] = useState<ToolbarPanel | null>(null);
+  const [isRenamingView, setIsRenamingView] = useState(false);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [renamingViewId, setRenamingViewId] = useState<string | null>(null);
+  const [viewContextMenuId, setViewContextMenuId] = useState<string | null>(null);
+  const [deleteViewTarget, setDeleteViewTarget] = useState<{ id: string; name: string } | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [draggingViewIndex, setDraggingViewIndex] = useState<number | null>(null);
+  const dragFromIndexRef = useRef<number | null>(null);
+  const dragGhostRef = useRef<HTMLDivElement | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [cardRecordId, setCardRecordId] = useState<string | null>(null);
+  const [editingFieldPanel, setEditingFieldPanel] = useState<{ fieldId: string; left: number; top: number } | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [dropActive, setDropActive] = useState(false);
   const [ganttDraft, setGanttDraft] = useState<{ recordId: string; start: string; end: string } | null>(null);
@@ -399,6 +559,38 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const selectionAnchorRef = useRef<string | null>(null);
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const viewContextMenuRef = useRef<HTMLDivElement>(null);
+  const fieldPanelAnchorRef = useRef<HTMLSpanElement>(null);
+  const [isViewToolsVisible, setIsViewToolsVisible] = useState(false);
+  const viewHoverZoneRef = useRef<HTMLDivElement>(null);
+  const viewToolsLeaveTimerRef = useRef<number | null>(null);
+
+  const showViewTools = useCallback(() => {
+    if (viewToolsLeaveTimerRef.current != null) {
+      window.clearTimeout(viewToolsLeaveTimerRef.current);
+      viewToolsLeaveTimerRef.current = null;
+    }
+    setIsViewToolsVisible(true);
+  }, []);
+
+  const hideViewTools = useCallback(() => {
+    if (viewToolsLeaveTimerRef.current != null) window.clearTimeout(viewToolsLeaveTimerRef.current);
+    viewToolsLeaveTimerRef.current = window.setTimeout(() => {
+      viewToolsLeaveTimerRef.current = null;
+      setIsViewToolsVisible(false);
+    }, 160);
+  }, []);
+
+  const handleViewHoverLeave = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && viewHoverZoneRef.current?.contains(next)) return;
+    hideViewTools();
+  }, [hideViewTools]);
+
+  useEffect(() => () => {
+    if (viewToolsLeaveTimerRef.current != null) window.clearTimeout(viewToolsLeaveTimerRef.current);
+  }, []);
 
   const commit = (next: BaseTable) => {
     tableRef.current = next;
@@ -406,7 +598,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     updateAttributes({
       model: serializeBaseTable(next),
       title: next.name,
-      view: view.type === 'gallery' || view.type === 'gantt' ? view.type : 'grid',
+      view: view.type === 'gallery' || view.type === 'gantt' || view.type === 'kanban' ? view.type : 'grid',
     });
   };
 
@@ -417,22 +609,53 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   }, []); // migrate legacy nodes once on mount
 
   useEffect(() => {
-    if (!showViewMenu && !showSettings) return;
+    if (!showViewMenu && !showSettings && !activeToolbarPanel && !viewContextMenuId) return;
     const outside = (event: globalThis.MouseEvent) => {
       if (!(event.target instanceof Node)) return;
       if (viewMenuRef.current?.contains(event.target) || settingsRef.current?.contains(event.target)) return;
-      if (event.target instanceof Element && event.target.closest('.base-viewbar__tools')) return;
+      if (viewContextMenuRef.current?.contains(event.target)) return;
+      if (event.target instanceof Element && event.target.closest('.base-viewbar__rename')) return;
       setShowViewMenu(false);
-      setShowCreateViewMenu(false);
       setShowSettings(false);
+      setViewContextMenuId(null);
+      if (!(event.target instanceof Element) || !event.target.closest('.base-field-panel, .base-viewbar__tool-anchor, .base-toolbar-panel, .base-viewbar__tool')) {
+        setActiveToolbarPanel(null);
+      }
     };
     document.addEventListener('mousedown', outside);
     return () => document.removeEventListener('mousedown', outside);
-  }, [showViewMenu, showSettings]);
+  }, [showViewMenu, showSettings, activeToolbarPanel, viewContextMenuId]);
 
   useEffect(() => {
-    if (detailRecordId && !table.records.some(record => record.id === detailRecordId)) setDetailRecordId(null);
-  }, [detailRecordId, table.records]);
+    setIsRenamingView(false);
+    setRenamingViewId(null);
+  }, [activeView.id]);
+
+  useEffect(() => {
+    if (!isRenamingView && !renamingViewId) return;
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+  }, [isRenamingView, renamingViewId]);
+
+  useEffect(() => {
+    if (editingFieldPanel && !table.fields.some(field => field.id === editingFieldPanel.fieldId)) setEditingFieldPanel(null);
+  }, [editingFieldPanel, table.fields]);
+
+  useEffect(() => {
+    if (!editingFieldPanel) return;
+    const close = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest('.base-field-edit-popover-portal')) return;
+      if (event.target.closest('.base-b-field-type-picker-portal')) return;
+      if (event.target.closest('.base-b-select-color-panel')) return;
+      if (event.target.closest('.base-b-select-default-panel')) return;
+      if (event.target.closest('.base-b-field-type-picker')) return;
+      if (event.target.closest('.base-grid-field-menu')) return;
+      setEditingFieldPanel(null);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [editingFieldPanel]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -447,15 +670,127 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const setView = (viewId: string) => {
     mutate(current => ({ ...current, activeViewId: viewId }));
     setShowViewMenu(false);
-    setShowCreateViewMenu(false);
     setShowSettings(false);
+    setActiveToolbarPanel(null);
+    setIsRenamingView(false);
+    setRenamingViewId(null);
+    setViewContextMenuId(null);
+  };
+
+  const beginRenameView = (viewId: string, fromMenu = false) => {
+    const target = table.views.find(view => view.id === viewId);
+    if (!target || target.locked) return;
+    setRenameDraft(target.name);
+    setViewContextMenuId(null);
+    if (fromMenu || viewId !== activeView.id) {
+      setRenamingViewId(viewId);
+      setIsRenamingView(false);
+      return;
+    }
+    setIsRenamingView(true);
+    setRenamingViewId(null);
+    setShowViewMenu(false);
+  };
+
+  const startRenameView = () => beginRenameView(activeView.id);
+
+  const commitRenameView = () => {
+    const targetId = renamingViewId || activeView.id;
+    const target = table.views.find(view => view.id === targetId);
+    const trimmed = renameDraft.trim();
+    if (target && trimmed && trimmed !== target.name) {
+      mutate(current => updateView(current, targetId, view => ({ ...view, name: trimmed })));
+    }
+    setIsRenamingView(false);
+    setRenamingViewId(null);
+  };
+
+  const cancelRenameView = () => {
+    setIsRenamingView(false);
+    setRenamingViewId(null);
+    setRenameDraft('');
+  };
+
+  const openViewContextMenu = (_btn: HTMLElement, viewId: string) => {
+    setViewContextMenuId(current => (current === viewId ? null : viewId));
+  };
+
+  const duplicateView = (viewId: string) => {
+    mutate(current => copyView(current, viewId));
+    setViewContextMenuId(null);
+  };
+
+  const removeView = (viewId: string) => {
+    if (table.views.length <= 1) return;
+    const target = table.views.find(view => view.id === viewId);
+    if (!target) return;
+    setViewContextMenuId(null);
+    setDeleteViewTarget({ id: target.id, name: target.name });
+  };
+
+  const confirmDeleteView = () => {
+    if (!deleteViewTarget) return;
+    mutate(current => deleteView(current, deleteViewTarget.id));
+    setDeleteViewTarget(null);
+    setRenamingViewId(null);
+    setIsRenamingView(false);
+  };
+
+  const handleViewDragStart = (event: DragEvent, index: number) => {
+    dragFromIndexRef.current = index;
+    setDraggingViewIndex(index);
+    setDragOverIndex(null);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+    if (!dragGhostRef.current) {
+      const ghost = document.createElement('div');
+      ghost.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
+      document.body.appendChild(ghost);
+      dragGhostRef.current = ghost;
+    }
+    event.dataTransfer.setDragImage(dragGhostRef.current, 0, 0);
+  };
+
+  const handleViewDragOver = (event: DragEvent, index: number) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    if (dragFromIndexRef.current === index) {
+      setDragOverIndex(null);
+      return;
+    }
+    setDragOverIndex(index);
+  };
+
+  const handleViewDrop = (event: DragEvent, toIndex: number) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const fromIndex = dragFromIndexRef.current;
+    if (fromIndex != null && fromIndex !== toIndex) {
+      mutate(current => reorderViews(current, fromIndex, toIndex));
+    }
+    dragFromIndexRef.current = null;
+    setDragOverIndex(null);
+    setDraggingViewIndex(null);
+  };
+
+  const handleViewDragEnd = () => {
+    dragFromIndexRef.current = null;
+    setDragOverIndex(null);
+    setDraggingViewIndex(null);
   };
 
   const createView = (type: 'grid' | 'gallery' | 'gantt' | 'kanban') => {
     mutate(current => addView(current, type));
     setShowViewMenu(false);
-    setShowCreateViewMenu(false);
+    setActiveToolbarPanel(null);
     setShowSettings(type === 'gallery');
+  };
+
+  const openToolbarPanel = (panel: ToolbarPanel) => {
+    setShowViewMenu(false);
+    setShowSettings(false);
+    setActiveToolbarPanel(current => current === panel ? null : panel);
   };
 
   const setGalleryConfig = (patch: Partial<GalleryViewConfig>) => {
@@ -474,7 +809,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     })));
   };
 
-  const addRecord = (initialTitle = '未命名记录') => {
+  const addRecord = (initialTitle = '') => {
     const record = createRecord(table.id, table.fields, table.primaryFieldId, initialTitle);
     if (activeView.type === 'gallery' && galleryConfig.groupByFieldId) {
       record.fields[galleryConfig.groupByFieldId] = '';
@@ -485,8 +820,29 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       record.fields[ganttConfig.endDateFieldId] = dateValue(offsetDate(start, 3));
     }
     mutate(current => ({ ...current, records: [...current.records, record] }));
-    setDetailRecordId(record.id);
     return record.id;
+  };
+
+  const insertRecordAt = (index: number, count = 1, initialTitle = '') => {
+    const insertedIds: string[] = [];
+    mutate(current => {
+      const newRecords = [...current.records];
+      for (let i = 0; i < count; i++) {
+        const record = createRecord(table.id, table.fields, table.primaryFieldId, initialTitle);
+        insertedIds.push(record.id);
+        if (activeView.type === 'gallery' && galleryConfig.groupByFieldId) {
+          record.fields[galleryConfig.groupByFieldId] = '';
+        }
+        if (activeView.type === 'gantt' && ganttConfig.startDateFieldId && ganttConfig.endDateFieldId) {
+          const start = new Date();
+          record.fields[ganttConfig.startDateFieldId] = dateValue(start);
+          record.fields[ganttConfig.endDateFieldId] = dateValue(offsetDate(start, 3));
+        }
+        newRecords.splice(index + i, 0, record);
+      }
+      return { ...current, records: newRecords };
+    });
+    return insertedIds;
   };
 
   const changeCell = (recordId: string, fieldId: string, value: CellValue) => {
@@ -502,14 +858,242 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
 
   const addField = () => {
     if (activeView.locked) return;
-    const id = `fld_text_${Date.now().toString(36)}`;
-    const existing = tableRef.current.fields.filter(field => /^字段/.test(field.name)).length;
-    const field: BaseField = { id, name: `字段 ${existing + 1}`, type: 'text' };
+    createField({ name: nextAutoFieldName(tableRef.current.fields), type: 'text' });
+  };
+
+  const createField = (input: CreateFieldInput) => {
+    if (activeView.locked) return;
+    const name = input.name.trim();
+    if (!name) return;
+    const { id, field, defaultValue } = buildNewFieldPayload({ ...input, name });
     mutate(current => ({
       ...current,
       fields: [...current.fields, field],
-      records: current.records.map(record => ({ ...record, fields: { ...record.fields, [id]: '' } })),
+      records: current.records.map(record => ({
+        ...record,
+        fields: { ...record.fields, [id]: defaultValue },
+      })),
     }));
+  };
+
+  const cloneCellValue = (value: CellValue): CellValue => {
+    if (Array.isArray(value)) return JSON.parse(JSON.stringify(value)) as CellValue;
+    return value;
+  };
+
+  const editField = (fieldId: string) => {
+    handleGridFieldMenuAction(fieldId, 'rename');
+  };
+
+  const removeField = (fieldId: string) => {
+    if (activeView.locked) return;
+    if (fieldId === table.primaryFieldId || table.fields.length <= 1) return;
+    const target = table.fields.find(field => field.id === fieldId);
+    if (!target) return;
+    mutate(current => ({
+      ...current,
+      fields: current.fields.filter(field => field.id !== fieldId),
+      records: current.records.map(record => {
+        const nextFields = { ...record.fields };
+        delete nextFields[fieldId];
+        return { ...record, fields: nextFields };
+      }),
+      views: current.views.map(view => ({
+        ...view,
+        hiddenFieldIds: view.hiddenFieldIds?.filter(id => id !== fieldId),
+        filters: view.filters?.filter(filter => filter.fieldId !== fieldId),
+        sorts: view.sorts?.filter(sort => sort.fieldId !== fieldId),
+        config: view.type === 'gallery'
+          ? (() => {
+              const config = { ...getGalleryConfig(current, view) };
+              if (config.coverFieldId === fieldId) delete config.coverFieldId;
+              if (config.groupByFieldId === fieldId) delete config.groupByFieldId;
+              return config;
+            })()
+          : view.type === 'gantt'
+            ? (() => {
+                const config = { ...getGanttConfig(current, view) };
+                if (config.titleFieldId === fieldId) config.titleFieldId = current.primaryFieldId;
+                if (config.startDateFieldId === fieldId) delete config.startDateFieldId;
+                if (config.endDateFieldId === fieldId) delete config.endDateFieldId;
+                return config;
+              })()
+            : view.config,
+      })),
+    }));
+  };
+
+  const reorderFields = (fromIndex: number, toIndex: number) => {
+    if (activeView.locked || fromIndex === toIndex) return;
+    mutate(current => {
+      const fields = [...current.fields];
+      const [moved] = fields.splice(fromIndex, 1);
+      fields.splice(toIndex, 0, moved);
+      return { ...current, fields };
+    });
+  };
+
+  const insertFieldAfter = (fieldId: string, source?: BaseField) => {
+    if (activeView.locked) return;
+    const id = `fld_text_${Date.now().toString(36)}`;
+    mutate(current => {
+      const index = current.fields.findIndex(field => field.id === fieldId);
+      const insertIndex = index >= 0 ? index + 1 : current.fields.length;
+      const field: BaseField = source
+        ? { ...source, id, name: duplicateFieldName(source.name) }
+        : { id, name: nextAutoFieldName(current.fields), type: 'text' };
+      const fields = [...current.fields];
+      fields.splice(insertIndex, 0, field);
+      return {
+        ...current,
+        fields,
+        records: current.records.map(record => ({
+          ...record,
+          fields: {
+            ...record.fields,
+            [id]: source ? cloneCellValue(record.fields[source.id]) : '',
+          },
+        })),
+      };
+    });
+  };
+
+  const insertFieldBefore = (fieldId: string) => {
+    if (activeView.locked) return;
+    const id = `fld_text_${Date.now().toString(36)}`;
+    mutate(current => {
+      const index = current.fields.findIndex(field => field.id === fieldId);
+      const insertIndex = index >= 0 ? index : 0;
+      const field: BaseField = { id, name: nextAutoFieldName(current.fields), type: 'text' };
+      const fields = [...current.fields];
+      fields.splice(insertIndex, 0, field);
+      return {
+        ...current,
+        fields,
+        records: current.records.map(record => ({
+          ...record,
+          fields: {
+            ...record.fields,
+            [id]: '',
+          },
+        })),
+      };
+    });
+  };
+
+  const coerceFieldValue = (value: CellValue, type: BaseField['type']): CellValue => {
+    if (type === 'attachment') return Array.isArray(value) && typeof value[0] === 'object' ? value : [];
+    if (type === 'checkbox') return typeof value === 'boolean' ? value : Boolean(valueText(value));
+    if (type === 'number') return Number(valueText(value)) || 0;
+    if (type === 'multi_select') return Array.isArray(value) && typeof value[0] !== 'object' ? value as string[] : valueText(value).split(',').map(item => item.trim()).filter(Boolean);
+    return valueText(value);
+  };
+
+  const updateFieldConfig = (fieldId: string, input: UpdateFieldInput) => {
+    if (activeView.locked) return;
+    mutate(current => {
+      const oldField = current.fields.find(field => field.id === fieldId);
+      if (!oldField) return current;
+      const typeChanged = oldField.type !== input.type;
+      return {
+        ...current,
+        fields: current.fields.map(field => {
+          if (field.id !== fieldId) return field;
+          const nextField: BaseField = {
+            ...field,
+            name: input.name,
+            type: input.type,
+            defaultValue: input.defaultValue,
+          };
+          if (input.type === 'single_select' || input.type === 'multi_select') {
+            nextField.options = { choices: input.options?.choices ?? [] };
+          } else {
+            delete nextField.options;
+          }
+          if (input.defaultValue === undefined) {
+            delete nextField.defaultValue;
+          }
+          return nextField;
+        }),
+        records: typeChanged
+          ? current.records.map(record => ({
+              ...record,
+              fields: {
+                ...record.fields,
+                [fieldId]: coerceFieldValue(record.fields[fieldId], input.type),
+              },
+            }))
+          : current.records,
+      };
+    });
+    setEditingFieldPanel(null);
+  };
+
+  const handleGridFieldMenuAction = (fieldId: string, action: GridFieldMenuAction, position?: GridFieldMenuPosition) => {
+    const field = tableRef.current.fields.find(item => item.id === fieldId);
+    if (!field) return;
+    if (action === 'rename') {
+      if (activeView.locked) return;
+      setEditingFieldPanel({
+        fieldId,
+        left: Math.max(8, position?.anchorLeft ?? position?.left ?? 320),
+        top: Math.max(8, (position?.anchorTop ?? 88) + 32),
+      });
+      return;
+    }
+    if (action === 'description') {
+            
+      return;
+    }
+    if (action === 'duplicate') {
+      insertFieldAfter(fieldId, field);
+      return;
+    }
+    if (action === 'hide') {
+      if (activeView.locked || fieldId === tableRef.current.primaryFieldId) return;
+      mutate(current => updateView(current, activeView.id, view => ({
+        ...view,
+        hiddenFieldIds: Array.from(new Set([...(view.hiddenFieldIds || []), fieldId])),
+      })));
+      return;
+    }
+    if (action === 'insertLeft') {
+      insertFieldBefore(fieldId);
+      return;
+    }
+    if (action === 'insertRight') {
+      insertFieldAfter(fieldId);
+      return;
+    }
+    if (action === 'sortAsc' || action === 'sortDesc') {
+      if (activeView.locked) return;
+      mutate(current => updateView(current, activeView.id, view => ({
+        ...view,
+        sorts: [{ fieldId, direction: action === 'sortAsc' ? 'asc' : 'desc' }],
+      })));
+      return;
+    }
+    if (action === 'filter') {
+      if (activeView.locked) return;
+      mutate(current => updateView(current, activeView.id, view => ({
+        ...view,
+        filters: [{
+          id: view.filters?.[0]?.id || `filter_${Date.now().toString(36)}`,
+          fieldId,
+          operator: view.filters?.[0]?.operator || 'contains',
+          value: view.filters?.[0]?.value || '',
+        }],
+      })));
+      setActiveToolbarPanel('filter');
+      return;
+    }
+    if (action === 'group') {
+      setActiveToolbarPanel('group');
+      return;
+    }
+    if (action === 'delete') {
+      removeField(fieldId);
+    }
   };
 
   const ensureAttachmentField = () => {
@@ -545,7 +1129,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     };
     xhr.onload = () => {
       try {
-        const response = JSON.parse(xhr.responseText || '{}');
+        const response = parseJsonPayload<{ name: string; size: number; type: string; url: string }>(xhr.responseText || '');
         if (xhr.status < 200 || xhr.status >= 300 || response.code !== 0) throw new Error(response.message || '上传失败');
         const uploaded = response.data as { name: string; size: number; type: string; url: string };
         mutate(current => updateRecord(current, recordId, record => withUpdatedValue(record, fieldId,
@@ -614,7 +1198,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       return;
     }
     selectionAnchorRef.current = recordId;
-    setDetailRecordId(recordId);
+    setSelectedIds(new Set([recordId]));
   };
 
   const selectBlock = () => {
@@ -638,189 +1222,67 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     if (cover) return <FileBadge attachment={cover} />;
     return (
       <div className="base-gallery-empty-cover">
-        <span>▧</span>
+        <span aria-hidden>▧</span>
         {!galleryConfig.coverFieldId ? <small>选择附件字段作为封面</small> : null}
       </div>
     );
   };
 
   const renderGallery = () => (
-    <div
-      className={`base-gallery-surface${dropActive ? ' is-drop-active' : ''}`}
-      onDragOver={event => {
-        if (!event.dataTransfer.types.includes('Files')) return;
-        event.preventDefault();
-        setDropActive(true);
-      }}
-      onDragLeave={() => setDropActive(false)}
-      onDrop={event => onDropFiles(event)}
-    >
-      {groups.map(group => (
-        <section className="base-gallery-group" key={group.key || 'all'}>
-          {group.label && (
-            <button
-              type="button"
-              className="base-gallery-group__header"
-              onClick={() => setCollapsedGroups(current => {
-                const next = new Set(current);
-                if (next.has(group.key)) next.delete(group.key); else next.add(group.key);
-                return next;
-              })}
-            >
-              <span>{collapsedGroups.has(group.key) ? '▸' : '▾'}</span>
-              {group.label}
-              <em>{group.records.length}</em>
-            </button>
-          )}
-          {!collapsedGroups.has(group.key) && (
-            <div className={`base-gallery-grid size-${galleryConfig.cardSize}`}>
-              {group.records.map(record => {
-                const rawTitle = valueText(record.fields[galleryConfig.titleFieldId || table.primaryFieldId]);
-                const title = rawTitle || '未命名记录';
-                const attachments = getAttachments(record, galleryConfig.coverFieldId);
-                return (
-                  <article
-                    key={record.id}
-                    className={`base-gallery-card${selectedIds.has(record.id) ? ' is-selected' : ''}`}
-                    onClick={event => cardClick(event, record.id)}
-                    onDragOver={event => event.preventDefault()}
-                    onDrop={event => onDropFiles(event, record.id)}
-                  >
-                    {galleryConfig.emptyCoverMode !== 'hide-cover' && (
-                      <div className={`base-gallery-card__cover ratio-${galleryConfig.cardAspectRatio.replace(':', '-')}`}>
-                        {renderCover(record)}
-                        {attachments.length > 1 && galleryConfig.showAttachmentCount && <span className="base-gallery-count">{attachments.length}</span>}
-                        {selectCoverAttachment(attachments)?.mimeType.startsWith('video/') && <span className="base-gallery-video">▶</span>}
-                      </div>
-                    )}
-                    <div className="base-gallery-card__body">
-                      <strong className={`base-gallery-card__title${rawTitle ? '' : ' is-placeholder'}`}>{title}</strong>
-                      {galleryConfig.visibleFieldIds.map(fieldId => {
-                        const field = table.fields.find(item => item.id === fieldId);
-                        if (!field) return null;
-                        const value = record.fields[field.id];
-                        if (!galleryConfig.showEmptyFields && !valueText(value)) return null;
-                        return (
-                          <div className="base-gallery-card__field" key={field.id}>
-                            {galleryConfig.showFieldNames && <label>{field.name}</label>}
-                            <FieldDisplay field={field} value={value} />
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {galleryConfig.showRecordActions && (
-                      <button
-                        type="button"
-                        className="base-gallery-card__delete"
-                        aria-label="删除记录"
-                        onClick={event => {
-                          event.stopPropagation();
-                          removeRecords([record.id], true);
-                        }}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      ))}
-      {records.length === 0 && (
-        <div className="base-gallery-empty">
-          <span>暂无记录</span>
-          <button type="button" onClick={() => addRecord()}>新建记录</button>
-        </div>
-      )}
-      {records.length > 0 && (
-        <button type="button" className="base-gallery-add-record" onClick={() => addRecord()}>+ 添加记录</button>
-      )}
-    </div>
-  );
-
-  const renderCanvasGrid = () => (
-    <BitableCanvasGrid
+    <BitableGalleryView
       table={table}
-      activeView={activeView}
+      config={galleryConfig}
+      groups={groups}
       records={records}
-      changeCell={changeCell}
-      pickFiles={pickFiles}
-      addRecord={() => { addRecord(); }}
-      openRecord={setDetailRecordId}
-      selectBlock={selectBlock}
+      selectedIds={selectedIds}
+      collapsedGroups={collapsedGroups}
+      dropActive={dropActive}
+      setCollapsedGroups={setCollapsedGroups}
+      onDropFiles={onDropFiles}
+      setDropActive={setDropActive}
+      cardClick={cardClick}
+      removeRecords={removeRecords}
+      addRecord={() => addRecord()}
     />
   );
 
-  const renderGrid = () => {
-    const visibleFields = table.fields.filter(field => !(activeView.hiddenFieldIds || []).includes(field.id));
-    const blankRows = Array.from({ length: Math.max(0, 7 - records.length) }, (_, index) => records.length + index + 1);
-
-    return (
-      <div className="base-grid-shell">
-        <div className="base-grid-scroll">
-          <table className="base-grid-table">
-            <thead>
-              <tr>
-                <th className="base-grid-index"><span className="base-grid-checkbox" aria-hidden /></th>
-                {visibleFields.map(field => (
-                  <th key={field.id} data-field-type={field.type}>
-                    <span className="base-grid-field-head">
-                      {field.id === table.primaryFieldId && <span className="base-grid-field-lock" aria-hidden><FieldLockGlyph size={11} /></span>}
-                      <span className="base-grid-field-icon" aria-hidden>{fieldTypeGlyph(field.type, 13)}</span>
-                      <span className="base-grid-field-name">{field.name}</span>
-                      <span className="base-grid-field-chevron" aria-hidden><SelGlyphChevronDown size={11} fill="currentColor" /></span>
-                    </span>
-                  </th>
-                ))}
-                <th className="base-grid-add-field" onClick={() => addField()} title="添加字段"><span aria-hidden>+</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {records.map((record, index) => (
-                <tr key={record.id}>
-                  <td className="base-grid-index"><button type="button" onClick={() => setDetailRecordId(record.id)}>{index + 1}</button></td>
-                  {visibleFields.map(field => (
-                    <td key={field.id} data-field-type={field.type}>
-                      {field.type === 'attachment' ? (
-                        <button type="button" className="base-grid-attachment" onClick={() => pickFiles(record.id, field.id)}>
-                          {getAttachments(record, field.id).length ? `${getAttachments(record, field.id).length} 个附件` : '+ 添加附件'}
-                        </button>
-                      ) : field.type === 'single_select' ? (
-                        <button type="button" className="base-grid-select-value" onClick={() => setDetailRecordId(record.id)}>
-                          <FieldDisplay field={field} value={record.fields[field.id]} />
-                        </button>
-                      ) : (
-                        <input
-                          value={valueText(record.fields[field.id])}
-                          onChange={event => changeCell(record.id, field.id, event.target.value)}
-                        />
-                      )}
-                    </td>
-                  ))}
-                  <td className="feishu-bitable-block__tail" onClick={selectBlock} />
-                </tr>
-              ))}
-              {blankRows.map(rowNumber => (
-                <tr className="base-grid-blank-row base-grid-add-row" key={`blank-${rowNumber}`}>
-                  <td className="base-grid-index">{rowNumber}</td>
-                  {visibleFields.map(field => <td key={field.id} data-field-type={field.type} />)}
-                  <td className="feishu-bitable-block__tail" onClick={selectBlock} />
-                </tr>
-              ))}
-              <tr className="base-grid-add-row base-grid-add-control-row">
-                <td colSpan={visibleFields.length + 2}>
-                  <button type="button" onClick={() => addRecord()}>+</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div className="base-grid-footer">{Math.max(7, records.length)} 条记录⌄</div>
-      </div>
-    );
-  };
+  const renderGrid = () => (
+    <BitableGridView
+      table={table}
+      activeView={activeView}
+      records={records}
+      selectedIds={selectedIds}
+      addField={addField}
+      addRecord={() => addRecord()}
+      insertRecordAt={insertRecordAt}
+      removeRecords={removeRecords}
+      changeCell={changeCell}
+      pickFiles={pickFiles}
+      toggleRecordSelection={toggleRecordSelection}
+      toggleAllRecordSelection={toggleAllRecordSelection}
+      reorderRecords={reorderRecords}
+      openRecord={recordId => {
+        setCardRecordId(recordId);
+        selectionAnchorRef.current = recordId;
+        setSelectedIds(new Set([recordId]));
+      }}
+      selectBlock={selectBlock}
+      onFieldMenuAction={handleGridFieldMenuAction}
+      onColumnWidthChange={(fieldId, width) => {
+        if (activeView.locked) return;
+        mutate(current => updateView(current, activeView.id, view => ({
+          ...view,
+          config: {
+            ...view.config,
+            fieldWidths: {
+              ...((view.config as { fieldWidths?: Record<string, number> }).fieldWidths || {}),
+              [fieldId]: width,
+            },
+          },
+        })));
+      }}
+    />
+  );
 
   const ganttScrollRef = useRef<HTMLDivElement>(null);
 
@@ -884,6 +1346,17 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     }
   };
 
+  const reorderRecords = (fromIndex: number, toIndex: number) => {
+    if (activeView.locked || fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    if (fromIndex >= records.length || toIndex >= records.length) return;
+    mutate(current => {
+      const nextRecords = [...current.records];
+      const [moved] = nextRecords.splice(fromIndex, 1);
+      nextRecords.splice(toIndex, 0, moved);
+      return { ...current, records: nextRecords };
+    });
+  };
+
   const draftGanttAt = (drag: NonNullable<typeof ganttDragRef.current>, clientX: number) => {
     const delta = Math.round((clientX - drag.originX) / ganttConfig.dayWidth);
     let start = drag.start;
@@ -910,7 +1383,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const finishGanttDragAt = (clientX: number) => {
     const drag = ganttDragRef.current;
     if (!drag) return;
-    const draft = draftGanttAt(drag, clientX);
+    const draft = ganttDraftRef.current || draftGanttAt(drag, clientX);
     ganttDragRef.current = null;
     ganttDraftRef.current = null;
     setGanttDraft(null);
@@ -987,7 +1460,6 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     const drag = ganttDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
-    if (event.clientX === drag.originX) return;
     finishGanttDragAt(event.clientX);
   };
 
@@ -999,357 +1471,236 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     }));
   };
 
-  const renderGantt = () => {
-    const isAllSelected = records.length > 0 && selectedIds.size === records.length;
-    return (
-      <div className="base-gantt">
-        <div className="base-gantt__toolbar">
-          <div className="base-gantt__toolbar-left">
-            <span className="base-gantt__month-label">{ganttMonthSpans[0]?.label || formatMonth(today)}</span>
-          </div>
-          <div className="base-gantt__toolbar-right">
-            <div className="base-gantt__scale">
-              <button type="button" className={ganttConfig.dayWidth >= 55 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 60 })}>周</button>
-              <button type="button" className={ganttConfig.dayWidth >= 35 && ganttConfig.dayWidth < 55 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 40 })}>月</button>
-              <button type="button" className={ganttConfig.dayWidth >= 20 && ganttConfig.dayWidth < 35 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 24 })}>季</button>
-              <button type="button" className={ganttConfig.dayWidth < 20 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 12 })}>年</button>
-            </div>
-            <div className="base-gantt__nav">
-              <button type="button" className="base-gantt__nav-btn" onClick={scrollToToday}>今天</button>
-              <button type="button" className="base-gantt__nav-arrow" onClick={() => scrollTimeline('left')} title="向左滚动">‹</button>
-              <button type="button" className="base-gantt__nav-arrow" onClick={() => scrollTimeline('right')} title="向右滚动">›</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="base-gantt__scroll" ref={ganttScrollRef}>
-          <div className="base-gantt__container" style={{ minWidth: 'max-content', position: 'relative' }}>
-            
-            {/* Timeline Header Row */}
-            <div className="base-gantt__header">
-              
-              {/* Left sticky pane for metadata */}
-              <div className={`base-gantt__left-pane ${leftPanelCollapsed ? 'is-collapsed' : ''}`}>
-                <div className="base-gantt__col base-gantt__col--checkbox">
-                  <input type="checkbox" checked={isAllSelected} onChange={toggleAllRecordSelection} />
-                </div>
-                <div className="base-gantt__col base-gantt__col--index">#</div>
-                <div className="base-gantt__col base-gantt__col--name base-gantt__record-column">
-                  <span>任务名</span>
-                  <button type="button" className="base-gantt__collapse-btn" onClick={() => setLeftPanelCollapsed(true)} title="折叠左侧面板">«</button>
-                </div>
-              </div>
-
-              {/* Right pane scrollable timeline header */}
-              <div className="base-gantt__timeline-head" style={{ width: ganttDays.length * ganttConfig.dayWidth }}>
-                <div className="base-gantt__months">
-                  {ganttMonthSpans.map(month => <span key={month.key} style={{ width: month.days * ganttConfig.dayWidth }}>{month.label}</span>)}
-                </div>
-                <div className="base-gantt__days">
-                  {ganttDays.map(day => {
-                    const isWeekend = day.getDay() === 0 || day.getDay() === 6;
-                    return (
-                      <span key={dateValue(day)} className={`${dateValue(day) === dateValue(today) ? 'is-today' : ''} ${isWeekend ? 'is-weekend' : ''}`} style={{ width: ganttConfig.dayWidth }}>
-                        {day.getDate()}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* If Left Panel is Collapsed, render an expand tab */}
-            {leftPanelCollapsed && (
-              <button type="button" className="base-gantt__expand-btn" onClick={() => setLeftPanelCollapsed(false)} title="展开左侧面板">
-                »
-              </button>
-            )}
-
-            {/* Timeline Today Vertical Line */}
-            <div 
-              className="base-gantt__today-line" 
-              style={{ 
-                left: (leftPanelCollapsed ? 0 : 260) + daysBetween(ganttOrigin, today) * ganttConfig.dayWidth + ganttConfig.dayWidth / 2,
-              }} 
-            />
-
-            {/* Timeline Lanes / Rows */}
-            <div className="base-gantt__rows">
-              {records.map((record, index) => {
-                const title = valueText(record.fields[ganttConfig.titleFieldId || table.primaryFieldId]) || '未命名记录';
-                const draft = ganttDraft?.recordId === record.id ? ganttDraft : null;
-                const start = readDate(draft?.start ?? record.fields[ganttConfig.startDateFieldId || '']);
-                const end = readDate(draft?.end ?? record.fields[ganttConfig.endDateFieldId || '']);
-                const scheduled = Boolean(start && end && daysBetween(start, end) >= 0);
-                const durationDays = scheduled ? daysBetween(start!, end!) + 1 : 0;
-                
-                return (
-                  <div className="base-gantt__row" key={record.id}>
-                    {/* Left sticky columns */}
-                    <div className={`base-gantt__left-pane ${leftPanelCollapsed ? 'is-collapsed' : ''}`}>
-                      <div className="base-gantt__col base-gantt__col--checkbox">
-                        <input type="checkbox" checked={selectedIds.has(record.id)} onChange={() => toggleRecordSelection(record.id)} />
-                      </div>
-                      <div className="base-gantt__col base-gantt__col--index" onClick={() => setDetailRecordId(record.id)}>{index + 1}</div>
-                      <div className="base-gantt__col base-gantt__col--name base-gantt__record" onClick={() => setDetailRecordId(record.id)}>
-                        <div className="base-gantt__title-text">{title}</div>
-                      </div>
-                    </div>
-
-                    {/* Right timeline cell lane */}
-                    <div
-                      className={`base-gantt__timeline base-gantt__lane${scheduled ? '' : ' is-unscheduled'}`}
-                      style={{ width: ganttDays.length * ganttConfig.dayWidth }}
-                      onClick={event => {
-                        if (scheduled || (event.target instanceof Element && event.target.closest('.base-gantt__schedule'))) return;
-                        const clientLeft = event.currentTarget.getBoundingClientRect().left;
-                        const cell = Math.max(0, Math.min(ganttDays.length - 1, Math.floor((event.clientX - clientLeft) / ganttConfig.dayWidth)));
-                        scheduleRecordAt(record.id, ganttDays[cell]);
-                      }}
-                      title={scheduled ? undefined : '点击日期设置排期'}
-                    >
-                      {ganttDays.map(day => {
-                        const isWeekend = day.getDay() === 0 || day.getDay() === 6;
-                        return (
-                          <span 
-                            key={dateValue(day)} 
-                            className={`${dateValue(day) === dateValue(today) ? 'is-today' : ''} ${isWeekend ? 'is-weekend' : ''}`} 
-                            style={{ width: ganttConfig.dayWidth }} 
-                          />
-                        );
-                      })}
-                      {scheduled ? (
-                        <div
-                          className="base-gantt__bar"
-                          data-record-id={record.id}
-                          style={{
-                            left: daysBetween(ganttOrigin, start!) * ganttConfig.dayWidth + 3,
-                            width: (daysBetween(start!, end!) + 1) * ganttConfig.dayWidth - 6,
-                          }}
-                          onPointerDown={event => startGanttDrag(event, record, 'move')}
-                          onPointerMove={moveGanttDrag}
-                          onPointerUp={endGanttDrag}
-                          onPointerCancel={endGanttDrag}
-                          onMouseDown={event => startGanttMouseDrag(event, record, 'move')}
-                          onMouseUp={event => finishGanttDragAt(event.clientX)}
-                        >
-                          <i className="base-gantt__resize base-gantt__resize--start" onPointerDown={event => startGanttDrag(event, record, 'start')} />
-                          <div className="base-gantt__bar-content">
-                            <span className="base-gantt__bar-title">{title}</span>
-                            <span className="base-gantt__bar-duration">{durationDays}天</span>
-                          </div>
-                          <i className="base-gantt__resize base-gantt__resize--end" onPointerDown={event => startGanttDrag(event, record, 'end')} />
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="base-gantt__schedule"
-                          style={{ left: daysBetween(ganttOrigin, today) * ganttConfig.dayWidth + 5 }}
-                          onClick={() => scheduleRecordAt(record.id, today)}
-                        >+ 设置排期</button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              
-              {/* Bottom empty row/add row for Left Pane */}
-              <div className="base-gantt__add-row base-gantt__row--add">
-                <div className={`base-gantt__left-pane ${leftPanelCollapsed ? 'is-collapsed' : ''}`}>
-                  <button type="button" className="base-gantt__quick-add-btn" onClick={() => addRecord()} title="快速添加记录">
-                    +
-                  </button>
-                </div>
-                <div className="base-gantt__timeline" style={{ width: ganttDays.length * ganttConfig.dayWidth }} />
-              </div>
-            </div>
-
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const renderGantt = () => (
+    <BitableGanttView
+      table={table}
+      config={ganttConfig}
+      records={records}
+      selectedIds={selectedIds}
+      leftPanelCollapsed={leftPanelCollapsed}
+      today={today}
+      ganttOrigin={ganttOrigin}
+      ganttDays={ganttDays}
+      ganttMonthSpans={ganttMonthSpans}
+      ganttDraft={ganttDraft}
+      setLeftPanelCollapsed={setLeftPanelCollapsed}
+      setGanttConfig={setGanttConfig}
+      toggleAllRecordSelection={toggleAllRecordSelection}
+      toggleRecordSelection={toggleRecordSelection}
+      scheduleRecordAt={scheduleRecordAt}
+      startGanttDrag={startGanttDrag}
+      moveGanttDrag={moveGanttDrag}
+      endGanttDrag={endGanttDrag}
+      startGanttMouseDrag={startGanttMouseDrag}
+      finishGanttDragAt={finishGanttDragAt}
+      scrollToToday={scrollToToday}
+      scrollTimeline={scrollTimeline}
+      addRecord={() => addRecord()}
+      scrollRef={ganttScrollRef}
+    />
+  );
 
   const renderKanban = () => {
-    // Find first single-select field to group by
-    const selectFields = table.fields.filter(field => field.type === 'single_select');
-    const kanbanField = selectFields[0] || table.fields[0];
-    
-    if (!kanbanField) return <div className="base-kanban-empty">请先创建单选字段以使用看板视图</div>;
-
-    // Columns: choices from the select field, plus "Uncategorized" (未分类)
-    const choices = kanbanField.options?.choices || [];
-    const columns = [
-      ...choices.map(choice => ({
-        id: choice.id,
-        name: choice.name,
-        color: choice.color,
-        value: choice.name
-      })),
-      { id: 'uncategorized', name: '未分类', color: '#8f959e', value: '' }
-    ];
-
-    const moveCard = (recordId: string, direction: 'left' | 'right') => {
-      const record = table.records.find(r => r.id === recordId);
-      if (!record) return;
-      const currentValue = valueText(record.fields[kanbanField.id]);
-      const currentIdx = columns.findIndex(col => col.value === currentValue);
-      if (currentIdx === -1) return;
-      let nextIdx = currentIdx + (direction === 'left' ? -1 : 1);
-      if (nextIdx < 0) nextIdx = columns.length - 1;
-      if (nextIdx >= columns.length) nextIdx = 0;
-      const targetColumn = columns[nextIdx];
-      changeCell(recordId, kanbanField.id, targetColumn.value);
-    };
-
+    const statusField = table.fields.find(field => field.type === 'single_select');
     const addRecordToColumn = (statusValue: string) => {
       const recordId = addRecord();
-      if (statusValue) {
-        changeCell(recordId, kanbanField.id, statusValue);
+      if (statusValue && statusField) {
+        changeCell(recordId, statusField.id, statusValue);
       }
     };
 
     return (
-      <div className="base-kanban">
-        <div className="base-kanban__board">
-          {columns.map(column => {
-            const columnRecords = records.filter(record => {
-              const val = valueText(record.fields[kanbanField.id]);
-              return column.id === 'uncategorized' ? !val : val === column.value;
-            });
-
-            return (
-              <div className="base-kanban__column" key={column.id}>
-                <header className="base-kanban__column-header" style={{ borderTop: `3px solid ${column.color}` }}>
-                  <span className="base-kanban__column-title-tag" style={{ backgroundColor: `${column.color}15`, color: column.color }}>
-                    {column.name}
-                  </span>
-                  <span className="base-kanban__column-count">{columnRecords.length}</span>
-                </header>
-
-                <div className="base-kanban__column-cards">
-                  {columnRecords.map(record => {
-                    const title = valueText(record.fields[galleryConfig.titleFieldId || table.primaryFieldId]) || '未命名记录';
-                    return (
-                      <div className="base-kanban__card" key={record.id} onClick={() => setDetailRecordId(record.id)}>
-                        <div className="base-kanban__card-header">
-                          <strong className="base-kanban__card-title">{title}</strong>
-                        </div>
-                        <div className="base-kanban__card-fields">
-                          {galleryConfig.visibleFieldIds.map(fieldId => {
-                            const field = table.fields.find(item => item.id === fieldId);
-                            if (!field || field.id === kanbanField.id) return null;
-                            const value = record.fields[field.id];
-                            if (!valueText(value)) return null;
-                            return (
-                              <div className="base-kanban__card-field" key={field.id}>
-                                <label>{field.name}:</label>
-                                <FieldDisplay field={field} value={value} />
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div className="base-kanban__card-actions" onClick={e => e.stopPropagation()}>
-                          <button type="button" className="base-kanban__card-action-btn" onClick={() => moveCard(record.id, 'left')} title="左移">‹</button>
-                          <button type="button" className="base-kanban__card-action-btn base-kanban__card-action-btn--delete" onClick={() => removeRecords([record.id], true)} title="删除">×</button>
-                          <button type="button" className="base-kanban__card-action-btn" onClick={() => moveCard(record.id, 'right')} title="右移">›</button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {columnRecords.length === 0 && (
-                    <div className="base-kanban__column-empty">暂无记录</div>
-                  )}
-                </div>
-
-                <button type="button" className="base-kanban__add-card-btn" onClick={() => addRecordToColumn(column.value)}>
-                  + 添加记录
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <BitableKanbanView
+        table={table}
+        config={galleryConfig}
+        records={records}
+        addRecordToColumn={addRecordToColumn}
+      />
     );
   };
 
-  const selectedRecord = table.records.find(record => record.id === detailRecordId);
+  const editingField = editingFieldPanel ? table.fields.find(field => field.id === editingFieldPanel.fieldId) : null;
+  const cardRecord = cardRecordId ? table.records.find(record => record.id === cardRecordId) : null;
+  const settingsLabel = viewSettingsLabel(activeView.type);
+
+  useEffect(() => {
+    if (cardRecordId && !table.records.some(record => record.id === cardRecordId)) setCardRecordId(null);
+  }, [cardRecordId, table.records]);
 
   return (
     <NodeViewWrapper
-      className={`feishu-bitable-block feishu-base-block${selected ? ' is-selected' : ''}${showSettings || showViewMenu ? ' is-panel-open' : ''}`}
+      className={`feishu-bitable-block feishu-base-block${selected ? ' is-selected' : ''}${isViewToolsVisible ? ' is-view-tools-visible' : ''}${showSettings || showViewMenu || activeToolbarPanel ? ' is-panel-open' : ''}`}
       {...blockAttrs(node.attrs)}
       data-base-view-type={activeView.type}
       contentEditable={false}
+      onContextMenu={(event: React.MouseEvent) => event.stopPropagation()}
     >
+      <div
+        ref={viewHoverZoneRef}
+        className="base-view-hover-zone"
+        data-no-marquee-selection="true"
+        onPointerEnter={showViewTools}
+        onPointerLeave={handleViewHoverLeave}
+      >
       <header className="base-viewbar bitable-toolbar-doc" data-no-marquee-selection="true">
+        <div className="base-viewbar__page">
         <span className="base-viewbar__source" aria-hidden>✦</span>
         <span className="base-viewbar__app">{table.name}</span>
         <span className="base-viewbar__divider" />
-        <div className="base-view-switcher" ref={viewMenuRef}>
-          <button
-            type="button"
-            className={`base-viewbar__current${showViewMenu ? ' is-open' : ''}`}
-            onClick={() => {
-              setShowViewMenu(open => !open);
-              setShowCreateViewMenu(false);
-            }}
-          >
-            <span className="base-viewbar__view-icon" aria-hidden data-view-icon={activeView.type}>
-              <ViewIcon type={activeView.type} />
-            </span>
-            <span className="base-viewbar__title">
-              {activeView.name}
-              {activeView.locked ? ' 🔒' : ''}
-            </span>
-            <span className="base-viewbar__chevron" aria-hidden>
-              <SelGlyphChevronDown size={12} fill="currentColor" />
-            </span>
-          </button>
-          {showViewMenu && (
-            <div className="base-view-menu">
-              {table.views.map(view => (
-                <button
-                  type="button"
-                  className={view.id === activeView.id ? 'is-active' : ''}
-                  key={view.id}
-                  onClick={() => setView(view.id)}
-                >
-                  <span aria-hidden data-view-icon={view.type}><ViewIcon type={view.type} /></span>{view.name}
-                </button>
-              ))}
-              <div className="base-view-menu__create">
-                <button type="button" className="base-view-menu__new" onClick={() => setShowCreateViewMenu(open => !open)}>
-                  <span aria-hidden>+</span>新建<span aria-hidden>▸</span>
-                </button>
-                {showCreateViewMenu && (
-                  <div className="base-view-create-menu">
-                    <button type="button" onClick={() => createView('grid')}><span aria-hidden>▦</span>表格视图</button>
-                    <button type="button" onClick={() => createView('gallery')}><span aria-hidden>▧</span>画册视图</button>
-                    <button type="button" onClick={() => createView('gantt')}><span aria-hidden>☷</span>甘特图</button>
-                    <button type="button" onClick={() => createView('kanban')}><span aria-hidden>📋</span>看板视图</button>
-                  </div>
-                )}
-              </div>
-            </div>
+        <div className={`base-view-title-group${isRenamingView ? ' is-renaming' : ''}`}>
+          <div className="base-view-switcher" ref={viewMenuRef}>
+            <button
+              type="button"
+              className={`base-viewbar__current${showViewMenu ? ' is-open' : ''}${isRenamingView ? ' is-renaming' : ''}`}
+              onClick={() => {
+                if (isRenamingView) return;
+                setShowViewMenu(open => !open);
+              }}
+            >
+              <span className="base-viewbar__view-icon" aria-hidden data-view-icon={activeView.type}>
+                <ViewIcon type={activeView.type} />
+              </span>
+              {isRenamingView ? (
+                <input
+                  ref={renameInputRef}
+                  className="base-viewbar__title-input"
+                  value={renameDraft}
+                  aria-label="视图名称"
+                  onChange={event => setRenameDraft(event.target.value)}
+                  onBlur={commitRenameView}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitRenameView();
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      cancelRenameView();
+                    }
+                  }}
+                  onClick={event => event.stopPropagation()}
+                  onMouseDown={event => event.stopPropagation()}
+                />
+              ) : (
+                <span className="base-viewbar__title">
+                  {activeView.name}
+                  {activeView.locked ? ' 🔒' : ''}
+                </span>
+              )}
+              {!isRenamingView && (
+                <span className="base-viewbar__chevron" aria-hidden>
+                  <SelGlyphChevronDown size={12} fill="currentColor" />
+                </span>
+              )}
+            </button>
+            {showViewMenu && (
+              <ViewSidebarMenu
+                views={table.views}
+                activeViewId={activeView.id}
+                renamingViewId={renamingViewId}
+                renameDraft={renameDraft}
+                renameInputRef={renameInputRef}
+                dragOverIndex={dragOverIndex}
+                draggingViewIndex={draggingViewIndex}
+                contextMenuViewId={viewContextMenuId}
+                contextMenuRef={viewContextMenuRef}
+                canDeleteView={table.views.length > 1}
+                onSelectView={setView}
+                onCreateView={createView}
+                onOpenContextMenu={openViewContextMenu}
+                onRenameView={viewId => beginRenameView(viewId, true)}
+                onRemoveView={removeView}
+                onRenameDraftChange={setRenameDraft}
+                onCommitRename={commitRenameView}
+                onCancelRename={cancelRenameView}
+                onDragStart={handleViewDragStart}
+                onDragOver={handleViewDragOver}
+                onDrop={handleViewDrop}
+                onDragEnd={handleViewDragEnd}
+              />
+            )}
+          </div>
+          {!isRenamingView && !activeView.locked && (
+            <button
+              type="button"
+              className="base-viewbar__rename"
+              aria-label="重命名视图"
+              title="重命名"
+              onClick={startRenameView}
+            >
+              <ToolGlyphRename />
+            </button>
           )}
         </div>
 
-        {selectedIds.size > 0 && <button type="button" className="base-selection-delete base-danger" onClick={() => removeRecords(Array.from(selectedIds), true)}>删除已选 {selectedIds.size} 项</button>}
         <div className="base-viewbar__tools">
-          <button type="button" className={`base-viewbar__tool${showSettings ? ' is-active' : ''}`} aria-label="设置" title="视图设置" onClick={() => setShowSettings(open => !open)}><ToolGlyphSettings /></button>
-          {activeView.type === 'gantt' && <button type="button" className="base-viewbar__tool" aria-label="甘特图设置" title="甘特图设置" onClick={() => setShowSettings(true)}><ToolGlyphGantt /></button>}
-          <button type="button" className="base-viewbar__tool" aria-label="筛选" title="筛选" onClick={() => setShowSettings(true)}><ToolGlyphFilter /></button>
-          <button type="button" className="base-viewbar__tool" aria-label="分组" title="分组" onClick={() => setShowSettings(true)}><ToolGlyphGroup /></button>
-          <button type="button" className="base-viewbar__tool base-viewbar__tool--active" aria-label="排序" title="排序" onClick={() => setShowSettings(true)}><ToolGlyphSort /></button>
+          <span className="base-viewbar__tool-anchor" ref={fieldPanelAnchorRef}>
+            <button
+              type="button"
+              className={`base-viewbar__tool${activeToolbarPanel === 'fields' ? ' is-active' : ''}`}
+              aria-label="字段配置"
+              title="字段配置"
+              onClick={() => openToolbarPanel('fields')}
+            >
+              <ToolGlyphSettings />
+            </button>
+            {activeToolbarPanel === 'fields' && (
+              <FieldConfigPanel
+                table={table}
+                view={activeView}
+                panelRef={settingsRef}
+                onTable={mutate}
+                onCreateField={createField}
+                onEditField={editField}
+                onDeleteField={removeField}
+                onReorderFields={reorderFields}
+              />
+            )}
+          </span>
+          <button
+            type="button"
+            className={`base-viewbar__tool${showSettings ? ' is-active' : ''}`}
+            aria-label={settingsLabel}
+            title={settingsLabel}
+            onClick={() => {
+              setActiveToolbarPanel(null);
+              setShowSettings(open => !open);
+            }}
+          >
+            <SlashGlyphBitableGrid size={16} fill="currentColor" />
+          </button>
+          {activeView.type === 'gantt' && (
+            <button type="button" className="base-viewbar__tool" aria-label="甘特设置" title="甘特设置" onClick={() => {
+              setActiveToolbarPanel(null);
+              setShowSettings(true);
+            }}>
+              <ToolGlyphGantt />
+            </button>
+          )}
+          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'filter' ? ' is-active' : ''}`} aria-label="筛选" title="筛选" onClick={() => openToolbarPanel('filter')}><ToolGlyphFilter /></button>
+          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' ? ' is-active' : ''}`} aria-label="分组" title="分组" onClick={() => openToolbarPanel('group')}><ToolGlyphGroup /></button>
+          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' || activeView.sorts?.length ? ' is-active' : ''}`} aria-label="排序" title="排序" onClick={() => openToolbarPanel('sort')}><ToolGlyphSort /></button>
           <span className="base-viewbar__tool-sep" aria-hidden />
-          <button type="button" className="base-viewbar__tool" aria-label="评论" title="评论"><ToolGlyphComment /></button>
+          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'comment' ? ' is-active' : ''}`} aria-label="评论" title="评论" onClick={() => openToolbarPanel('comment')}><ToolGlyphComment /></button>
           <span className="base-viewbar__tool-sep" aria-hidden />
-          <button type="button" className="base-viewbar__tool" aria-label="分享" title="在新窗口打开"><ToolGlyphShare /></button>
+          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'share' ? ' is-active' : ''}`} aria-label="分享" title="在新窗口打开" onClick={() => openToolbarPanel('share')}><ToolGlyphShare /></button>
+          {activeToolbarPanel && activeToolbarPanel !== 'fields' && (
+            <ToolbarQuickPanel
+              panel={activeToolbarPanel}
+              table={table}
+              view={activeView}
+              records={records}
+              panelRef={settingsRef}
+              onClose={() => setActiveToolbarPanel(null)}
+              onTable={mutate}
+            />
+          )}
+        </div>
         </div>
       </header>
       <div className="base-view-content" data-no-marquee-selection="true">
         {activeView.type === 'gallery' ? renderGallery() : activeView.type === 'gantt' ? renderGantt() : activeView.type === 'kanban' ? renderKanban() : renderGrid()}
+      </div>
       </div>
       {showSettings && activeView.type === 'gallery' && (
         <GallerySettings
@@ -1382,21 +1733,461 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           onTable={mutate}
         />
       )}
-      {selectedRecord && createPortal(
-        <RecordDetail
-          table={table}
-          record={selectedRecord}
-          onClose={() => setDetailRecordId(null)}
-          onChange={changeCell}
-          onDelete={() => {
-            if (removeRecords([selectedRecord.id], true)) setDetailRecordId(null);
+      {deleteViewTarget && (
+        <DeleteViewDialog
+          viewName={deleteViewTarget.name}
+          onCancel={() => setDeleteViewTarget(null)}
+          onConfirm={confirmDeleteView}
+        />
+      )}
+      {editingFieldPanel && editingField && createPortal(
+        <div
+          className="base-field-edit-popover-portal"
+          style={{
+            left: Math.min(editingFieldPanel.left, Math.max(8, window.innerWidth - 336)),
+            top: Math.min(editingFieldPanel.top, Math.max(8, window.innerHeight - 420)),
           }}
-          onUpload={pickFiles}
-          onRemoveAttachment={(fieldId, attachmentId) => changeCell(selectedRecord.id, fieldId, getAttachments(selectedRecord, fieldId).filter(item => item.id !== attachmentId))}
+          data-no-marquee-selection="true"
+          data-floating-panel="true"
+        >
+          <BitableEditFieldPopover
+            field={editingField}
+            onCancel={() => setEditingFieldPanel(null)}
+            onConfirm={input => updateFieldConfig(editingField.id, input)}
+          />
+        </div>,
+        document.body,
+      )}
+      {cardRecord && createPortal(
+        <BitableRecordCardModal
+          table={table}
+          activeView={activeView}
+          record={cardRecord}
+          records={records}
+          locked={activeView.locked}
+          onClose={() => setCardRecordId(null)}
+          onChange={changeCell}
+          onNavigate={setCardRecordId}
         />,
         document.body,
       )}
     </NodeViewWrapper>
+  );
+}
+
+function FieldConfigPanel({
+  table,
+  view,
+  panelRef,
+  onTable,
+  onCreateField,
+  onEditField,
+  onDeleteField,
+  onReorderFields,
+}: {
+  table: BaseTable;
+  view: BaseView;
+  panelRef: RefObject<HTMLDivElement>;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+  onCreateField: (input: CreateFieldInput) => void;
+  onEditField: (fieldId: string) => void;
+  onDeleteField: (fieldId: string) => void;
+  onReorderFields: (fromIndex: number, toIndex: number) => void;
+}) {
+  const [fieldMoreId, setFieldMoreId] = useState<string | null>(null);
+  const [fieldMoreAnchor, setFieldMoreAnchor] = useState<HTMLElement | null>(null);
+  const [showAddField, setShowAddField] = useState(false);
+  const [draggingFieldIndex, setDraggingFieldIndex] = useState<number | null>(null);
+  const [dragOverFieldIndex, setDragOverFieldIndex] = useState<number | null>(null);
+  const fieldListRef = useRef<HTMLUListElement>(null);
+  const fieldDragFromRef = useRef<number | null>(null);
+  const fieldDragGhostRef = useRef<HTMLDivElement | null>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const hiddenFieldIds = new Set(view.hiddenFieldIds || []);
+  const canDeleteField = table.fields.length > 1;
+
+  const updateCurrentView = (update: (current: BaseView) => BaseView) => {
+    if (view.locked) return;
+    onTable(current => updateView(current, view.id, update));
+  };
+
+  const toggleFieldVisible = (fieldId: string) => {
+    if (view.locked || fieldId === table.primaryFieldId) return;
+    updateCurrentView(item => {
+      const hidden = new Set(item.hiddenFieldIds || []);
+      if (hidden.has(fieldId)) hidden.delete(fieldId);
+      else hidden.add(fieldId);
+      return { ...item, hiddenFieldIds: Array.from(hidden) };
+    });
+  };
+
+  const openFieldMoreMenu = (btn: HTMLElement, fieldId: string) => {
+    if (fieldMoreId === fieldId) {
+      setFieldMoreId(null);
+      setFieldMoreAnchor(null);
+      return;
+    }
+    setFieldMoreId(fieldId);
+    setFieldMoreAnchor(btn);
+    btn.focus();
+  };
+
+  const closeFieldMoreMenu = () => {
+    setFieldMoreId(null);
+    setFieldMoreAnchor(null);
+  };
+
+  useEffect(() => {
+    if (!fieldMoreId) return;
+    const close = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (moreMenuRef.current?.contains(event.target)) return;
+      if (fieldMoreAnchor?.contains(event.target)) return;
+      closeFieldMoreMenu();
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [fieldMoreId, fieldMoreAnchor]);
+
+  const resolveFieldDropIndex = (clientY: number) => {
+    const list = fieldListRef.current;
+    if (!list) return null;
+    const rows = list.querySelectorAll<HTMLElement>('.base-view-sidebar__item');
+    for (let i = 0; i < rows.length; i++) {
+      const rect = rows[i].getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) return i;
+    }
+    return rows.length > 0 ? rows.length - 1 : null;
+  };
+
+  const handleFieldDragStart = (event: DragEvent, index: number) => {
+    if (view.locked || table.fields[index]?.id === table.primaryFieldId) return;
+    fieldDragFromRef.current = index;
+    setDraggingFieldIndex(index);
+    setDragOverFieldIndex(null);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+    if (!fieldDragGhostRef.current) {
+      const ghost = document.createElement('div');
+      ghost.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
+      document.body.appendChild(ghost);
+      fieldDragGhostRef.current = ghost;
+    }
+    event.dataTransfer.setDragImage(fieldDragGhostRef.current, 0, 0);
+  };
+
+  const handleFieldListDragOver = (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (view.locked || fieldDragFromRef.current == null) return;
+    event.dataTransfer.dropEffect = 'move';
+    const index = resolveFieldDropIndex(event.clientY);
+    if (index == null || table.fields[index]?.id === table.primaryFieldId) {
+      setDragOverFieldIndex(null);
+      return;
+    }
+    if (fieldDragFromRef.current === index) {
+      setDragOverFieldIndex(null);
+      return;
+    }
+    setDragOverFieldIndex(index);
+  };
+
+  const handleFieldListDrop = (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const fromIndex = fieldDragFromRef.current ?? draggingFieldIndex ?? Number(event.dataTransfer.getData('text/plain'));
+    const toIndex = resolveFieldDropIndex(event.clientY);
+    fieldDragFromRef.current = null;
+    setDraggingFieldIndex(null);
+    setDragOverFieldIndex(null);
+    if (toIndex == null || Number.isNaN(fromIndex) || fromIndex === toIndex) return;
+    if (table.fields[toIndex]?.id === table.primaryFieldId) return;
+    onReorderFields(fromIndex, toIndex);
+  };
+
+  const handleFieldDragEnd = () => {
+    fieldDragFromRef.current = null;
+    setDraggingFieldIndex(null);
+    setDragOverFieldIndex(null);
+  };
+
+  const listMaxHeight = Math.min(280, Math.max(36, table.fields.length * 36 + 8));
+  const defaultNewFieldName = useMemo(() => nextAutoFieldName(table.fields), [table.fields]);
+
+  const openAddField = () => {
+    if (view.locked) return;
+    closeFieldMoreMenu();
+    setShowAddField(true);
+  };
+
+  const fieldMoreTarget = fieldMoreId ? table.fields.find(field => field.id === fieldMoreId) : null;
+
+  return (
+    <div
+      ref={panelRef}
+      className={`base-field-panel-stack${fieldMoreId || showAddField ? ' is-menu-open' : ''}`}
+      data-no-marquee-selection="true"
+      data-floating-panel="true"
+      onMouseDown={event => event.stopPropagation()}
+    >
+      <div
+        className="base-field-panel"
+        data-e2e="bitable-field-customize-panel"
+        role="dialog"
+        aria-label="字段配置"
+      >
+      <span className="base-field-panel__arrow" aria-hidden />
+      <div className="base-field-panel__title-wrap">
+        <div className="base-field-panel__title">
+          <span>字段配置</span>
+          <span className="base-field-panel__help" title="配置当前视图显示的字段" aria-hidden><GlyphHelp size={14} /></span>
+        </div>
+      </div>
+      <div className="base-field-panel__divider" />
+      <div className="base-field-panel__list" style={{ maxHeight: listMaxHeight }}>
+        <ul
+          ref={fieldListRef}
+          className={`base-view-sidebar__list${draggingFieldIndex != null ? ' is-sorting' : ''}`}
+          onDragOver={handleFieldListDragOver}
+          onDrop={handleFieldListDrop}
+        >
+          {table.fields.map((field, index) => {
+            const isPrimary = field.id === table.primaryFieldId;
+            const isVisible = !hiddenFieldIds.has(field.id);
+            const fieldCanDelete = canDeleteField && !isPrimary;
+            return (
+              <li
+                key={field.id}
+                className={[
+                  'base-view-sidebar__item',
+                  draggingFieldIndex === index ? 'is-dragging' : '',
+                  dragOverFieldIndex === index && draggingFieldIndex !== index ? 'is-drag-over' : '',
+                ].filter(Boolean).join(' ')}
+              >
+                {isPrimary ? (
+                  <span className="base-view-sidebar__drag is-locked" aria-hidden>
+                    <FieldLockGlyph size={14} />
+                  </span>
+                ) : (
+                  <span
+                    className="base-view-sidebar__drag"
+                    draggable={!view.locked}
+                    aria-hidden
+                    onDragStart={event => handleFieldDragStart(event, index)}
+                    onDragEnd={handleFieldDragEnd}
+                  >
+                    <GlyphDrag />
+                  </span>
+                )}
+                <span className="base-view-sidebar__icon" aria-hidden>
+                  {fieldTypeGlyph(field.type, 14)}
+                </span>
+                <span className="base-view-sidebar__name base-field-panel__label">{field.name}</span>
+                {!isPrimary && (
+                  <button
+                    type="button"
+                    className={`base-view-sidebar__more base-field-panel__visible${isVisible ? '' : ' is-hidden'}`}
+                    aria-label={isVisible ? '隐藏字段' : '显示字段'}
+                    disabled={view.locked}
+                    onMouseDown={event => event.stopPropagation()}
+                    onClick={() => toggleFieldVisible(field.id)}
+                  >
+                    <GlyphVisible size={14} />
+                  </button>
+                )}
+                {!view.locked && (
+                  <button
+                    type="button"
+                    className={`base-view-sidebar__more${fieldMoreId === field.id ? ' is-open' : ''}`}
+                    aria-label="鏇村鎿嶄綔"
+                    onMouseDown={event => {
+                      event.stopPropagation();
+                      event.preventDefault();
+                      openFieldMoreMenu(event.currentTarget, field.id);
+                    }}
+                  >
+                    <GlyphMore />
+                  </button>
+                )}
+                {isPrimary && index === 0 && table.fields.length > 1 && <div className="base-field-panel__frozen-divider" />}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      <button
+        type="button"
+        className={`base-field-panel__add${showAddField ? ' is-active' : ''}`}
+        disabled={view.locked}
+        onClick={openAddField}
+      >
+        <GlyphAdd size={14} />
+        <span>新增字段</span>
+      </button>
+      </div>
+      {showAddField && (
+        <BitableAddFieldPopover
+          defaultName={defaultNewFieldName}
+          onCancel={() => setShowAddField(false)}
+          onConfirm={input => {
+            onCreateField(input);
+            setShowAddField(false);
+          }}
+        />
+      )}
+      {fieldMoreId && fieldMoreAnchor && fieldMoreTarget && (
+        <FloatingItemRowMenu
+          anchor={fieldMoreAnchor}
+          menuRef={moreMenuRef}
+          canDelete={canDeleteField && fieldMoreTarget.id !== table.primaryFieldId}
+          onEdit={() => {
+            closeFieldMoreMenu();
+            onEditField(fieldMoreTarget.id);
+          }}
+          onDelete={() => {
+            if (!canDeleteField || fieldMoreTarget.id === table.primaryFieldId) return;
+            if (!window.confirm(`确认删除字段「${fieldMoreTarget.name}」？`)) return;
+            closeFieldMoreMenu();
+            onDeleteField(fieldMoreTarget.id);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ToolbarQuickPanel({
+  panel,
+  table,
+  view,
+  records,
+  panelRef,
+  onClose,
+  onTable,
+}: {
+  panel: ToolbarPanel;
+  table: BaseTable;
+  view: BaseView;
+  records: BaseRecord[];
+  panelRef: RefObject<HTMLDivElement>;
+  onClose: () => void;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+}) {
+  const filter = view.filters?.[0];
+  const sort = view.sorts?.[0];
+  const search = String((view.config as { search?: string }).search || '');
+  const canGroup = view.type === 'gallery';
+  const groupBy = canGroup ? (view.config as GalleryViewConfig).groupByFieldId || '' : '';
+
+  const updateCurrentView = (update: (current: BaseView) => BaseView) => {
+    if (view.locked) return;
+    onTable(current => updateView(current, view.id, update));
+  };
+
+  return (
+    <div ref={panelRef} className={`base-toolbar-panel base-toolbar-panel--${panel}`} data-no-marquee-selection="true" data-floating-panel="true">
+      <header>
+        <strong>{toolbarPanelTitle(panel)}</strong>
+        <button type="button" onClick={onClose} aria-label="关闭">×</button>
+      </header>
+
+      {panel === 'filter' && (
+        <>
+          <label>搜索记录
+            <input
+              disabled={view.locked}
+              value={search}
+              placeholder="搜索当前视图"
+              onChange={event => updateCurrentView(item => ({ ...item, config: { ...item.config, search: event.target.value } }))}
+            />
+          </label>
+          <div className="base-toolbar-panel__row">
+            <label>字段
+              <select
+                disabled={view.locked}
+                value={filter?.fieldId || ''}
+                onChange={event => updateCurrentView(item => ({
+                  ...item,
+                  filters: event.target.value ? [{ id: filter?.id || `filter_${Date.now().toString(36)}`, fieldId: event.target.value, operator: filter?.operator || 'contains', value: filter?.value || '' }] : [],
+                }))}
+              >
+                <option value="">不筛选</option>
+                {table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
+              </select>
+            </label>
+            <label>鏉′欢
+              <select
+                disabled={view.locked || !filter}
+                value={filter?.operator || 'contains'}
+                onChange={event => updateCurrentView(item => ({ ...item, filters: item.filters?.length ? [{ ...item.filters[0], operator: event.target.value as 'contains' | 'equals' | 'is_empty' | 'is_not_empty' }] : [] }))}
+              >
+                <option value="contains">鍖呭惈</option>
+                <option value="equals">绛変簬</option>
+                <option value="is_empty">为空</option>
+                <option value="is_not_empty">不为空</option>
+              </select>
+            </label>
+          </div>
+          {filter && !['is_empty', 'is_not_empty'].includes(filter.operator) && (
+            <label>值
+              <input
+                disabled={view.locked}
+                value={filter.value || ''}
+                placeholder="输入筛选值"
+                onChange={event => updateCurrentView(item => ({ ...item, filters: item.filters?.length ? [{ ...item.filters[0], value: event.target.value }] : [] }))}
+              />
+            </label>
+          )}
+        </>
+      )}
+
+      {panel === 'sort' && (
+        <>
+          <label>字段
+            <select
+              disabled={view.locked}
+              value={sort?.fieldId || ''}
+              onChange={event => updateCurrentView(item => ({ ...item, sorts: event.target.value ? [{ fieldId: event.target.value, direction: item.sorts?.[0]?.direction || 'asc' }] : [] }))}
+            >
+              <option value="">不排序</option>
+              {table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
+            </select>
+          </label>
+          <div className="base-toolbar-panel__segmented" aria-label="排序方向">
+            <button type="button" disabled={view.locked || !sort} className={sort?.direction !== 'desc' ? 'is-active' : ''} onClick={() => updateCurrentView(item => ({ ...item, sorts: item.sorts?.length ? [{ ...item.sorts[0], direction: 'asc' }] : [] }))}>升序</button>
+            <button type="button" disabled={view.locked || !sort} className={sort?.direction === 'desc' ? 'is-active' : ''} onClick={() => updateCurrentView(item => ({ ...item, sorts: item.sorts?.length ? [{ ...item.sorts[0], direction: 'desc' }] : [] }))}>降序</button>
+          </div>
+        </>
+      )}
+
+      {panel === 'group' && (
+        <>
+          <label>字段
+            <select
+              disabled={view.locked || !canGroup}
+              value={groupBy}
+              onChange={event => updateCurrentView(item => ({ ...item, config: { ...item.config, groupByFieldId: event.target.value || undefined } }))}
+            >
+              <option value="">不分组</option>
+              {table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
+            </select>
+          </label>
+          {!canGroup && <p className="base-toolbar-panel__empty">当前视图未开启分组呈现。</p>}
+        </>
+      )}
+
+      {panel === 'comment' && (
+        <p className="base-toolbar-panel__empty">当前视图共有 {records.length} 条记录。评论入口已保持在工具栏位置，后续会接入文档评论线程。</p>
+      )}
+
+      {panel === 'share' && (
+        <div className="base-toolbar-panel__actions">
+          <button type="button" onClick={() => window.open(window.location.href, '_blank', 'noopener,noreferrer')}>在新窗口打开</button>
+          <button type="button" onClick={() => navigator.clipboard?.writeText(window.location.href)}>澶嶅埗閾炬帴</button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1463,8 +2254,8 @@ function GallerySettings({
         <label className="base-check"><input type="checkbox" disabled={view.locked} checked={config.showFieldNames} onChange={event => onConfig({ showFieldNames: event.target.checked })} />显示字段名</label>
         <label className="base-check"><input type="checkbox" disabled={view.locked} checked={config.showEmptyFields} onChange={event => onConfig({ showEmptyFields: event.target.checked })} />显示空字段</label>
       </div>
-      <label>分组字段<select disabled={view.locked} value={config.groupByFieldId || ''} onChange={event => onConfig({ groupByFieldId: event.target.value || undefined })}><option value="">不分组</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}</select></label>
-      <label>排序字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
+      <label>字段<select disabled={view.locked} value={config.groupByFieldId || ''} onChange={event => onConfig({ groupByFieldId: event.target.value || undefined })}><option value="">不分组</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}</select></label>
+      <label>字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, sorts: event.target.value ? [{ fieldId: event.target.value, direction: item.sorts?.[0]?.direction || 'asc' }] : [] })));
       }}>
@@ -1474,13 +2265,14 @@ function GallerySettings({
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, sorts: [{ ...item.sorts![0], direction: item.sorts![0].direction === 'asc' ? 'desc' : 'asc' }] })));
       }}>{view.sorts[0].direction === 'asc' ? '升序' : '降序'}</button> : null}
-      <label>筛选字段<select disabled={view.locked} value={view.filters?.[0]?.fieldId || ''} onChange={event => {
+      <label>筛选字段
+        <select disabled={view.locked} value={view.filters?.[0]?.fieldId || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, filters: event.target.value ? [{ id: 'primary-filter', fieldId: event.target.value, operator: 'contains', value: item.filters?.[0]?.value || '' }] : [] })));
       }}>
         <option value="">不筛选</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
       </select></label>
-      {view.filters?.length ? <input disabled={view.locked} placeholder="包含内容" value={view.filters[0].value || ''} onChange={event => {
+      {view.filters?.length ? <input disabled={view.locked} placeholder="鍖呭惈鍐呭" value={view.filters[0].value || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, filters: [{ ...item.filters![0], value: event.target.value }] })));
       }} /> : null}
@@ -1538,7 +2330,7 @@ function GanttSettings({
           <option value={24}>季</option>
         </select>
       </label>
-      <label>排序字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
+      <label>字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, sorts: event.target.value ? [{ fieldId: event.target.value, direction: item.sorts?.[0]?.direction || 'asc' }] : [] })));
       }}>
@@ -1589,7 +2381,7 @@ function GridSettings({
           </label>
         ))}
       </fieldset>
-      <label>排序字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
+      <label>字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, sorts: event.target.value ? [{ fieldId: event.target.value, direction: item.sorts?.[0]?.direction || 'asc' }] : [] })));
       }}>
@@ -1599,13 +2391,14 @@ function GridSettings({
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, sorts: [{ ...item.sorts![0], direction: item.sorts![0].direction === 'asc' ? 'desc' : 'asc' }] })));
       }}>{view.sorts[0].direction === 'asc' ? '升序' : '降序'}</button> : null}
-      <label>筛选字段<select disabled={view.locked} value={view.filters?.[0]?.fieldId || ''} onChange={event => {
+      <label>筛选字段
+        <select disabled={view.locked} value={view.filters?.[0]?.fieldId || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, filters: event.target.value ? [{ id: 'primary-filter', fieldId: event.target.value, operator: 'contains', value: item.filters?.[0]?.value || '' }] : [] })));
       }}>
         <option value="">不筛选</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
       </select></label>
-      {view.filters?.length ? <input disabled={view.locked} placeholder="包含内容" value={view.filters[0].value || ''} onChange={event => {
+      {view.filters?.length ? <input disabled={view.locked} placeholder="鍖呭惈鍐呭" value={view.filters[0].value || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, filters: [{ ...item.filters![0], value: event.target.value }] })));
       }} /> : null}
@@ -1613,61 +2406,5 @@ function GridSettings({
         <button type="button" onClick={() => onTable(current => updateView(current, view.id, item => ({ ...item, locked: !item.locked })))}>{view.locked ? '解锁视图' : '锁定视图'}</button>
       </footer>
     </aside>
-  );
-}
-
-function RecordDetail({
-  table,
-  record,
-  onClose,
-  onChange,
-  onDelete,
-  onUpload,
-  onRemoveAttachment,
-}: {
-  table: BaseTable;
-  record: BaseRecord;
-  onClose: () => void;
-  onChange: (recordId: string, fieldId: string, value: CellValue) => void;
-  onDelete: () => void;
-  onUpload: (recordId: string, fieldId?: string) => void;
-  onRemoveAttachment: (fieldId: string, attachmentId: string) => void;
-}) {
-  const title = valueText(record.fields[table.primaryFieldId]) || '未命名记录';
-  return (
-    <div className="base-detail-mask" data-no-marquee-selection="true" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside className="base-detail">
-        <header><h3>{title}</h3><button type="button" onClick={onClose}>×</button></header>
-        <div className="base-detail__fields">
-          {table.fields.map(field => (
-            <div className="base-detail__field" key={field.id}>
-              <label>{field.name}</label>
-              {field.type === 'attachment' ? (
-                <>
-                  <div className="base-detail__attachments">
-                    {getAttachments(record, field.id).map(attachment => (
-                      <div key={attachment.id} className="base-detail__attachment">
-                        {isPreviewImage(attachment) ? <img src={attachment.thumbnailUrl || attachment.url} alt="" /> : <FileBadge attachment={attachment} />}
-                        <span>{attachment.name}</span>
-                        {attachment.uploadStatus === 'uploading' && <progress max={100} value={attachment.uploadProgress || 0} />}
-                        {attachment.uploadStatus === 'failed' && <em>上传失败</em>}
-                        <button type="button" onClick={() => onRemoveAttachment(field.id, attachment.id)}>删除</button>
-                      </div>
-                    ))}
-                  </div>
-                  <button type="button" className="base-detail__upload" onClick={() => onUpload(record.id, field.id)}>+ 上传附件</button>
-                </>
-              ) : (
-                <input value={valueText(record.fields[field.id])} onChange={event => onChange(record.id, field.id, event.target.value)} />
-              )}
-            </div>
-          ))}
-        </div>
-        <footer>
-          <span>创建于 {new Date(record.createdAt).toLocaleString()}</span>
-          <button type="button" className="base-danger" onClick={onDelete}>删除记录</button>
-        </footer>
-      </aside>
-    </div>
   );
 }

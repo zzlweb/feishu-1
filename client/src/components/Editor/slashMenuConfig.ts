@@ -4,6 +4,7 @@ import { TextSelection } from '@tiptap/pm/state';
 import { insertFeishuTable } from './tableInsert';
 import { insertFeishuColumns } from './columnsInsert';
 import { createBaseTable, serializeBaseTable } from './bitableModel';
+import { readApiPayload } from '../../api/http';
 import {
   SlashGlyphHeading1,
   SlashGlyphHeading2,
@@ -155,7 +156,7 @@ async function uploadFile(file: File) {
   const body = new FormData();
   body.append('file', file);
   const res = await fetch('/api/uploads', { method: 'POST', body });
-  const json = await res.json();
+  const json = await readApiPayload<{ name: string; size: number; type: string; url: string }>(res);
   if (!res.ok || json.code !== 0) throw new Error(json.message || '上传失败');
   return json.data as { name: string; size: number; type: string; url: string };
 }
@@ -261,7 +262,7 @@ function insertHighlightBlockFromSlash(editor: Editor) {
   }).run();
 }
 
-function insertBitableBlockFromSlash(editor: Editor, view: 'grid' | 'gallery' | 'gantt') {
+function insertBitableBlockFromSlash(editor: Editor, view: 'grid' | 'gallery' | 'gantt' | 'kanban') {
   const table = createBaseTable(view);
   replacePlusOrSlash(editor, {
     type: 'localBitableBlock',
@@ -335,6 +336,7 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
     layout: 'list',
     items: [
       { Icon: SlashGlyphBitableGrid, iconColor: '#34c759', label: '表格', matchText: '多维表格 bitable database grid', action: e => insertBitableBlockFromSlash(e, 'grid') },
+      { Icon: SlashGlyphBitableGrid, iconColor: '#3370ff', label: '看板', matchText: '多维表格 kanban 看板', action: e => insertBitableBlockFromSlash(e, 'kanban') },
       { Icon: SlashGlyphGallery, iconColor: '#7b61ff', label: '画册', matchText: '多维表格 gallery album 画册', action: e => insertBitableBlockFromSlash(e, 'gallery') },
       { Icon: SlashGlyphGantt, iconColor: '#e9519f', label: '甘特图', matchText: '多维表格 gantt 甘特图 时间轴', action: e => insertBitableBlockFromSlash(e, 'gantt') },
     ],

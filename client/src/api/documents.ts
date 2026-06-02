@@ -1,4 +1,5 @@
 import type { Document, ApiResponse, Comment, Template } from '../types';
+import { readApiPayload } from './http';
 
 const BASE_URL = '/api';
 const REQUEST_TIMEOUT_MS = 10000;
@@ -9,19 +10,20 @@ async function request<T>(url: string, options?: RequestInit): Promise<ApiRespon
 
   try {
     const res = await fetch(`${BASE_URL}${url}`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json; charset=utf-8', Accept: 'application/json; charset=utf-8' },
       signal: controller.signal,
       ...options,
     });
 
+    const body = await readApiPayload<T>(res);
     if (!res.ok) {
       return {
-        code: res.status,
-        message: `请求失败 (${res.status})`,
+        code: body.code ?? res.status,
+        message: body.message || `请求失败 (${res.status})`,
       };
     }
 
-    return await res.json();
+    return body as ApiResponse<T>;
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       return { code: -1, message: '请求超时，请确认后端服务已启动' };

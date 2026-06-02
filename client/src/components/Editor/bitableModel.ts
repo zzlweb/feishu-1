@@ -40,13 +40,20 @@ export interface AttachmentValue {
 
 export type CellValue = string | number | boolean | string[] | AttachmentValue[] | null;
 
+export interface SelectChoice {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export interface BaseField {
   id: FieldId;
   name: string;
   type: BaseFieldType;
-  options?: { choices?: Array<{ id: string; name: string; color: string }> };
+  options?: { choices?: SelectChoice[] };
   hidden?: boolean;
   required?: boolean;
+  defaultValue?: CellValue;
 }
 
 export interface BaseRecord {
@@ -90,6 +97,7 @@ export interface GalleryViewConfig {
 
 export interface GridViewConfig {
   search?: string;
+  fieldWidths?: Record<FieldId, number>;
 }
 
 export interface GanttViewConfig {
@@ -167,11 +175,11 @@ export function createGanttConfig(fields: BaseField[], primaryFieldId: string): 
     titleFieldId: primaryFieldId,
     startDateFieldId: dateFields[0]?.id,
     endDateFieldId: dateFields[1]?.id || dateFields[0]?.id,
-    dayWidth: 60,
+    dayWidth: 40,
   };
 }
 
-export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' = 'gallery'): BaseTable {
+export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' | 'kanban' = 'gallery'): BaseTable {
   const tableId = uid('tbl');
   const titleId = uid('fld_title');
   const attachmentId = uid('fld_attachment');
@@ -197,7 +205,7 @@ export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' = 'gal
       id: statusId,
       name: '状态',
       type: 'single_select',
-      options: { choices: [{ id: 'todo', name: '待处理', color: '#3370ff' }, { id: 'done', name: '已完成', color: '#34c759' }] },
+      options: { choices: [{ id: 'todo', name: '未开始', color: '#dee8ff' }, { id: 'doing', name: '进行中', color: '#f8e6c2' }, { id: 'done', name: '已完成', color: '#c7effb' }] },
     },
     { id: startDateId, name: '开始日期', type: 'date' },
     { id: endDateId, name: '结束日期', type: 'date' },
@@ -224,6 +232,13 @@ export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' = 'gal
       record.fields[startDateId] = start.toISOString().slice(0, 10);
       record.fields[endDateId] = end.toISOString().slice(0, 10);
       record.fields[titleId] = `任务 ${index + 1}`;
+      record.fields[statusId] = '未开始';
+    });
+  }
+  if (initialView === 'kanban') {
+    records.forEach((record, index) => {
+      record.fields[titleId] = `任务 ${index + 1}`;
+      record.fields[statusId] = '未开始';
     });
   }
   const gridView: BaseView = { id: uid('view_grid'), tableId, name: '表格', type: 'grid', config: {}, sorts: [], filters: [] };
@@ -245,7 +260,22 @@ export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' = 'gal
     sorts: [],
     filters: [],
   };
-  const initial = initialView === 'gallery' ? galleryView : initialView === 'gantt' ? ganttView : gridView;
+  const kanbanView: BaseView = {
+    id: uid('view_kanban'),
+    tableId,
+    name: '看板',
+    type: 'kanban',
+    config: createGalleryConfig(fields, titleId),
+    sorts: [],
+    filters: [],
+  };
+  const initial = initialView === 'gallery'
+    ? galleryView
+    : initialView === 'gantt'
+    ? ganttView
+    : initialView === 'kanban'
+    ? kanbanView
+    : gridView;
   return {
     id: tableId,
     name: '未命名多维表格',
@@ -261,7 +291,7 @@ export function createRecord(tableId: string, fields: BaseField[], primaryFieldI
   const time = now();
   const values: Record<string, CellValue> = {};
   fields.forEach(field => {
-    values[field.id] = field.id === primaryFieldId ? title : field.type === 'attachment' ? [] : '';
+    values[field.id] = field.id === primaryFieldId ? title : field.defaultValue ?? (field.type === 'attachment' ? [] : '');
   });
   return {
     id: uid('rec'),
@@ -308,6 +338,15 @@ function normalizeTable(raw: BaseTable): BaseTable {
           dayWidth: Math.max(24, Math.min(60, Number(config.dayWidth) || defaults.dayWidth)),
         },
       };
+    }
+    if (view.type === 'grid') {
+      const config = view.config as Partial<GridViewConfig> | undefined;
+      const fieldWidths = Object.fromEntries(
+        Object.entries(config?.fieldWidths || {})
+          .filter(([fieldId, width]) => fields.some(field => field.id === fieldId) && Number.isFinite(width))
+          .map(([fieldId, width]) => [fieldId, Math.max(80, Math.min(420, Math.round(Number(width))))])
+      );
+      return { ...view, tableId, config: { ...(config || {}), fieldWidths }, filters: view.filters || [], sorts: view.sorts || [] };
     }
     if (view.type !== 'gallery') return { ...view, tableId, config: view.config || {}, filters: view.filters || [], sorts: view.sorts || [] };
     const config = view.config as Partial<GalleryViewConfig>;
@@ -475,6 +514,80 @@ export function groupRecords(table: BaseTable, view: BaseView, records: BaseReco
   return Array.from(groups.entries()).map(([label, group]) => ({ key: label, label, records: group }));
 }
 
+export function uniqueViewName(views: BaseView[], baseName: string) {
+  const names = new Set(views.map(view => view.name));
+  if (!names.has(baseName)) return baseName;
+  let index = 2;
+  while (names.has(`${baseName} ${index}`)) index += 1;
+  return `${baseName} ${index}`;
+}
+
+const AUTO_FIELD_NAME_RE = /^字段\s*(\d+)$/;
+
+export function nextAutoFieldName(fields: BaseField[]): string {
+  const numbers = fields
+    .map(field => {
+      const match = field.name.match(AUTO_FIELD_NAME_RE);
+      return match ? Number(match[1]) : 0;
+    })
+    .filter(n => n > 0);
+  const next = numbers.length ? Math.max(...numbers) + 1 : 1;
+  return `字段 ${next}`;
+}
+
+export function duplicateFieldName(sourceName: string): string {
+  return `${sourceName} 副本`;
+}
+
+function defaultViewName(type: BaseViewType) {
+  if (type === 'gallery') return '画册';
+  if (type === 'gantt') return '甘特图';
+  if (type === 'kanban') return '看板';
+  return '表格';
+}
+
+export function copyView(table: BaseTable, viewId: string): BaseTable {
+  const source = table.views.find(view => view.id === viewId);
+  if (!source) return table;
+  const copy: BaseView = {
+    ...source,
+    id: uid(`view_${source.type}`),
+    name: uniqueViewName(table.views, `${source.name} 副本`),
+    config: JSON.parse(JSON.stringify(source.config)) as BaseView['config'],
+    filters: source.filters?.map(filter => ({ ...filter, id: uid('filter') })),
+    sorts: source.sorts ? [...source.sorts] : [],
+    hiddenFieldIds: source.hiddenFieldIds ? [...source.hiddenFieldIds] : undefined,
+    fieldOrder: source.fieldOrder ? [...source.fieldOrder] : undefined,
+    locked: false,
+  };
+  const index = table.views.findIndex(view => view.id === viewId);
+  const views = [...table.views];
+  views.splice(index + 1, 0, copy);
+  return { ...table, views, activeViewId: copy.id };
+}
+
+export function deleteView(table: BaseTable, viewId: string): BaseTable {
+  if (table.views.length <= 1) return table;
+  const index = table.views.findIndex(view => view.id === viewId);
+  if (index < 0) return table;
+  const views = table.views.filter(view => view.id !== viewId);
+  const activeViewId = table.activeViewId === viewId
+    ? views[Math.max(0, index - 1)]?.id || views[0].id
+    : table.activeViewId;
+  return { ...table, views, activeViewId };
+}
+
+export function reorderViews(table: BaseTable, fromIndex: number, toIndex: number): BaseTable {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= table.views.length || toIndex >= table.views.length) {
+    return table;
+  }
+  const views = [...table.views];
+  const [moved] = views.splice(fromIndex, 1);
+  if (!moved) return table;
+  views.splice(toIndex, 0, moved);
+  return { ...table, views };
+}
+
 export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt' | 'kanban') {
   if (type === 'gantt') {
     let fields = table.fields;
@@ -490,7 +603,7 @@ export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt' | '
     const view: BaseView = {
       id: uid('view_gantt'),
       tableId: table.id,
-      name: '甘特图',
+      name: uniqueViewName(table.views, defaultViewName(type)),
       type,
       config: createGanttConfig(fields, table.primaryFieldId),
       filters: [],
@@ -510,11 +623,50 @@ export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt' | '
       activeViewId: view.id,
     };
   }
+  if (type === 'kanban') {
+    let fields = table.fields;
+    if (!fields.some(field => field.type === 'single_select')) {
+      const statusField = {
+        id: uid('fld_status'),
+        name: '任务状态',
+        type: 'single_select' as const,
+        options: {
+          choices: [
+            { id: 'todo', name: '未开始', color: '#dee8ff' },
+            { id: 'doing', name: '进行中', color: '#f8e6c2' },
+            { id: 'done', name: '已完成', color: '#c7effb' },
+          ],
+        },
+      };
+      fields = [...fields, statusField];
+    }
+    const view: BaseView = {
+      id: uid('view_kanban'),
+      tableId: table.id,
+      name: uniqueViewName(table.views, defaultViewName(type)),
+      type,
+      config: createGalleryConfig(fields, table.primaryFieldId),
+      filters: [],
+      sorts: [],
+    };
+    return {
+      ...table,
+      fields,
+      records: table.records.map(record => ({
+        ...record,
+        fields: fields.reduce<Record<FieldId, CellValue>>((values, field) => {
+          values[field.id] = record.fields[field.id] ?? (field.type === 'attachment' ? [] : '');
+          return values;
+        }, {}),
+      })),
+      views: [...table.views, view],
+      activeViewId: view.id,
+    };
+  }
+  const viewName = uniqueViewName(table.views, defaultViewName(type));
   const view: BaseView = type === 'gallery'
-    ? { id: uid('view_gallery'), tableId: table.id, name: '画册', type, config: createGalleryConfig(table.fields, table.primaryFieldId), filters: [], sorts: [] }
-    : type === 'kanban'
-    ? { id: uid('view_kanban'), tableId: table.id, name: '看板', type, config: createGalleryConfig(table.fields, table.primaryFieldId), filters: [], sorts: [] }
-    : { id: uid('view_grid'), tableId: table.id, name: '表格', type, config: {}, filters: [], sorts: [] };
+    ? { id: uid('view_gallery'), tableId: table.id, name: viewName, type, config: createGalleryConfig(table.fields, table.primaryFieldId), filters: [], sorts: [] }
+    : { id: uid('view_grid'), tableId: table.id, name: viewName, type, config: {}, filters: [], sorts: [] };
   return { ...table, views: [...table.views, view], activeViewId: view.id };
 }
 

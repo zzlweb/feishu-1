@@ -4,6 +4,11 @@ const app = (appModule as any).default ?? appModule;
 
 const PORT = Number(process.env.PORT || 3000);
 
+if (process.platform === 'win32') {
+  process.stdout.setDefaultEncoding?.('utf8');
+  process.stderr.setDefaultEncoding?.('utf8');
+}
+
 if (process.env.NODE_ENV !== 'test') {
   let server = app.listen(PORT, () => {
     console.log(`🚀 飞书文档服务器已启动: http://localhost:${PORT}`);
