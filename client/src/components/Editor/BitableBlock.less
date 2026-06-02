@@ -734,9 +734,14 @@
   }
 
   .base-view-content {
+    position: relative;
     width: 100%;
     min-height: 260px;
     background: #fff;
+  }
+
+  &.is-comment-open .base-view-content {
+    padding-right: 320px;
   }
 
   .base-gallery-surface {
@@ -1370,13 +1375,6 @@
     background: #e8eaed;
   }
 
-  .base-grid-cell-expand__icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
-  }
 
   .base-grid-overlay-header {
     box-sizing: border-box;
@@ -1440,8 +1438,9 @@
     background: #e5ebf5;
   }
 
-  .base-grid-row-hover-actions__view-icon {
+  .base-record-view-icon {
     position: relative;
+    flex-shrink: 0;
     width: 13px;
     height: 11px;
     border: 1px solid #637083;
@@ -1449,7 +1448,7 @@
     background: #f8fafc;
   }
 
-  .base-grid-row-hover-actions__view-icon::before {
+  .base-record-view-icon::before {
     content: '';
     position: absolute;
     top: 3px;
@@ -5124,8 +5123,9 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  width: min(980px, calc(100vw - 48px));
-  max-height: min(80vh, 720px);
+  width: min(840px, calc(100vw - 80px));
+  height: min(calc(100vh - 80px), 820px);
+  max-height: min(calc(100vh - 80px), 820px);
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 12px 40px rgba(31, 35, 41, .2);
@@ -5140,14 +5140,24 @@
 .bitable-card-modal-header-v2-navbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   min-height: 48px;
   padding: 0 12px;
 }
 
+.bitable-card-modal-header-v2-navbar__left,
+.bitable-card-modal-header-v2-navbar__right {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .bitable-card-modal-header-v2-navbar__mid {
-  flex: 1 1 auto;
-  display: flex;
-  justify-content: center;
+  display: none;
+}
+
+.bitable-card-modal-header-v2-navbar__gap {
+  display: none;
 }
 
 .bitable-card-modal-header-v2-switch-buttons {
@@ -5155,14 +5165,62 @@
   gap: 4px;
 }
 
-.bitable-card-modal-header-v2-navbar__gap {
-  flex: 0 0 auto;
+.bitable-card-modal-header-v2-btn.is-active {
+  color: #1f2329;
+  background: #f2f3f5;
 }
 
-.bitable-card-modal-header-v2-navbar__right {
-  display: inline-flex;
+.bitable-card-modal-more {
+  position: relative;
+}
+
+.bitable-card-modal-more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 2;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid #dee0e3;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(31, 35, 41, .12);
+}
+
+.bitable-card-modal-more-menu__item {
+  display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #1f2329;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: left;
+}
+
+.bitable-card-modal-more-menu__item:hover:not(:disabled) {
+  background: #f5f6f7;
+}
+
+.bitable-card-modal-more-menu__item.is-danger {
+  color: #f54a45;
+}
+
+.bitable-card-modal-more-menu__item:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.bitable-card-modal-more-menu__icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
 }
 
 .bitable-card-modal-header-v2-btn {
@@ -5216,7 +5274,7 @@
 
 .bitable-card-modal-header-v2-title-container {
   flex-shrink: 0;
-  padding: 4px 20px 0;
+  padding: 8px 20px 0;
 }
 
 .bitable-card-modal-header-v2-title-content {
@@ -5245,7 +5303,7 @@
 
 .bitable-item-view-tabs {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   flex-direction: column;
   min-height: 0;
 }
@@ -5272,7 +5330,7 @@
 }
 
 .bitable-item-view-tab.is-active {
-  color: #1f2329;
+  color: #3370ff;
   font-weight: 500;
 }
 
@@ -5300,16 +5358,146 @@
 
 .J-card-edit-modal-body {
   flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  padding: 8px 0 16px;
+  padding: 0 0 24px;
 }
 
 .bitable-card-detail--history {
   display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  color: #1f2329;
+  font-size: 14px;
+}
+
+.bitable-card-detail--history .J-card-edit-modal-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.bitable-card-history {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 20px 12px;
+  overflow: auto;
+}
+
+.bitable-card-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.bitable-card-history-table th {
+  padding: 10px 8px;
+  border-bottom: 1px solid #dee0e3;
+  color: #8f959e;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  text-align: left;
+}
+
+.bitable-card-history-table td {
+  padding: 12px 8px;
+  border-bottom: 1px solid #f0f1f2;
+  vertical-align: middle;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.bitable-card-history-table th:nth-child(1),
+.bitable-card-history-table td:nth-child(1) { width: 72px; }
+
+.bitable-card-history-table th:nth-child(2),
+.bitable-card-history-table td:nth-child(2) { width: 120px; }
+
+.bitable-card-history-table th:nth-child(3),
+.bitable-card-history-table td:nth-child(3) { width: 120px; }
+
+.bitable-card-history-table th:nth-child(5),
+.bitable-card-history-table td:nth-child(5) { width: 24px; padding: 0; text-align: center; }
+
+.bitable-card-history-time {
+  color: #646a73;
+  white-space: nowrap;
+}
+
+.bitable-card-history-operator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bitable-card-history-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #fff;
+  background: #3370ff;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.bitable-card-history-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #646a73;
+}
+
+.bitable-card-history-field-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.bitable-card-history-arrow {
+  color: #bbbfc4;
+  font-size: 12px;
+}
+
+.bitable-card-history-value.is-empty {
+  color: #bbbfc4;
+}
+
+.bitable-card-history-end,
+.bitable-card-history-empty .bitable-card-history-end {
+  margin: 16px 0 0;
   color: #8f959e;
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.bitable-card-history-empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  padding: 48px 0 24px;
+  color: #8f959e;
+  text-align: center;
+}
+
+.bitable-card-history-empty p {
+  margin: 0;
 }
 
 .card-modal-form {
@@ -5326,9 +5514,9 @@
   grid-template-columns: 239px minmax(0, 1fr);
   gap: 12px;
   align-items: center;
-  min-height: 44px;
+  min-height: 40px;
   margin: 0;
-  padding: 6px 20px;
+  padding: 4px 20px;
   cursor: default;
 }
 
@@ -5364,6 +5552,96 @@
   min-width: 0;
 }
 
+.bitable-card-field-value {
+  position: relative;
+  min-width: 0;
+}
+
+.bitable-card-field-value--select,
+.bitable-card-field-value--date {
+  min-height: 32px;
+}
+
+.bitable-card-select-display,
+.bitable-card-date-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 2px;
+}
+
+.bitable-card-field-text,
+.bitable-card-field-readonly {
+  min-height: 32px;
+  color: #1f2329;
+  font-size: 14px;
+  line-height: 32px;
+}
+
+.bitable-card-field-placeholder {
+  color: #bbbfc4;
+  font-size: 14px;
+  line-height: 32px;
+}
+
+.bitable-card-field-suffix {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: #8f959e;
+  font-size: 14px;
+}
+
+.bitable-card-date-trigger {
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.bitable-card-date-trigger:hover:not(:disabled) {
+  color: #646a73;
+  background: #f2f3f5;
+}
+
+.bitable-card-date-trigger:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.bitable-card-select-native,
+.bitable-card-date-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.bitable-card-select-native:disabled,
+.bitable-card-date-native:disabled {
+  cursor: not-allowed;
+}
+
+.bitable-card-select-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+
 .bitable-card-field-input,
 .bitable-card-field-select {
   box-sizing: border-box;
@@ -5382,6 +5660,15 @@
 .bitable-card-field-select:hover {
   border-color: #dee0e3;
   background: #fff;
+}
+
+.bitable-card-field-input.is-empty {
+  color: #bbbfc4;
+}
+
+.bitable-card-field-input.is-empty:not(:focus) {
+  border-color: transparent;
+  background: transparent;
 }
 
 .bitable-card-field-input:focus,
@@ -5423,6 +5710,22 @@
   font-size: 13px;
 }
 
+.card_edit_hide_toggle_chevron {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: #8f959e;
+  transition: transform .2s ease;
+}
+
+.card_edit_hide_toggle.is-expanded .card_edit_hide_toggle_chevron {
+  transform: rotate(180deg);
+}
+
+.card_edit_hide_fields {
+  margin-top: 4px;
+}
+
 .card_edit_add_field {
   padding: 8px 20px 0;
 }
@@ -5432,18 +5735,16 @@
   align-items: center;
   gap: 6px;
   min-height: 32px;
-  padding: 4px 12px;
-  border: 1px solid #dee0e3;
-  border-radius: 6px;
+  padding: 4px 0;
+  border: 0;
   color: #1f2329;
-  background: #fff;
+  background: transparent;
   cursor: pointer;
   font-size: 14px;
 }
 
 .card_edit_add_field_content:hover:not(:disabled) {
-  border-color: #bbbfc4;
-  background: #f8f9fa;
+  color: #3370ff;
 }
 
 .card_edit_add_field_content:disabled {
@@ -5455,4 +5756,223 @@
   display: inline-flex;
   width: 16px;
   height: 16px;
+}
+
+.bitable-record-comment-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  border-left: 1px solid #dee0e3;
+  background: #fff;
+  box-shadow: -8px 0 24px rgba(31, 35, 41, .08);
+}
+
+.bitable-record-comment-panel__header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid #f0f1f2;
+}
+
+.bitable-record-comment-panel__header strong {
+  color: #1f2329;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.bitable-record-comment-panel__more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #646a73;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.bitable-record-comment-panel__more:hover {
+  color: #1f2329;
+  background: #f2f3f5;
+}
+
+.bitable-record-comment-panel__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.bitable-record-comment-panel__empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.bitable-record-comment-panel__composer-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f2329;
+  font-size: 14px;
+}
+
+.bitable-record-comment-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bitable-record-comment-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.bitable-record-comment-item__avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #fff;
+  background: #3370ff;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.bitable-record-comment-item__body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.bitable-record-comment-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.bitable-record-comment-item__meta strong {
+  color: #1f2329;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.bitable-record-comment-item__meta span {
+  color: #8f959e;
+  font-size: 12px;
+}
+
+.bitable-record-comment-item__body p {
+  margin: 0;
+  color: #1f2329;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bitable-record-comment-panel__footer {
+  flex-shrink: 0;
+  padding: 12px 16px 16px;
+  border-top: 1px solid #f0f1f2;
+}
+
+.bitable-record-comment-panel__input-wrap {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+}
+
+.bitable-record-comment-panel__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  max-height: 120px;
+  padding: 8px 36px 8px 12px;
+  border: 1px solid #dee0e3;
+  border-radius: 8px;
+  outline: none;
+  resize: none;
+  color: #1f2329;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.bitable-record-comment-panel__input:focus {
+  border-color: #3370ff;
+  box-shadow: 0 0 0 2px rgba(51, 112, 255, .12);
+}
+
+.bitable-record-comment-panel__input::placeholder {
+  color: #bbbfc4;
+}
+
+.bitable-record-comment-panel__attach {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: #8f959e;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.bitable-record-comment-panel__attach:hover:not(:disabled) {
+  color: #646a73;
+  background: #f2f3f5;
+}
+
+.bitable-record-comment-panel__attach:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.bitable-record-comment-panel__submit {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  color: #3370ff;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.bitable-record-comment-panel__submit:hover:not(:disabled) {
+  color: #245bdb;
+}
+
+.bitable-record-comment-panel__submit:disabled {
+  opacity: .45;
+  cursor: not-allowed;
 }

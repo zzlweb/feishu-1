@@ -1,4 +1,4 @@
-import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react';
+﻿import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
@@ -8,10 +8,12 @@ import { FieldLockGlyph, fieldTypeGlyph } from './bitableFieldTypeIcons';
 import { parseJsonPayload } from '../../api/http';
 import {
   addView,
+  appendRecordHistory,
   attachmentFromUpload,
   copyView,
   createGalleryConfig,
   createRecord,
+  createRecordComment,
   deleteView,
   duplicateFieldName,
   getActiveView,
@@ -40,6 +42,7 @@ import { BitableGanttView } from './BitableGanttView';
 import { BitableKanbanView } from './BitableKanbanView';
 import { BitableGridView, type GridFieldMenuAction, type GridFieldMenuPosition } from './BitableGridView';
 import { BitableRecordCardModal } from './BitableRecordCardModal';
+import { BitableRecordCommentPanel } from './BitableRecordCommentPanel';
 import './BitableBlock.less';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -483,8 +486,15 @@ function FloatingItemRowMenu({
   );
 }
 
-function withUpdatedValue(record: BaseRecord, fieldId: string, value: CellValue): BaseRecord {
-  return { ...record, updatedAt: new Date().toISOString(), fields: { ...record.fields, [fieldId]: value } };
+function withUpdatedValue(record: BaseRecord, fieldId: string, value: CellValue, fieldName?: string): BaseRecord {
+  const before = record.fields[fieldId];
+  if (JSON.stringify(before) === JSON.stringify(value)) return record;
+  const next: BaseRecord = {
+    ...record,
+    updatedAt: new Date().toISOString(),
+    fields: { ...record.fields, [fieldId]: value },
+  };
+  return fieldName ? appendRecordHistory(next, fieldId, fieldName, before, value) : next;
 }
 
 function isPreviewImage(attachment: AttachmentValue | undefined) {
@@ -542,6 +552,9 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const dragGhostRef = useRef<HTMLDivElement | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [cardRecordId, setCardRecordId] = useState<string | null>(null);
+  const [commentPanelOpen, setCommentPanelOpen] = useState(false);
+  const [commentTargetRecordId, setCommentTargetRecordId] = useState<string | null>(null);
+  const [gridFocusedRecordId, setGridFocusedRecordId] = useState<string | null>(null);
   const [editingFieldPanel, setEditingFieldPanel] = useState<{ fieldId: string; left: number; top: number } | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [dropActive, setDropActive] = useState(false);
@@ -790,8 +803,47 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const openToolbarPanel = (panel: ToolbarPanel) => {
     setShowViewMenu(false);
     setShowSettings(false);
+    setCommentPanelOpen(false);
     setActiveToolbarPanel(current => current === panel ? null : panel);
   };
+
+  const resolveCommentRecordId = useCallback(() => {
+    if (gridFocusedRecordId) return gridFocusedRecordId;
+    if (selectedIds.size === 1) return [...selectedIds][0];
+    if (selectedIds.size > 1) return [...selectedIds][0];
+    return records[0]?.id ?? null;
+  }, [gridFocusedRecordId, records, selectedIds]);
+
+  const openCommentPanel = useCallback((recordId?: string | null) => {
+    setShowViewMenu(false);
+    setShowSettings(false);
+    setActiveToolbarPanel(null);
+    const targetId = recordId || resolveCommentRecordId();
+    if (!targetId) return;
+    setCommentTargetRecordId(targetId);
+    setCommentPanelOpen(true);
+    if (recordId) {
+      selectionAnchorRef.current = recordId;
+      setSelectedIds(new Set([recordId]));
+    }
+  }, [resolveCommentRecordId]);
+
+  const toggleCommentPanel = useCallback(() => {
+    if (commentPanelOpen) {
+      setCommentPanelOpen(false);
+      return;
+    }
+    openCommentPanel();
+  }, [commentPanelOpen, openCommentPanel]);
+
+  const addRecordComment = useCallback((recordId: string, content: string) => {
+    const comment = createRecordComment(content);
+    if (!comment.content) return;
+    mutate(current => updateRecord(current, recordId, record => ({
+      ...record,
+      comments: [comment, ...(record.comments ?? [])],
+    })));
+  }, [mutate]);
 
   const setGalleryConfig = (patch: Partial<GalleryViewConfig>) => {
     if (activeView.type !== 'gallery' || activeView.locked) return;
@@ -846,7 +898,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   };
 
   const changeCell = (recordId: string, fieldId: string, value: CellValue) => {
-    mutate(current => updateRecord(current, recordId, record => withUpdatedValue(record, fieldId, value)));
+    mutate(current => updateRecord(current, recordId, record => {
+      const field = current.fields.find(item => item.id === fieldId);
+      return withUpdatedValue(record, fieldId, value, field?.name);
+    }));
   };
 
   const removeRecords = (recordIds: string[], requireConfirm = false) => {
@@ -1266,6 +1321,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         selectionAnchorRef.current = recordId;
         setSelectedIds(new Set([recordId]));
       }}
+      onFocusedRecordChange={setGridFocusedRecordId}
+      onOpenComment={recordId => openCommentPanel(recordId)}
       selectBlock={selectBlock}
       onFieldMenuAction={handleGridFieldMenuAction}
       onColumnWidthChange={(fieldId, width) => {
@@ -1521,15 +1578,33 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
 
   const editingField = editingFieldPanel ? table.fields.find(field => field.id === editingFieldPanel.fieldId) : null;
   const cardRecord = cardRecordId ? table.records.find(record => record.id === cardRecordId) : null;
+  const commentTargetRecord = commentTargetRecordId
+    ? table.records.find(record => record.id === commentTargetRecordId) ?? null
+    : null;
+  const commentTargetRecordIndex = commentTargetRecord
+    ? Math.max(0, records.findIndex(record => record.id === commentTargetRecord.id))
+    : 0;
   const settingsLabel = viewSettingsLabel(activeView.type);
 
   useEffect(() => {
     if (cardRecordId && !table.records.some(record => record.id === cardRecordId)) setCardRecordId(null);
   }, [cardRecordId, table.records]);
 
+  useEffect(() => {
+    if (!commentPanelOpen || !gridFocusedRecordId) return;
+    setCommentTargetRecordId(gridFocusedRecordId);
+  }, [commentPanelOpen, gridFocusedRecordId]);
+
+  useEffect(() => {
+    if (commentTargetRecordId && !table.records.some(record => record.id === commentTargetRecordId)) {
+      setCommentPanelOpen(false);
+      setCommentTargetRecordId(null);
+    }
+  }, [commentTargetRecordId, table.records]);
+
   return (
     <NodeViewWrapper
-      className={`feishu-bitable-block feishu-base-block${selected ? ' is-selected' : ''}${isViewToolsVisible ? ' is-view-tools-visible' : ''}${showSettings || showViewMenu || activeToolbarPanel ? ' is-panel-open' : ''}`}
+      className={`feishu-bitable-block feishu-base-block${selected ? ' is-selected' : ''}${isViewToolsVisible ? ' is-view-tools-visible' : ''}${showSettings || showViewMenu || activeToolbarPanel || commentPanelOpen ? ' is-panel-open' : ''}${commentPanelOpen ? ' is-comment-open' : ''}`}
       {...blockAttrs(node.attrs)}
       data-base-view-type={activeView.type}
       contentEditable={false}
@@ -1681,10 +1756,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' ? ' is-active' : ''}`} aria-label="分组" title="分组" onClick={() => openToolbarPanel('group')}><ToolGlyphGroup /></button>
           <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' || activeView.sorts?.length ? ' is-active' : ''}`} aria-label="排序" title="排序" onClick={() => openToolbarPanel('sort')}><ToolGlyphSort /></button>
           <span className="base-viewbar__tool-sep" aria-hidden />
-          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'comment' ? ' is-active' : ''}`} aria-label="评论" title="评论" onClick={() => openToolbarPanel('comment')}><ToolGlyphComment /></button>
+          <button type="button" className={`base-viewbar__tool${commentPanelOpen ? ' is-active' : ''}`} aria-label="评论" title="评论" onClick={toggleCommentPanel}><ToolGlyphComment /></button>
           <span className="base-viewbar__tool-sep" aria-hidden />
           <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'share' ? ' is-active' : ''}`} aria-label="分享" title="在新窗口打开" onClick={() => openToolbarPanel('share')}><ToolGlyphShare /></button>
-          {activeToolbarPanel && activeToolbarPanel !== 'fields' && (
+          {activeToolbarPanel && activeToolbarPanel !== 'fields' && activeToolbarPanel !== 'comment' && (
             <ToolbarQuickPanel
               panel={activeToolbarPanel}
               table={table}
@@ -1700,6 +1775,15 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       </header>
       <div className="base-view-content" data-no-marquee-selection="true">
         {activeView.type === 'gallery' ? renderGallery() : activeView.type === 'gantt' ? renderGantt() : activeView.type === 'kanban' ? renderKanban() : renderGrid()}
+        {commentPanelOpen && commentTargetRecord && (
+          <BitableRecordCommentPanel
+            record={commentTargetRecord}
+            recordIndex={commentTargetRecordIndex}
+            locked={activeView.locked}
+            onClose={() => setCommentPanelOpen(false)}
+            onSubmit={content => addRecordComment(commentTargetRecord.id, content)}
+          />
+        )}
       </div>
       </div>
       {showSettings && activeView.type === 'gallery' && (
@@ -1768,6 +1852,12 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           onClose={() => setCardRecordId(null)}
           onChange={changeCell}
           onNavigate={setCardRecordId}
+          onDelete={recordId => {
+            if (removeRecords([recordId], true)) {
+              setCardRecordId(null);
+            }
+          }}
+          onAddField={addField}
         />,
         document.body,
       )}
@@ -2175,10 +2265,6 @@ function ToolbarQuickPanel({
           </label>
           {!canGroup && <p className="base-toolbar-panel__empty">当前视图未开启分组呈现。</p>}
         </>
-      )}
-
-      {panel === 'comment' && (
-        <p className="base-toolbar-panel__empty">当前视图共有 {records.length} 条记录。评论入口已保持在工具栏位置，后续会接入文档评论线程。</p>
       )}
 
       {panel === 'share' && (

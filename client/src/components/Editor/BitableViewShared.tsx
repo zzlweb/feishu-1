@@ -160,15 +160,6 @@ function GridFieldLockWithTooltip() {
   );
 }
 
-export function RecordCardExpandGlyph({ size = 14 }: GlyphProps) {
-  return (
-    <svg {...svgProps(size)} aria-hidden>
-      <rect x="4" y="6" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M8 12h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 export function GridFieldHeader({
   field,
   primaryFieldId,

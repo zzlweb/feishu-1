@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { valueText, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridViewConfig, type SelectChoice } from './bitableModel';
 import { createPortal } from 'react-dom';
 import type { Ref } from 'react';
@@ -40,6 +40,8 @@ export interface BitableGridViewProps {
   toggleAllRecordSelection: () => void;
   reorderRecords: (fromIndex: number, toIndex: number) => void;
   openRecord?: (recordId: string) => void;
+  onFocusedRecordChange?: (recordId: string | null) => void;
+  onOpenComment?: (recordId: string) => void;
   selectBlock: () => void;
   onFieldMenuAction: (fieldId: string, action: GridFieldMenuAction, position?: GridFieldMenuPosition) => void;
   onColumnWidthChange: (fieldId: string, width: number) => void;
@@ -376,6 +378,8 @@ export function BitableGridView({
   toggleAllRecordSelection,
   reorderRecords,
   openRecord,
+  onFocusedRecordChange,
+  onOpenComment,
   selectBlock,
   onFieldMenuAction,
   onColumnWidthChange,
@@ -478,6 +482,10 @@ export function BitableGridView({
     if (!selectAllRef.current) return;
     selectAllRef.current.indeterminate = isPartiallySelected;
   }, [isPartiallySelected]);
+
+  useEffect(() => {
+    onFocusedRecordChange?.(selectedCell?.recordId ?? null);
+  }, [onFocusedRecordChange, selectedCell?.recordId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -987,12 +995,12 @@ export function BitableGridView({
               +
             </button>
             {selectedCell && !editingCell && !selectEditor && (() => {
-              const column = columns.find(item => item.field.id === selectedCell.fieldId);
-              if (!column) return null;
+              const primaryColumn = columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
+              if (!primaryColumn || selectedCell.fieldId !== primaryColumn.field.id) return null;
               return (
                 <BitableGridCellExpand
                   style={{
-                    left: column.left + column.width - 28,
+                    left: primaryColumn.left + primaryColumn.width - 28,
                     top: HEADER_HEIGHT + selectedCell.rowIndex * ROW_HEIGHT + (ROW_HEIGHT - 24) / 2,
                   }}
                   onOpen={() => openRecord?.(selectedCell.recordId)}
@@ -1020,7 +1028,7 @@ export function BitableGridView({
                     openRecord?.(records[hoverRow].id);
                   }}
                 >
-                  <span className="base-grid-row-hover-actions__view-icon" aria-hidden />
+                  <span className="base-record-view-icon" aria-hidden />
                   查看
                 </button>
                 <button
@@ -1225,7 +1233,7 @@ export function BitableGridView({
             setCellContextMenu(null);
           }}
           onAddComment={() => {
-            openRecord?.(cellContextMenu.recordId);
+            onOpenComment?.(cellContextMenu.recordId);
             setCellContextMenu(null);
           }}
           onDeleteRecord={() => {

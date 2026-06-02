@@ -64,6 +64,26 @@ export interface BaseRecord {
   updatedAt: string;
   createdBy: UserId;
   updatedBy?: UserId;
+  history?: RecordHistoryEntry[];
+  comments?: RecordComment[];
+}
+
+export interface RecordHistoryEntry {
+  id: string;
+  time: string;
+  operatorId: UserId;
+  operatorName: string;
+  fieldId: FieldId;
+  fieldName: string;
+  before: CellValue;
+  after: CellValue;
+}
+
+export interface RecordComment {
+  id: string;
+  content: string;
+  author: string;
+  createdAt: string;
 }
 
 export interface FilterRule {
@@ -139,6 +159,87 @@ function uid(prefix: string) {
 
 function now() {
   return new Date().toISOString();
+}
+
+export const DEFAULT_RECORD_OPERATOR = '张正亮';
+
+export function formatHistoryCellValue(value: CellValue): string {
+  if (value == null || value === '') return '-';
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '-';
+    if (typeof value[0] === 'object') return `${value.length} 个附件`;
+    return value.map(item => String(item)).join(', ');
+  }
+  return String(value);
+}
+
+export function formatHistoryTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '--:--';
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+export function formatCardDateValue(value: CellValue) {
+  const text = valueText(value);
+  if (!text) return '';
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}/${month}/${day}`;
+}
+
+export function textColorForBackground(hex: string) {
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) return '#1f2329';
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 170 ? '#1f2329' : '#fff';
+}
+
+export function findSelectChoice(field: BaseField, value: string): SelectChoice | null {
+  return field.options?.choices?.find(choice => choice.name === value) ?? null;
+}
+
+export function createRecordComment(content: string, author = DEFAULT_RECORD_OPERATOR): RecordComment {
+  return {
+    id: uid('rcmt'),
+    content: content.trim(),
+    author,
+    createdAt: now(),
+  };
+}
+
+export function appendRecordHistory(
+  record: BaseRecord,
+  fieldId: FieldId,
+  fieldName: string,
+  before: CellValue,
+  after: CellValue,
+  operatorName = DEFAULT_RECORD_OPERATOR,
+): BaseRecord {
+  if (JSON.stringify(before) === JSON.stringify(after)) return record;
+  const entry: RecordHistoryEntry = {
+    id: uid('hist'),
+    time: now(),
+    operatorId: record.updatedBy || record.createdBy || 'local-user',
+    operatorName,
+    fieldId,
+    fieldName,
+    before,
+    after,
+  };
+  return {
+    ...record,
+    updatedAt: entry.time,
+    updatedBy: entry.operatorId,
+    history: [entry, ...(record.history ?? [])],
+  };
 }
 
 function parseArray<T>(value: unknown, fallback: T[]): T[] {
@@ -293,6 +394,19 @@ export function createRecord(tableId: string, fields: BaseField[], primaryFieldI
   fields.forEach(field => {
     values[field.id] = field.id === primaryFieldId ? title : field.defaultValue ?? (field.type === 'attachment' ? [] : '');
   });
+  const primaryField = fields.find(field => field.id === primaryFieldId);
+  const history: RecordHistoryEntry[] | undefined = title
+    ? [{
+        id: uid('hist'),
+        time,
+        operatorId: 'local-user',
+        operatorName: DEFAULT_RECORD_OPERATOR,
+        fieldId: primaryFieldId,
+        fieldName: primaryField?.name ?? '文本',
+        before: null,
+        after: title,
+      }]
+    : undefined;
   return {
     id: uid('rec'),
     tableId,
@@ -300,6 +414,7 @@ export function createRecord(tableId: string, fields: BaseField[], primaryFieldI
     createdAt: time,
     updatedAt: time,
     createdBy: 'local-user',
+    history,
   };
 }
 

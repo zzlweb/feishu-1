@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { RecordCardExpandGlyph, useBitablePortalTooltip } from './BitableViewShared';
+import { useBitablePortalTooltip } from './BitableViewShared';
 
 export function BitableGridCellExpand({
   style,
@@ -23,9 +23,7 @@ export function BitableGridCellExpand({
           onOpen();
         }}
       >
-        <span className="base-grid-cell-expand__icon" aria-hidden>
-          <RecordCardExpandGlyph size={14} />
-        </span>
+        <span className="base-record-view-icon" aria-hidden />
       </button>
       {renderTip('弹窗打开')}
     </>
