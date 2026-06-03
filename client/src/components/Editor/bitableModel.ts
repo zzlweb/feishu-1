@@ -64,6 +64,7 @@ export interface BaseRecord {
   updatedAt: string;
   createdBy: UserId;
   updatedBy?: UserId;
+  parentId?: string;
   history?: RecordHistoryEntry[];
   comments?: RecordComment[];
 }
@@ -265,7 +266,7 @@ export function createGalleryConfig(fields: BaseField[], primaryFieldId: string)
     showFieldNames: false,
     showEmptyFields: false,
     showAttachmentCount: true,
-    showRecordActions: true,
+    showRecordActions: false,
     emptyCoverMode: 'placeholder',
   };
 }
@@ -483,6 +484,7 @@ function normalizeTable(raw: BaseTable): BaseTable {
   const records = (Array.isArray(raw.records) ? raw.records : []).map(record => ({
     ...record,
     tableId,
+    parentId: typeof record.parentId === 'string' ? record.parentId : undefined,
     fields: fields.reduce<Record<string, CellValue>>((values, field) => {
       const value = record.fields?.[field.id];
       values[field.id] = value ?? (field.type === 'attachment' ? [] : '');
@@ -559,15 +561,207 @@ export function getActiveView(table: BaseTable) {
 }
 
 export function getGalleryConfig(table: BaseTable, view: BaseView): GalleryViewConfig {
-  return view.type === 'gallery'
+  const config = view.type === 'gallery'
     ? view.config as GalleryViewConfig
     : createGalleryConfig(table.fields, table.primaryFieldId);
+  return { ...config, showRecordActions: false };
 }
 
 export function getGanttConfig(table: BaseTable, view: BaseView): GanttViewConfig {
   return view.type === 'gantt'
     ? view.config as GanttViewConfig
     : createGanttConfig(table.fields, table.primaryFieldId);
+}
+
+export const RECORD_TREE_INDENT = 18;
+
+export function getRecordDepth(record: BaseRecord, records: BaseRecord[]): number {
+  const byId = new Map(records.map(item => [item.id, item]));
+  let depth = 0;
+  let parentId = record.parentId;
+  const seen = new Set<string>();
+  while (parentId) {
+    if (seen.has(parentId)) break;
+    seen.add(parentId);
+    depth += 1;
+    parentId = byId.get(parentId)?.parentId;
+  }
+  return depth;
+}
+
+export function findInsertIndexAfterSubtree(records: BaseRecord[], parentIndex: number): number {
+  if (parentIndex < 0 || parentIndex >= records.length) return records.length;
+  const parentDepth = getRecordDepth(records[parentIndex], records);
+  let index = parentIndex + 1;
+  while (index < records.length && getRecordDepth(records[index], records) > parentDepth) {
+    index += 1;
+  }
+  return index;
+}
+
+export function getRecordSubtreeRange(records: BaseRecord[], startIndex: number): { start: number; end: number } {
+  if (startIndex < 0 || startIndex >= records.length) return { start: startIndex, end: startIndex };
+  const rootDepth = getRecordDepth(records[startIndex], records);
+  let end = startIndex + 1;
+  while (end < records.length && getRecordDepth(records[end], records) > rootDepth) {
+    end += 1;
+  }
+  return { start: startIndex, end };
+}
+
+export function getRecordSubtreeIds(records: BaseRecord[], startIndex: number): Set<string> {
+  if (startIndex < 0 || startIndex >= records.length) return new Set();
+  return collectRecordSubtreeIds(records, [records[startIndex].id]);
+}
+
+export function normalizeRecordTreeOrder(records: BaseRecord[]): BaseRecord[] {
+  if (!records.length) return records;
+  const recordById = new Map(records.map(record => [record.id, record]));
+  const childrenByParent = new Map<string | null, BaseRecord[]>();
+
+  records.forEach(record => {
+    const parentKey = record.parentId && recordById.has(record.parentId) ? record.parentId : null;
+    const siblings = childrenByParent.get(parentKey);
+    if (siblings) siblings.push(record);
+    else childrenByParent.set(parentKey, [record]);
+  });
+
+  const result: BaseRecord[] = [];
+  const walk = (parentKey: string | null) => {
+    const siblings = childrenByParent.get(parentKey);
+    if (!siblings) return;
+    siblings.forEach(record => {
+      result.push(record);
+      walk(record.id);
+    });
+  };
+  walk(null);
+
+  if (result.length !== records.length) {
+    const used = new Set(result.map(record => record.id));
+    records.forEach(record => {
+      if (!used.has(record.id)) result.push(record);
+    });
+  }
+  return result;
+}
+
+export function reorderRecordsInTree(records: BaseRecord[], fromIndex: number, toIndex: number): BaseRecord[] {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= records.length || toIndex >= records.length) {
+    return records;
+  }
+
+  const root = records[fromIndex];
+  const subtreeIds = getRecordSubtreeIds(records, fromIndex);
+  const target = records[toIndex];
+
+  if (subtreeIds.has(target.id) && target.id !== root.id) {
+    return records;
+  }
+
+  const block = records.filter(record => subtreeIds.has(record.id));
+  const remaining = records.filter(record => !subtreeIds.has(record.id));
+
+  let insertAt = remaining.findIndex(record => record.id === target.id);
+  if (insertAt < 0) return records;
+  if (fromIndex < toIndex) insertAt += 1;
+
+  const next = [
+    ...remaining.slice(0, insertAt),
+    ...block,
+    ...remaining.slice(insertAt),
+  ];
+  return normalizeRecordTreeOrder(next);
+}
+
+export interface RecordTreeRowMeta {
+  depth: number;
+  guideContinues: boolean[];
+  isLastChild: boolean;
+  hasChildren: boolean;
+  childCount: number;
+}
+
+export function recordHasChildren(recordId: string, records: BaseRecord[]): boolean {
+  return records.some(record => record.parentId === recordId);
+}
+
+export function countDirectChildren(recordId: string, records: BaseRecord[]): number {
+  return records.filter(record => record.parentId === recordId).length;
+}
+
+export function filterRecordsByCollapsedAncestors(records: BaseRecord[], collapsedIds: Set<string>): BaseRecord[] {
+  if (!collapsedIds.size) return records;
+  const byId = new Map(records.map(record => [record.id, record]));
+  return records.filter(record => {
+    let parentId = record.parentId;
+    while (parentId) {
+      if (collapsedIds.has(parentId)) return false;
+      parentId = byId.get(parentId)?.parentId;
+    }
+    return true;
+  });
+}
+
+export function getRootDisplayNumber(record: BaseRecord, displayRecords: BaseRecord[], allRecords: BaseRecord[]): number | null {
+  if (getRecordDepth(record, allRecords) > 0) return null;
+  let count = 0;
+  for (const item of displayRecords) {
+    if (getRecordDepth(item, allRecords) === 0) count += 1;
+    if (item.id === record.id) return count;
+  }
+  return null;
+}
+
+export function buildRecordTreeMeta(displayRecords: BaseRecord[], allRecords: BaseRecord[]): RecordTreeRowMeta[] {
+  const depths = displayRecords.map(record => getRecordDepth(record, allRecords));
+  return displayRecords.map((record, index) => {
+    const depth = depths[index];
+    const guideContinues: boolean[] = [];
+    for (let level = 0; level < depth; level += 1) {
+      let continues = false;
+      for (let j = index + 1; j < displayRecords.length; j += 1) {
+        if (depths[j] <= level) break;
+        if (depths[j] > level) {
+          continues = true;
+          break;
+        }
+      }
+      guideContinues.push(continues);
+    }
+    let isLastChild = true;
+    if (record.parentId) {
+      for (let j = index + 1; j < displayRecords.length; j += 1) {
+        if (depths[j] < depth) break;
+        if (depths[j] === depth) {
+          isLastChild = displayRecords[j].parentId !== record.parentId;
+          break;
+        }
+      }
+    }
+    return {
+      depth,
+      guideContinues,
+      isLastChild,
+      hasChildren: recordHasChildren(record.id, allRecords),
+      childCount: countDirectChildren(record.id, allRecords),
+    };
+  });
+}
+
+export function collectRecordSubtreeIds(records: BaseRecord[], rootIds: string[]): Set<string> {
+  const ids = new Set(rootIds);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    records.forEach(record => {
+      if (record.parentId && ids.has(record.parentId) && !ids.has(record.id)) {
+        ids.add(record.id);
+        changed = true;
+      }
+    });
+  }
+  return ids;
 }
 
 export function getAttachments(record: BaseRecord, fieldId?: string): AttachmentValue[] {

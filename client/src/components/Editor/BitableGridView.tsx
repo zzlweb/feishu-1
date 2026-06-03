@@ -1,9 +1,9 @@
-﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
-import { valueText, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridViewConfig, type SelectChoice } from './bitableModel';
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { valueText, buildRecordTreeMeta, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from './bitableModel';
 import { createPortal } from 'react-dom';
 import type { Ref } from 'react';
 import { BitableGridCellExpand } from './BitableGridCellExpand';
-import { GridFieldHeader, GridFieldMenuIcon, attachmentCellLabel } from './BitableViewShared';
+import { GridFieldHeader, GridFieldMenuIcon, BitableTooltip, attachmentCellLabel } from './BitableViewShared';
 
 export interface GridFieldMenuPosition {
   left: number;
@@ -30,9 +30,10 @@ export interface BitableGridViewProps {
   activeView: BaseView;
   records: BaseRecord[];
   selectedIds: Set<string>;
-  addField: () => void;
+  addField: (anchor: { left: number; top: number }) => void;
   addRecord: () => string;
   insertRecordAt?: (index: number, count: number, initialTitle?: string) => string[];
+  insertChildRecord?: (parentRecordId: string, initialTitle?: string) => string;
   removeRecords?: (recordIds: string[], requireConfirm?: boolean) => void;
   changeCell: (recordId: string, fieldId: string, value: CellValue) => void;
   pickFiles: (recordId: string, fieldId?: string) => void;
@@ -45,16 +46,43 @@ export interface BitableGridViewProps {
   selectBlock: () => void;
   onFieldMenuAction: (fieldId: string, action: GridFieldMenuAction, position?: GridFieldMenuPosition) => void;
   onColumnWidthChange: (fieldId: string, width: number) => void;
+  addSelectChoice?: (fieldId: string, name: string) => string | null;
 }
 
 const INDEX_WIDTH = 56;
-const ADD_FIELD_WIDTH = 54;
+const ADD_FIELD_WIDTH = 44;
+const BITABLE_EDGE_MARGIN = 72;
 const DEFAULT_FIELD_WIDTH = 160;
 const MIN_FIELD_WIDTH = 80;
 const MAX_FIELD_WIDTH = 420;
 const HEADER_HEIGHT = 32;
 const ROW_HEIGHT = 32;
 const RESIZE_HIT_WIDTH = 10;
+const TREE_TOGGLE_SIZE = 16;
+const PRIMARY_CELL_PADDING = 8;
+const TREE_ANCHOR_X = 10;
+const TREE_TOGGLE_LEFT = TREE_ANCHOR_X - TREE_TOGGLE_SIZE / 2;
+const PRIMARY_TEXT_START = TREE_TOGGLE_LEFT + TREE_TOGGLE_SIZE;
+
+const FIELD_MENU_WIDTH = 188;
+const FIELD_MENU_WIDTH_PRIMARY = 220;
+const FIELD_MENU_ESTIMATED_HEIGHT = 420;
+
+function computeFieldMenuViewportPosition(
+  clientX: number,
+  clientY: number,
+  isPrimaryField: boolean,
+) {
+  const menuWidth = isPrimaryField ? FIELD_MENU_WIDTH_PRIMARY : FIELD_MENU_WIDTH;
+  const margin = 8;
+  let left = clientX - menuWidth + 28;
+  left = Math.max(margin, Math.min(left, window.innerWidth - menuWidth - margin));
+  let top = clientY + 6;
+  if (top + FIELD_MENU_ESTIMATED_HEIGHT > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - FIELD_MENU_ESTIMATED_HEIGHT - margin);
+  }
+  return { left, top };
+}
 
 function GridFieldContextMenu({
   menuRef,
@@ -79,7 +107,7 @@ function GridFieldContextMenu({
     <div
       ref={menuRef}
       id="bitable-contextmenu"
-      className={`base-grid-field-menu bitable-contextmenu${isPrimaryField ? ' is-primary-field' : ''}`}
+      className={`base-grid-field-menu base-grid-field-menu--portal bitable-contextmenu${isPrimaryField ? ' is-primary-field' : ''}`}
       style={{ left, top }}
       data-no-marquee-selection="true"
       data-floating-panel="true"
@@ -157,6 +185,13 @@ function GridCellContextMenu({
 }) {
   const [aboveCount, setAboveCount] = useState('1');
   const [belowCount, setBelowCount] = useState('1');
+  const menuWidth = 220;
+  const menuHeight = 284;
+  const margin = 8;
+  const viewportWidth = typeof window === 'undefined' ? left + menuWidth + margin : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? top + menuHeight + margin : window.innerHeight;
+  const fixedLeft = Math.max(margin, Math.min(left, viewportWidth - menuWidth - margin));
+  const fixedTop = Math.max(margin, Math.min(top, viewportHeight - menuHeight - margin));
 
   const handleAboveChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -176,8 +211,8 @@ function GridCellContextMenu({
     <div
       ref={menuRef}
       id="bitable-contextmenu"
-      className="b-menu bitable-noselect white J-bitable-container bitable-hover-scrollbar-sm bitable-contextmenu"
-      style={{ left, top, maxHeight: 'unset', overflowY: 'auto' }}
+      className="b-menu bitable-noselect white J-bitable-container bitable-hover-scrollbar-sm bitable-contextmenu base-grid-cell-menu--portal"
+      style={{ left: fixedLeft, top: fixedTop, width: menuWidth, maxHeight: `calc(100vh - ${margin * 2}px)`, overflowY: 'auto' }}
       onMouseDown={e => e.stopPropagation()}
     >
       <ul className="ud__menu ud__menu-root ud__menu-vertical ud-scrollbar" dir="ltr" role="menu" tabIndex={0} data-menu-list="true">
@@ -273,7 +308,7 @@ function GridCellContextMenu({
 }
 
 type GridColumn = { field: BaseField; left: number; width: number };
-type EditingCell = { recordId: string; fieldId: string; left: number; top: number; width: number; value: string };
+type EditingCell = { recordId: string; fieldId: string; left: number; top: number; width: number; paddingLeft: number; paddingRight: number; value: string };
 type SelectedCell = { recordId: string; fieldId: string; rowIndex: number };
 type SelectEditor = {
   recordId: string;
@@ -299,6 +334,113 @@ function drawText(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
   }
   while (value.length > 1 && ctx.measureText(`${value}...`).width > maxWidth) value = value.slice(0, -1);
   ctx.fillText(`${value}...`, x, y);
+}
+
+function drawRecordTreeGuides(
+  ctx: CanvasRenderingContext2D,
+  columnLeft: number,
+  rowTop: number,
+  rowHeight: number,
+  meta: RecordTreeRowMeta,
+  isCollapsed: boolean,
+) {
+  const midY = rowTop + rowHeight / 2;
+  const anchorX = columnLeft + TREE_ANCHOR_X;
+  ctx.save();
+  ctx.strokeStyle = '#c9cdd4';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 2]);
+
+  if (meta.depth === 0 && meta.hasChildren && !isCollapsed) {
+    ctx.beginPath();
+    ctx.moveTo(anchorX + 0.5, midY + TREE_TOGGLE_SIZE / 2 - 2);
+    ctx.lineTo(anchorX + 0.5, rowTop + rowHeight);
+    ctx.stroke();
+  }
+
+  if (meta.depth <= 0) {
+    ctx.setLineDash([]);
+    ctx.restore();
+    return;
+  }
+
+  const baseX = columnLeft + TREE_TOGGLE_LEFT;
+  meta.guideContinues.forEach((continues, level) => {
+    const x = baseX + level * RECORD_TREE_INDENT + 8;
+    if (!continues) return;
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, rowTop);
+    ctx.lineTo(x + 0.5, rowTop + rowHeight);
+    ctx.stroke();
+  });
+  const branchX = baseX + (meta.depth - 1) * RECORD_TREE_INDENT + 8;
+  const endX = branchX + 10;
+  ctx.beginPath();
+  ctx.moveTo(branchX + 0.5, rowTop);
+  ctx.lineTo(branchX + 0.5, meta.isLastChild ? midY : rowTop + rowHeight);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(branchX + 0.5, midY);
+  ctx.lineTo(endX, midY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function primaryCellTextOffset(meta: RecordTreeRowMeta) {
+  if (meta.depth > 0) return PRIMARY_TEXT_START + meta.depth * RECORD_TREE_INDENT;
+  return PRIMARY_TEXT_START;
+}
+
+function cellTextInset(column: GridColumn, meta: RecordTreeRowMeta | undefined, primaryFieldId: string) {
+  if (column.field.id === primaryFieldId && meta) return primaryCellTextOffset(meta);
+  return PRIMARY_CELL_PADDING;
+}
+
+function getCellEditorLayout(column: GridColumn, meta: RecordTreeRowMeta | undefined, isPrimaryField: boolean) {
+  const paddingRight = PRIMARY_CELL_PADDING;
+  if (!isPrimaryField || !meta) {
+    return { left: column.left, width: column.width, paddingLeft: PRIMARY_CELL_PADDING, paddingRight };
+  }
+  if (meta.depth === 0 && meta.hasChildren) {
+    return {
+      left: column.left + PRIMARY_TEXT_START,
+      width: column.width - PRIMARY_TEXT_START,
+      paddingLeft: 4,
+      paddingRight,
+    };
+  }
+  if (meta.depth === 0) {
+    return {
+      left: column.left,
+      width: column.width,
+      paddingLeft: PRIMARY_TEXT_START,
+      paddingRight,
+    };
+  }
+  const editInset = primaryCellTextOffset(meta) - 4;
+  return {
+    left: column.left + editInset,
+    width: column.width - editInset,
+    paddingLeft: 4,
+    paddingRight,
+  };
+}
+
+function isTreeToggleHit(
+  point: { x: number; y: number },
+  column: GridColumn,
+  rowIndex: number,
+  primaryFieldId: string,
+  meta: RecordTreeRowMeta | undefined,
+) {
+  if (!meta?.hasChildren || column.field.id !== primaryFieldId) return false;
+  const toggleLeft = column.left + TREE_TOGGLE_LEFT;
+  const toggleTop = HEADER_HEIGHT + rowIndex * ROW_HEIGHT + (ROW_HEIGHT - TREE_TOGGLE_SIZE) / 2;
+  return point.x >= toggleLeft
+    && point.x <= toggleLeft + TREE_TOGGLE_SIZE
+    && point.y >= toggleTop
+    && point.y <= toggleTop + TREE_TOGGLE_SIZE;
 }
 
 function textColorForBackground(background: string) {
@@ -348,9 +490,12 @@ function findResizeColumn(columns: GridColumn[], x: number) {
   return columns.find(column => Math.abs(x - (column.left + column.width)) <= RESIZE_HIT_WIDTH / 2) || null;
 }
 
-function pointFromCanvas(event: ReactPointerEvent<HTMLCanvasElement>) {
+function pointFromCanvas(
+  event: { clientX: number; clientY: number; currentTarget: EventTarget & Element },
+  scrollOffsetX: number,
+) {
   const rect = event.currentTarget.getBoundingClientRect();
-  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  return { x: event.clientX - rect.left + scrollOffsetX, y: event.clientY - rect.top };
 }
 
 function rowIndexFromClientY(shell: HTMLDivElement | null, clientY: number, recordCount: number) {
@@ -363,6 +508,23 @@ function rowIndexFromClientY(shell: HTMLDivElement | null, clientY: number, reco
   return index;
 }
 
+function isValidTreeDropTarget(
+  records: BaseRecord[],
+  displayRecords: BaseRecord[],
+  fromDisplayIndex: number,
+  toDisplayIndex: number,
+) {
+  if (fromDisplayIndex === toDisplayIndex) return false;
+  const fromRecord = displayRecords[fromDisplayIndex];
+  const toRecord = displayRecords[toDisplayIndex];
+  if (!fromRecord || !toRecord) return false;
+  const fromRecordsIndex = records.findIndex(record => record.id === fromRecord.id);
+  const toRecordsIndex = records.findIndex(record => record.id === toRecord.id);
+  if (fromRecordsIndex < 0 || toRecordsIndex < 0) return false;
+  const subtreeIds = getRecordSubtreeIds(records, fromRecordsIndex);
+  return !(subtreeIds.has(toRecord.id) && toRecord.id !== fromRecord.id);
+}
+
 export function BitableGridView({
   table,
   activeView,
@@ -371,6 +533,7 @@ export function BitableGridView({
   addField,
   addRecord,
   insertRecordAt,
+  insertChildRecord,
   removeRecords,
   changeCell,
   pickFiles,
@@ -383,8 +546,21 @@ export function BitableGridView({
   selectBlock,
   onFieldMenuAction,
   onColumnWidthChange,
+  addSelectChoice,
 }: BitableGridViewProps) {
   const shellRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canvasScrollRef = useRef<HTMLDivElement>(null);
+  const hTrackRef = useRef<HTMLDivElement>(null);
+  const scrollLeftRef = useRef(0);
+  const anchorWidthRef = useRef(0);
+  const layoutOriginRef = useRef({ blockLeft: 0, bleedLeft: 0 });
+  const prevCanvasWidthRef = useRef(0);
+  const prevMaxScrollLeftRef = useRef(0);
+  const pendingFoldScrollRef = useRef(false);
+  const frozenCanvasRef = useRef<HTMLCanvasElement>(null);
+  const hThumbDragRef = useRef<{ startX: number; startScrollLeft: number } | null>(null);
+  const fieldMenuOpenAtRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -392,6 +568,9 @@ export function BitableGridView({
   const selectEditorRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const pendingCellFocusRef = useRef<{ recordId: string; fieldId: string } | null>(null);
+  const suppressBlurCommitRef = useRef(false);
+  const editingCellRef = useRef<EditingCell | null>(null);
+  const selectedCellRef = useRef<SelectedCell | null>(null);
   const [fieldMenu, setFieldMenu] = useState<{ fieldId: string; left: number; top: number; columnLeft: number } | null>(null);
   const [cellContextMenu, setCellContextMenu] = useState<{
     recordId: string;
@@ -409,15 +588,39 @@ export function BitableGridView({
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
   const [selectEditor, setSelectEditor] = useState<SelectEditor | null>(null);
   const [rowDrag, setRowDrag] = useState<{ fromIndex: number; overIndex: number } | null>(null);
+  const [collapsedRecordIds, setCollapsedRecordIds] = useState<Set<string>>(() => new Set());
   const visibleFields = table.fields.filter(field => !(activeView.hiddenFieldIds || []).includes(field.id));
+  const displayRecords = useMemo(
+    () => filterRecordsByCollapsedAncestors(records, collapsedRecordIds),
+    [records, collapsedRecordIds],
+  );
   const isAllSelected = records.length > 0 && selectedIds.size === records.length;
   const isPartiallySelected = selectedIds.size > 0 && selectedIds.size < records.length;
-  const addRowIndex = records.length;
+  const addRowIndex = displayRecords.length;
   const rowCount = addRowIndex + 1;
   const gridBodyBottom = HEADER_HEIGHT + rowCount * ROW_HEIGHT;
   const gridConfig = activeView.config as GridViewConfig;
   const fieldWidths = gridConfig.fieldWidths || {};
   const menuField = fieldMenu ? visibleFields.find(field => field.id === fieldMenu.fieldId) : null;
+  const treeMeta = useMemo(() => buildRecordTreeMeta(displayRecords, records), [displayRecords, records]);
+
+  const toggleRecordCollapse = (recordId: string) => {
+    setCollapsedRecordIds(current => {
+      const next = new Set(current);
+      if (next.has(recordId)) next.delete(recordId);
+      else next.add(recordId);
+      return next;
+    });
+  };
+
+  const expandRecord = (recordId: string) => {
+    setCollapsedRecordIds(current => {
+      if (!current.has(recordId)) return current;
+      const next = new Set(current);
+      next.delete(recordId);
+      return next;
+    });
+  };
 
   const columns = useMemo(() => {
     let left = INDEX_WIDTH;
@@ -429,9 +632,272 @@ export function BitableGridView({
     });
   }, [activeResize, fieldWidths, visibleFields]);
 
-  const canvasWidth = Math.max(INDEX_WIDTH + ADD_FIELD_WIDTH, INDEX_WIDTH + ADD_FIELD_WIDTH + columns.reduce((sum, column) => sum + column.width, 0));
   const dataWidth = columns.length > 0 ? columns[columns.length - 1].left + columns[columns.length - 1].width : INDEX_WIDTH;
+  const gridContentRight = dataWidth + ADD_FIELD_WIDTH;
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [layoutCaps, setLayoutCaps] = useState({
+    anchor: 0,
+    maxBleedWidth: 0,
+    trackWidth: 0,
+    shiftMax: 0,
+    widthExpandMax: 0,
+    expandScrollMax: 0,
+    panScrollMax: 0,
+  });
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [foldMode, setFoldMode] = useState(false);
+  const [hThumbDragging, setHThumbDragging] = useState(false);
+  const [hoverAddFieldHeader, setHoverAddFieldHeader] = useState(false);
+  const canvasWidth = Math.max(INDEX_WIDTH + ADD_FIELD_WIDTH, gridContentRight);
   const canvasHeight = gridBodyBottom;
+  const freezeWidth = INDEX_WIDTH + (columns[0]?.width ?? DEFAULT_FIELD_WIDTH);
+  const { anchor, maxBleedWidth, trackWidth, shiftMax, panScrollMax } = layoutCaps;
+  const isFrozenScroll = foldMode;
+  const baseScrollWidth = trackWidth || anchor || viewportWidth;
+  const wideLimit = maxBleedWidth || baseScrollWidth;
+  const restingDisplayWidth = anchor > 0
+    ? Math.min(
+      baseScrollWidth || wideLimit,
+      Math.max(anchor, Math.min(canvasWidth, baseScrollWidth || canvasWidth)),
+    )
+    : viewportWidth;
+  const contentMaxScrollLeft = Math.max(0, canvasWidth - baseScrollWidth);
+  const maxScrollLeft = isFrozenScroll
+    ? Math.max(0, canvasWidth - baseScrollWidth)
+    : contentMaxScrollLeft;
+  const blockShift = isFrozenScroll
+    ? shiftMax
+    : Math.min(shiftMax, scrollLeft);
+  const shiftedDisplayWidth = Math.min(
+    wideLimit,
+    Math.max(restingDisplayWidth, Math.min(canvasWidth, baseScrollWidth + blockShift)),
+  );
+  const displayWidth = scrollLeft > 0 || isFrozenScroll
+    ? shiftedDisplayWidth
+    : restingDisplayWidth;
+  const panAmount = isFrozenScroll
+    ? scrollLeft
+    : Math.max(0, scrollLeft - shiftMax);
+  const canvasScrollOffsetX = isFrozenScroll ? freezeWidth + panAmount : panAmount;
+  const exceedsExtendWidth = maxBleedWidth > 0 && canvasWidth > maxBleedWidth;
+  const scrollTrackWidth = baseScrollWidth;
+
+  const hScrollMetrics = useMemo(() => {
+    const trackWidth = scrollTrackWidth > 0 ? scrollTrackWidth : viewportWidth;
+    if (trackWidth <= 0 || maxScrollLeft <= 0) {
+      return { trackWidth, thumbWidth: 0, thumbLeft: 0, travel: 0 };
+    }
+    // 与原生滚动条一致：clientWidth / scrollWidth，其中 scrollWidth = client + maxScrollLeft
+    const virtualScrollWidth = trackWidth + maxScrollLeft;
+    let thumbWidth = Math.max(48, Math.round((trackWidth * trackWidth) / virtualScrollWidth));
+    thumbWidth = Math.min(thumbWidth, Math.max(48, trackWidth - 48));
+    const travel = Math.max(0, trackWidth - thumbWidth);
+    const thumbLeft = travel > 0 ? (scrollLeft / maxScrollLeft) * travel : 0;
+    return { trackWidth, thumbWidth, thumbLeft, travel };
+  }, [maxScrollLeft, scrollLeft, scrollTrackWidth, viewportWidth]);
+
+  const applyScrollLeft = useCallback((next: number) => {
+    const clamped = Math.max(0, Math.min(next, maxScrollLeft));
+    scrollLeftRef.current = clamped;
+    setScrollLeft(clamped);
+  }, [maxScrollLeft]);
+
+  const scrollToAddColumn = useCallback(() => {
+    applyScrollLeft(maxScrollLeft);
+  }, [applyScrollLeft, maxScrollLeft]);
+
+  const openAddFieldPanelAt = useCallback((anchor: { left: number; top: number }) => {
+    addField(anchor);
+    scrollToAddColumn();
+  }, [addField, scrollToAddColumn]);
+
+  const syncLayoutCaps = useCallback(() => {
+    const block = wrapRef.current?.closest<HTMLElement>('.feishu-bitable-block');
+    const shell = shellRef.current;
+    if (!block || !shell) {
+      setViewportWidth(shell?.clientWidth ?? 0);
+      return;
+    }
+    const commentRail = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--comment-rail-width'),
+    ) || 0;
+    const blockLeftNow = block.getBoundingClientRect().left;
+    const bleedHost = block.closest<HTMLElement>('.doc-page-workspace')
+      ?? block.closest<HTMLElement>('.editor-container')
+      ?? block.parentElement;
+    const bleedLeftNow = bleedHost?.getBoundingClientRect().left ?? blockLeftNow;
+
+    if (scrollLeftRef.current <= 0 && !foldMode) {
+      anchorWidthRef.current = block.getBoundingClientRect().width
+        || block.parentElement?.clientWidth
+        || shell.clientWidth;
+      layoutOriginRef.current = { blockLeft: blockLeftNow, bleedLeft: bleedLeftNow };
+    } else if (!anchorWidthRef.current) {
+      anchorWidthRef.current = block.getBoundingClientRect().width
+        || block.parentElement?.clientWidth
+        || shell.clientWidth;
+      layoutOriginRef.current = { blockLeft: blockLeftNow, bleedLeft: bleedLeftNow };
+    }
+
+    const anchorWidth = anchorWidthRef.current;
+    const { blockLeft, bleedLeft } = layoutOriginRef.current;
+    const nextMaxBleedWidth = Math.max(
+      INDEX_WIDTH + ADD_FIELD_WIDTH,
+      window.innerWidth - commentRail - BITABLE_EDGE_MARGIN * 2,
+    );
+    const wideLeft = Math.max(bleedLeft, (window.innerWidth - commentRail - nextMaxBleedWidth) / 2);
+    const nextShiftMax = Math.max(0, blockLeft - wideLeft);
+    const nextTrackWidth = Math.max(
+      INDEX_WIDTH + ADD_FIELD_WIDTH,
+      nextMaxBleedWidth - nextShiftMax,
+    );
+    const nextWidthExpandMax = Math.max(0, nextMaxBleedWidth - anchorWidth);
+    const nextExpandScrollMax = Math.max(0, Math.min(nextShiftMax, canvasWidth - nextTrackWidth));
+    const nextPanScrollMax = Math.max(0, canvasWidth - nextMaxBleedWidth);
+    const nextMaxScrollLeft = Math.max(0, canvasWidth - nextTrackWidth);
+
+    block.style.setProperty('--bitable-bleed-left', `${wideLeft}px`);
+    block.style.setProperty('--bitable-block-left', `${blockLeft}px`);
+    block.style.setProperty('--bitable-anchor-width', `${anchorWidth}px`);
+    block.style.setProperty('--bitable-anchor-scroll-width', `${nextTrackWidth}px`);
+    block.classList.toggle(
+      'is-grid-hscroll-active',
+      nextMaxScrollLeft > 0,
+    );
+
+    setLayoutCaps({
+      anchor: anchorWidth,
+      maxBleedWidth: nextMaxBleedWidth,
+      trackWidth: nextTrackWidth,
+      shiftMax: nextShiftMax,
+      widthExpandMax: nextWidthExpandMax,
+      expandScrollMax: nextExpandScrollMax,
+      panScrollMax: nextPanScrollMax,
+    });
+    setViewportWidth(Math.max(INDEX_WIDTH + ADD_FIELD_WIDTH, anchorWidth));
+  }, [canvasWidth, foldMode]);
+
+  useEffect(() => {
+    const block = wrapRef.current?.closest<HTMLElement>('.feishu-bitable-block');
+    if (!block) return;
+    block.style.setProperty('--bitable-display-width', `${displayWidth}px`);
+    block.style.setProperty('--bitable-block-shift', `${blockShift}px`);
+    block.classList.toggle(
+      'is-grid-bleed-active',
+      blockShift > 0 || displayWidth > anchor + 1 || panScrollMax > 0,
+    );
+  }, [anchor, blockShift, displayWidth, panScrollMax]);
+
+  useEffect(() => {
+    syncLayoutCaps();
+    const onResize = () => {
+      layoutOriginRef.current = { blockLeft: 0, bleedLeft: 0 };
+      anchorWidthRef.current = 0;
+      syncLayoutCaps();
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [syncLayoutCaps]);
+
+  const prevScrollLeftForLayoutRef = useRef(0);
+  useEffect(() => {
+    if (scrollLeft <= 0 && prevScrollLeftForLayoutRef.current > 0 && !foldMode) {
+      layoutOriginRef.current = { blockLeft: 0, bleedLeft: 0 };
+      syncLayoutCaps();
+    }
+    prevScrollLeftForLayoutRef.current = scrollLeft;
+  }, [foldMode, scrollLeft, syncLayoutCaps]);
+
+  useEffect(() => {
+    const prevWidth = prevCanvasWidthRef.current;
+    const prevMaxScrollLeft = prevMaxScrollLeftRef.current;
+    const widthGrew = prevWidth > 0 && canvasWidth > prevWidth;
+    const wasAtScrollEnd = prevMaxScrollLeft > 0 && scrollLeftRef.current >= prevMaxScrollLeft - 1;
+
+    if (widthGrew && wasAtScrollEnd && exceedsExtendWidth) {
+      setFoldMode(true);
+      pendingFoldScrollRef.current = true;
+    }
+
+    prevCanvasWidthRef.current = canvasWidth;
+    prevMaxScrollLeftRef.current = isFrozenScroll
+      ? Math.max(0, canvasWidth - maxBleedWidth)
+      : contentMaxScrollLeft;
+  }, [canvasWidth, contentMaxScrollLeft, exceedsExtendWidth, isFrozenScroll, maxBleedWidth, maxScrollLeft]);
+
+  useEffect(() => {
+    if (scrollLeft <= 0) {
+      setFoldMode(false);
+      pendingFoldScrollRef.current = false;
+    }
+  }, [scrollLeft]);
+
+  useEffect(() => {
+    if (!foldMode || !pendingFoldScrollRef.current) return;
+    pendingFoldScrollRef.current = false;
+    applyScrollLeft(maxScrollLeft);
+  }, [applyScrollLeft, foldMode, maxScrollLeft]);
+
+  useEffect(() => {
+    if (scrollLeftRef.current > maxScrollLeft) {
+      applyScrollLeft(maxScrollLeft);
+    }
+  }, [applyScrollLeft, maxScrollLeft]);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      const delta = event.shiftKey
+        ? event.deltaY
+        : (Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : 0);
+      if (!delta || maxScrollLeft <= 0) return;
+      event.preventDefault();
+      applyScrollLeft(scrollLeftRef.current + delta);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [applyScrollLeft, maxScrollLeft]);
+
+  const handleHTrackPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (maxScrollLeft <= 0 || hTrackRef.current == null) return;
+    if ((event.target as HTMLElement).classList.contains('base-grid-hscroll__thumb')) return;
+    const rect = hTrackRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const clickX = event.clientX - rect.left;
+    const { thumbWidth, travel } = hScrollMetrics;
+    const effectiveTravel = travel > 0 ? travel : Math.max(1, rect.width - thumbWidth);
+    const nextLeft = Math.max(0, Math.min(clickX - thumbWidth / 2, effectiveTravel));
+    applyScrollLeft((nextLeft / effectiveTravel) * maxScrollLeft);
+  };
+
+  const handleHThumbPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (maxScrollLeft <= 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    hThumbDragRef.current = { startX: event.clientX, startScrollLeft: scrollLeftRef.current };
+    setHThumbDragging(true);
+  };
+
+  const handleHThumbPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = hThumbDragRef.current;
+    if (!drag || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const rect = hTrackRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || maxScrollLeft <= 0) return;
+    const { thumbWidth } = hScrollMetrics;
+    const effectiveTravel = Math.max(1, rect.width - thumbWidth);
+    const deltaScroll = ((event.clientX - drag.startX) / effectiveTravel) * maxScrollLeft;
+    applyScrollLeft(drag.startScrollLeft + deltaScroll);
+  };
+
+  const finishHThumbDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    hThumbDragRef.current = null;
+    setHThumbDragging(false);
+  };
 
   const addFromAddRow = (column: GridColumn | null) => {
     if (activeView.locked) return;
@@ -442,19 +908,32 @@ export function BitableGridView({
 
   useEffect(() => {
     if (!fieldMenu) return;
-    const close = (event: globalThis.MouseEvent) => {
-      if (!(event.target instanceof Node)) return;
-      if (menuRef.current?.contains(event.target)) return;
-      setFieldMenu(null);
+    let removeListener: (() => void) | null = null;
+    const timer = window.setTimeout(() => {
+      const close = (event: globalThis.MouseEvent) => {
+        if (Date.now() - fieldMenuOpenAtRef.current < 250) return;
+        if (!(event.target instanceof Node)) return;
+        if (event.target instanceof Element) {
+          if (event.target.closest('.base-grid-field-menu')) return;
+          if (event.target.closest('.base-grid-field-chevron')) return;
+          if (event.target.closest('.base-grid-overlay-header')) return;
+        }
+        setFieldMenu(null);
+      };
+      document.addEventListener('mousedown', close);
+      removeListener = () => document.removeEventListener('mousedown', close);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      removeListener?.();
     };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
   }, [fieldMenu]);
 
   useEffect(() => {
     if (!selectEditor) return;
     const close = (event: globalThis.MouseEvent) => {
       if (!(event.target instanceof Node)) return;
+      if (selectEditorRef.current?.contains(event.target)) return;
       if (shellRef.current?.contains(event.target)) return;
       setSelectEditor(null);
     };
@@ -474,14 +953,16 @@ export function BitableGridView({
   }, [cellContextMenu]);
 
   useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, [editingCell?.recordId, editingCell?.fieldId]);
-
-  useEffect(() => {
     if (!selectAllRef.current) return;
     selectAllRef.current.indeterminate = isPartiallySelected;
   }, [isPartiallySelected]);
+
+  useEffect(() => {
+    if (!selectedCell) return;
+    if (!displayRecords.some(record => record.id === selectedCell.recordId)) {
+      setSelectedCell(null);
+    }
+  }, [displayRecords, selectedCell]);
 
   useEffect(() => {
     onFocusedRecordChange?.(selectedCell?.recordId ?? null);
@@ -502,22 +983,35 @@ export function BitableGridView({
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-    records.forEach((record, rowIndex) => {
+    displayRecords.forEach((record, rowIndex) => {
       if (selectedIds.has(record.id)) {
         ctx.fillStyle = '#e8f3ff';
-        ctx.fillRect(0, HEADER_HEIGHT + rowIndex * ROW_HEIGHT, dataWidth, ROW_HEIGHT);
+        ctx.fillRect(0, HEADER_HEIGHT + rowIndex * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
       }
     });
 
     if (rowDrag) {
+      const fromRecord = displayRecords[rowDrag.fromIndex];
+      if (fromRecord) {
+        const fromRecordsIndex = records.findIndex(record => record.id === fromRecord.id);
+        if (fromRecordsIndex >= 0) {
+          const subtreeIds = getRecordSubtreeIds(records, fromRecordsIndex);
+          displayRecords.forEach((record, rowIndex) => {
+            if (subtreeIds.has(record.id)) {
+              ctx.fillStyle = 'rgba(51, 112, 255, 0.1)';
+              ctx.fillRect(0, HEADER_HEIGHT + rowIndex * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
+            }
+          });
+        }
+      }
       const markerY = HEADER_HEIGHT + rowDrag.overIndex * ROW_HEIGHT;
       ctx.fillStyle = '#3370ff';
-      ctx.fillRect(0, markerY - 1, dataWidth, 2);
+      ctx.fillRect(0, markerY - 1, gridContentRight, 2);
     }
 
-    if (hoverRow != null && hoverRow >= 0 && hoverRow < records.length && !selectedIds.has(records[hoverRow].id)) {
+    if (hoverRow != null && hoverRow >= 0 && hoverRow < displayRecords.length && !selectedIds.has(displayRecords[hoverRow].id)) {
       ctx.fillStyle = '#f2f3f5';
-      ctx.fillRect(0, HEADER_HEIGHT + hoverRow * ROW_HEIGHT, dataWidth, ROW_HEIGHT);
+      ctx.fillRect(0, HEADER_HEIGHT + hoverRow * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
     }
 
     if (hoverHeaderFieldId) {
@@ -531,20 +1025,27 @@ export function BitableGridView({
     ctx.strokeStyle = '#dee0e3';
     ctx.lineWidth = 1;
     ctx.beginPath();
+    const addRowTop = HEADER_HEIGHT + addRowIndex * ROW_HEIGHT;
     const verticals = [0, ...columns.map(column => column.left + column.width)];
     verticals.forEach(x => {
       const crisp = Math.round(x) + 0.5;
+      const isLeftEdge = Math.round(x) <= 0;
       ctx.moveTo(crisp, 0);
-      ctx.lineTo(crisp, canvasHeight);
+      ctx.lineTo(crisp, isLeftEdge ? canvasHeight : addRowTop);
     });
-    for (let row = 0; row <= rowCount + 2; row += 1) {
+    for (let row = 0; row <= rowCount; row += 1) {
       const y = Math.round(HEADER_HEIGHT + row * ROW_HEIGHT) + 0.5;
       ctx.moveTo(0, y);
-      ctx.lineTo(dataWidth, y);
+      ctx.lineTo(gridContentRight, y);
     }
     ctx.moveTo(0.5, 0.5);
-    ctx.lineTo(dataWidth - 0.5, 0.5);
+    ctx.lineTo(gridContentRight - 0.5, 0.5);
     ctx.stroke();
+
+    if (hoverAddFieldHeader) {
+      ctx.fillStyle = '#f5f8ff';
+      ctx.fillRect(dataWidth, 0, ADD_FIELD_WIDTH, HEADER_HEIGHT);
+    }
 
     columns.forEach(column => {
       if (hoverResizeFieldId === column.field.id || activeResize?.fieldId === column.field.id) {
@@ -567,13 +1068,18 @@ export function BitableGridView({
 
     ctx.font = '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     ctx.textBaseline = 'middle';
-    records.forEach((record, rowIndex) => {
+    displayRecords.forEach((record, rowIndex) => {
       const y = HEADER_HEIGHT + rowIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
+      const rowTop = HEADER_HEIGHT + rowIndex * ROW_HEIGHT;
+      const meta = treeMeta[rowIndex];
       ctx.font = '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
       columns.forEach(column => {
         const text = column.field.type === 'attachment'
           ? attachmentCellLabel(record, column.field.id)
           : valueText(record.fields[column.field.id]);
+        if (column.field.id === table.primaryFieldId && meta) {
+          drawRecordTreeGuides(ctx, column.left, rowTop, ROW_HEIGHT, meta, collapsedRecordIds.has(record.id));
+        }
         if (isSelectField(column.field)) {
           const values = getSelectValues(record, column.field);
           const isSelected = selectedCell?.recordId === record.id && selectedCell?.fieldId === column.field.id;
@@ -581,44 +1087,95 @@ export function BitableGridView({
           const isHovered = hoverCell?.rowIndex === rowIndex && hoverCell?.fieldId === column.field.id;
           if (values.length || isSelected || isEditingSelect || isHovered) drawChevron(ctx, column.left + column.width - 14, y);
         } else {
-          ctx.fillStyle = column.field.type === 'attachment' ? '#646a73' : '#1f2329';
-          drawText(ctx, text, column.left + 10, y, column.width - 20);
+          const isEditingCell = editingCell?.recordId === record.id && editingCell?.fieldId === column.field.id;
+          if (!isEditingCell) {
+            ctx.fillStyle = column.field.type === 'attachment' ? '#646a73' : '#1f2329';
+            const textInset = cellTextInset(column, meta, table.primaryFieldId);
+            const textX = column.left + textInset;
+            drawText(ctx, text, textX, y, column.width - textInset - PRIMARY_CELL_PADDING);
+          }
         }
       });
     });
 
-    if (selectedCell) {
+    if (selectedCell && !editingCell) {
       const column = columns.find(item => item.field.id === selectedCell.fieldId);
       if (column) {
-        const x = Math.round(column.left);
+        const meta = treeMeta[selectedCell.rowIndex];
+        const isPrimaryField = column.field.id === table.primaryFieldId;
+        const layout = getCellEditorLayout(column, meta, isPrimaryField);
+        const x = Math.round(layout.left);
         const y = Math.round(HEADER_HEIGHT + selectedCell.rowIndex * ROW_HEIGHT);
         ctx.strokeStyle = '#3370ff';
         ctx.lineWidth = 2;
-        ctx.strokeRect(x + 1, y + 1, column.width - 2, ROW_HEIGHT - 2);
+        ctx.strokeRect(x + 1, y + 1, layout.width - 2, ROW_HEIGHT - 2);
       }
     }
 
     if (hoverAddRow) {
       ctx.fillStyle = '#f8f9fa';
-      ctx.fillRect(0, HEADER_HEIGHT + addRowIndex * ROW_HEIGHT, dataWidth, ROW_HEIGHT);
+      ctx.fillRect(0, HEADER_HEIGHT + addRowIndex * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
     }
 
-    const indexCenterX = INDEX_WIDTH / 2;
-    const addRowY = HEADER_HEIGHT + addRowIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#8f959e';
-    ctx.font = '16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    ctx.fillText('+', indexCenterX, addRowY);
-    ctx.textAlign = 'left';
+    if (isFrozenScroll && frozenCanvasRef.current) {
+      const frozen = frozenCanvasRef.current;
+      const fDpr = window.devicePixelRatio || 1;
+      const frozenWidth = INDEX_WIDTH + (columns[0]?.width ?? DEFAULT_FIELD_WIDTH);
+      frozen.width = Math.round(frozenWidth * fDpr);
+      frozen.height = Math.round(canvasHeight * fDpr);
+      frozen.style.width = `${frozenWidth}px`;
+      frozen.style.height = `${canvasHeight}px`;
+      const fCtx = frozen.getContext('2d');
+      if (fCtx) {
+        fCtx.setTransform(fDpr, 0, 0, fDpr, 0, 0);
+        fCtx.clearRect(0, 0, frozenWidth, canvasHeight);
+        fCtx.drawImage(
+          canvas,
+          0,
+          0,
+          frozenWidth * fDpr,
+          canvasHeight * fDpr,
+          0,
+          0,
+          frozenWidth,
+          canvasHeight,
+        );
+      }
+    }
 
-  }, [activeResize, addRowIndex, canvasHeight, canvasWidth, dataWidth, columns, gridBodyBottom, hoverAddRow, hoverCell, hoverHeaderFieldId, hoverResizeFieldId, hoverRow, records, rowCount, rowDrag, selectEditor, selectedCell, selectedIds]);
+  }, [activeResize, addRowIndex, canvasHeight, canvasWidth, collapsedRecordIds, columns, dataWidth, displayRecords, editingCell, gridBodyBottom, gridContentRight, hoverAddFieldHeader, hoverAddRow, hoverCell, hoverHeaderFieldId, hoverResizeFieldId, hoverRow, isFrozenScroll, records, rowCount, rowDrag, scrollLeft, selectEditor, selectedCell, selectedIds, table.primaryFieldId, treeMeta]);
 
   const commitEditingCell = () => {
-    if (!editingCell) return;
-    changeCell(editingCell.recordId, editingCell.fieldId, editingCell.value);
+    const current = editingCellRef.current;
+    if (!current) return;
+    changeCell(current.recordId, current.fieldId, current.value);
     setEditingCell(null);
   };
+
+  const beginTextEdit = (
+    record: BaseRecord,
+    column: GridColumn,
+    rowIndex: number,
+    value?: string,
+  ) => {
+    if (activeView.locked || column.field.type === 'attachment' || isSelectField(column.field)) return;
+    const meta = treeMeta[rowIndex];
+    const isPrimaryField = column.field.id === table.primaryFieldId;
+    const layout = getCellEditorLayout(column, meta, isPrimaryField);
+    setEditingCell({
+      recordId: record.id,
+      fieldId: column.field.id,
+      left: layout.left,
+      top: HEADER_HEIGHT + rowIndex * ROW_HEIGHT,
+      width: layout.width,
+      paddingLeft: layout.paddingLeft,
+      paddingRight: layout.paddingRight,
+      value: value ?? valueText(record.fields[column.field.id]),
+    });
+  };
+
+  editingCellRef.current = editingCell;
+  selectedCellRef.current = selectedCell;
 
   const openSelectEditor = (record: BaseRecord, column: GridColumn, rowIndex: number) => {
     if (activeView.locked) return;
@@ -626,18 +1183,32 @@ export function BitableGridView({
       recordId: record.id,
       fieldId: column.field.id,
       left: column.left,
-      top: HEADER_HEIGHT + rowIndex * ROW_HEIGHT + ROW_HEIGHT,
+      top: HEADER_HEIGHT + rowIndex * ROW_HEIGHT,
       width: column.width,
       value: valueText(record.fields[column.field.id]),
       query: '',
     });
   };
 
-  const openFieldMenuAt = (fieldId: string, menuLeft: number, menuTop: number, columnLeft: number) => {
-    setFieldMenu(current => current?.fieldId === fieldId
-      ? null
-      : { fieldId, left: Math.max(0, menuLeft - 170), top: menuTop + 6, columnLeft });
+  const openFieldMenuAt = (
+    fieldId: string,
+    clientX: number,
+    clientY: number,
+    columnLeft: number,
+    toggle = true,
+  ) => {
+    const isPrimary = fieldId === table.primaryFieldId;
+    const { left, top } = computeFieldMenuViewportPosition(clientX, clientY, isPrimary);
+    fieldMenuOpenAtRef.current = Date.now();
+    setCellContextMenu(null);
+    setSelectEditor(null);
+    setFieldMenu(current => {
+      if (toggle && current?.fieldId === fieldId) return null;
+      return { fieldId, left, top, columnLeft };
+    });
   };
+
+  const fieldMenuPortalRoot = wrapRef.current?.closest<HTMLElement>('.feishu-bitable-block') ?? document.body;
 
   const clearSelectValue = (record: BaseRecord, field: BaseField, valueToRemove: string) => {
     if (field.type === 'single_select') {
@@ -648,24 +1219,105 @@ export function BitableGridView({
   };
 
   const startEditing = (record: BaseRecord, column: GridColumn, rowIndex: number) => {
-    if (activeView.locked || column.field.type === 'attachment' || isSelectField(column.field)) return;
-    setEditingCell({
-      recordId: record.id,
-      fieldId: column.field.id,
-      left: column.left,
-      top: HEADER_HEIGHT + rowIndex * ROW_HEIGHT,
-      width: column.width,
-      value: valueText(record.fields[column.field.id]),
-    });
+    beginTextEdit(record, column, rowIndex);
   };
+
+  useEffect(() => {
+    if (!editingCell) return;
+    suppressBlurCommitRef.current = true;
+    const focusInput = () => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus({ preventScroll: true });
+      const length = input.value.length;
+      input.setSelectionRange(length, length);
+      suppressBlurCommitRef.current = false;
+    };
+    const frame = requestAnimationFrame(() => {
+      requestAnimationFrame(focusInput);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [editingCell?.recordId, editingCell?.fieldId]);
+
+  useEffect(() => {
+    if (activeView.locked || selectEditor) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const currentEdit = editingCellRef.current;
+      const currentSelect = selectedCellRef.current;
+      if (!currentEdit && !currentSelect) return;
+
+      const target = event.target;
+      if (target instanceof HTMLInputElement && target.classList.contains('base-grid-select-editor__search')) return;
+      if (target instanceof HTMLInputElement && target.classList.contains('base-grid-cell-editor')) return;
+
+      const isPrintable = event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+
+      if (event.key === 'Escape') {
+        if (currentEdit) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          setEditingCell(null);
+        }
+        return;
+      }
+
+      if (!currentEdit && currentSelect && (isPrintable || event.key === 'Enter' || event.key === 'F2')) {
+        const record = displayRecords[currentSelect.rowIndex];
+        const column = columns.find(item => item.field.id === currentSelect.fieldId);
+        if (!record || !column || column.field.type === 'attachment' || isSelectField(column.field)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (isPrintable) {
+          beginTextEdit(record, column, currentSelect.rowIndex, event.key);
+        } else {
+          beginTextEdit(record, column, currentSelect.rowIndex);
+        }
+        return;
+      }
+
+      if (currentEdit && isPrintable) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setEditingCell(current => {
+          if (!current) return current;
+          return { ...current, value: current.value + event.key };
+        });
+        requestAnimationFrame(() => {
+          const input = inputRef.current;
+          if (!input) return;
+          input.focus({ preventScroll: true });
+          const length = input.value.length;
+          input.setSelectionRange(length, length);
+        });
+        return;
+      }
+
+      if (currentEdit && event.key === 'Backspace') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setEditingCell(current => {
+          if (!current) return current;
+          return { ...current, value: current.value.slice(0, -1) };
+        });
+        requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+        return;
+      }
+
+      if (currentEdit && (event.key === 'Delete' || event.key === 'Enter')) {
+        event.stopImmediatePropagation();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [activeView.locked, selectEditor, displayRecords, columns, treeMeta, table.primaryFieldId]);
 
   useEffect(() => {
     const pending = pendingCellFocusRef.current;
     if (!pending) return;
-    const rowIndex = records.findIndex(record => record.id === pending.recordId);
+    const rowIndex = displayRecords.findIndex(record => record.id === pending.recordId);
     if (rowIndex < 0) return;
     const column = columns.find(item => item.field.id === pending.fieldId);
-    const record = records[rowIndex];
+    const record = displayRecords[rowIndex];
     if (!column || !record) return;
     pendingCellFocusRef.current = null;
     setSelectedCell({ recordId: record.id, fieldId: column.field.id, rowIndex });
@@ -678,10 +1330,10 @@ export function BitableGridView({
       return;
     }
     startEditing(record, column, rowIndex);
-  }, [records, columns]);
+  }, [displayRecords, columns]);
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const point = pointFromCanvas(event);
+    const point = pointFromCanvas(event, canvasScrollOffsetX);
     if (activeResize) {
       const width = clampWidth(activeResize.startWidth + event.clientX - activeResize.startX);
       setActiveResize(current => current ? { ...current, width } : current);
@@ -691,19 +1343,26 @@ export function BitableGridView({
     setHoverResizeFieldId(resizeColumn?.field.id || null);
     if (point.y < HEADER_HEIGHT && point.x < dataWidth) {
       setHoverHeaderFieldId(findColumn(columns, point.x)?.field.id ?? null);
+      setHoverAddFieldHeader(false);
+    } else if (point.y < HEADER_HEIGHT && point.x >= dataWidth && point.x < gridContentRight) {
+      setHoverHeaderFieldId(null);
+      setHoverAddFieldHeader(true);
+      event.currentTarget.style.cursor = 'pointer';
     } else {
       setHoverHeaderFieldId(null);
+      setHoverAddFieldHeader(false);
     }
     const rowIndex = Math.floor((point.y - HEADER_HEIGHT) / ROW_HEIGHT);
-    if (point.y >= HEADER_HEIGHT && rowIndex === addRowIndex) {
+    if (point.y >= HEADER_HEIGHT && rowIndex === addRowIndex && point.x < gridContentRight) {
       setHoverAddRow(true);
       setHoverRow(null);
       setHoverCell(null);
-      event.currentTarget.style.cursor = point.x < INDEX_WIDTH ? 'pointer' : 'default';
+      setHoverAddFieldHeader(false);
+      event.currentTarget.style.cursor = 'pointer';
       return;
     }
     setHoverAddRow(false);
-    const nextHoverRow = point.y >= HEADER_HEIGHT && rowIndex >= 0 && rowIndex < records.length ? rowIndex : null;
+    const nextHoverRow = point.y >= HEADER_HEIGHT && rowIndex >= 0 && rowIndex < displayRecords.length ? rowIndex : null;
     setHoverRow(nextHoverRow);
     if (nextHoverRow != null && point.x >= INDEX_WIDTH && point.x < dataWidth) {
       const column = findColumn(columns, point.x);
@@ -720,6 +1379,7 @@ export function BitableGridView({
       setHoverRow(null);
       setHoverCell(null);
       setHoverAddRow(false);
+      setHoverAddFieldHeader(false);
       setHoverHeaderFieldId(null);
       setHoverResizeFieldId(null);
       event.currentTarget.style.cursor = 'default';
@@ -728,7 +1388,9 @@ export function BitableGridView({
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) return;
-    const point = pointFromCanvas(event);
+    event.preventDefault();
+    event.stopPropagation();
+    const point = pointFromCanvas(event, canvasScrollOffsetX);
     const resizeColumn = point.y < gridBodyBottom ? findResizeColumn(columns, point.x) : null;
     if (resizeColumn) {
       event.preventDefault();
@@ -741,14 +1403,23 @@ export function BitableGridView({
     setFieldMenu(null);
     setSelectEditor(null);
     setCellContextMenu(null);
-    if (point.y < HEADER_HEIGHT) return;
+    if (point.y < HEADER_HEIGHT) {
+      if (point.x >= dataWidth && point.x < gridContentRight && !activeView.locked) {
+        openAddFieldPanelAt({
+          left: event.clientX - 320,
+          top: event.clientY + 4,
+        });
+      }
+      return;
+    }
     const rowIndex = Math.floor((point.y - HEADER_HEIGHT) / ROW_HEIGHT);
     if (rowIndex < 0) return;
     if (rowIndex === addRowIndex) {
-      if (point.x < INDEX_WIDTH) addFromAddRow(null);
+      if (point.x < gridContentRight) addFromAddRow(null);
       return;
     }
-    const record = records[rowIndex];
+    if (rowIndex >= displayRecords.length) return;
+    const record = displayRecords[rowIndex];
     if (point.x < INDEX_WIDTH) {
       setSelectedCell(null);
       return;
@@ -759,6 +1430,14 @@ export function BitableGridView({
     }
     const column = findColumn(columns, point.x);
     if (!column) return;
+    const meta = treeMeta[rowIndex];
+    if (isTreeToggleHit(point, column, rowIndex, table.primaryFieldId, meta)) {
+      toggleRecordCollapse(record.id);
+      return;
+    }
+    const isSameSelected = selectedCell?.recordId === record.id
+      && selectedCell?.fieldId === column.field.id
+      && selectedCell?.rowIndex === rowIndex;
     setSelectedCell({ recordId: record.id, fieldId: column.field.id, rowIndex });
     if (column.field.type === 'attachment') {
       pickFiles(record.id, column.field.id);
@@ -768,40 +1447,85 @@ export function BitableGridView({
       openSelectEditor(record, column, rowIndex);
       return;
     }
-    startEditing(record, column, rowIndex);
+    if (isSameSelected) {
+      startEditing(record, column, rowIndex);
+    }
   };
 
-  const handleContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {
+  const openRowContextMenu = (
+    recordId: string,
+    rowIndex: number,
+    clientX: number,
+    clientY: number,
+    fieldId?: string,
+  ) => {
+    if (editingCell) commitEditingCell();
+    setSelectEditor(null);
+    setFieldMenu(null);
+    if (fieldId) {
+      setSelectedCell({ recordId, fieldId, rowIndex });
+    }
+    setCellContextMenu({
+      recordId,
+      rowIndex,
+      left: clientX,
+      top: clientY,
+    });
+  };
+
+  const gridPointFromClient = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: clientX - rect.left + canvasScrollOffsetX,
+      y: clientY - rect.top,
+    };
+  };
+
+  const handleGridContextMenu = (event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    if (editingCell) commitEditingCell();
-    setFieldMenu(null);
-    setSelectEditor(null);
 
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const point = gridPointFromClient(event.clientX, event.clientY);
+    if (!point) return;
 
-    if (y < HEADER_HEIGHT) return;
-
-    const rowIndex = Math.floor((y - HEADER_HEIGHT) / ROW_HEIGHT);
-    if (rowIndex < 0 || rowIndex >= records.length) return;
-
-    const record = records[rowIndex];
-    const column = findColumn(columns, x);
-    if (column) {
-      setSelectedCell({ recordId: record.id, fieldId: column.field.id, rowIndex });
+    if (point.y < HEADER_HEIGHT) {
+      if (point.x >= dataWidth && point.x < gridContentRight) return;
+      const column = findColumn(columns, point.x);
+      if (column) {
+        openFieldMenuAt(column.field.id, event.clientX, event.clientY, column.left, false);
+      }
+      return;
     }
 
-    const shellRect = shellRef.current?.getBoundingClientRect();
-    if (shellRect) {
-      setCellContextMenu({
-        recordId: record.id,
-        rowIndex,
-        left: event.clientX - shellRect.left,
-        top: event.clientY - shellRect.top,
-      });
-    }
+    const rowIndex = Math.floor((point.y - HEADER_HEIGHT) / ROW_HEIGHT);
+    if (rowIndex < 0 || rowIndex >= displayRecords.length) return;
+
+    const record = displayRecords[rowIndex];
+    const column = findColumn(columns, point.x);
+    openRowContextMenu(
+      record.id,
+      rowIndex,
+      event.clientX,
+      event.clientY,
+      column?.field.id,
+    );
+  };
+
+  const handleIndexRowContextMenu = (
+    event: React.MouseEvent,
+    record: BaseRecord,
+    rowIndex: number,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openRowContextMenu(record.id, rowIndex, event.clientX, event.clientY);
+  };
+
+  const suppressBrowserContextMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   const handlePointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -817,8 +1541,8 @@ export function BitableGridView({
     const canvasRect = canvasView?.getBoundingClientRect();
     const position: GridFieldMenuPosition | undefined = fieldMenu && canvasRect
       ? {
-          left: (shellRect?.left || 0) + fieldMenu.left,
-          top: (shellRect?.top || 0) + fieldMenu.top,
+          left: fieldMenu.left,
+          top: fieldMenu.top,
           anchorLeft: canvasRect.left + fieldMenu.columnLeft,
           anchorTop: canvasRect.top,
         }
@@ -830,143 +1554,238 @@ export function BitableGridView({
   const selectField = selectEditor ? visibleFields.find(field => field.id === selectEditor.fieldId) : null;
   const selectRecord = selectEditor ? records.find(record => record.id === selectEditor.recordId) : null;
   const selectChoices = selectField?.options?.choices?.filter(choice => choice.name.trim()) ?? [];
+  const selectQuery = selectEditor?.query.trim() ?? '';
   const filteredSelectChoices = selectEditor
-    ? selectChoices.filter(choice => choice.name.toLowerCase().includes(selectEditor.query.trim().toLowerCase()))
+    ? selectChoices.filter(choice => choice.name.toLowerCase().includes(selectQuery.toLowerCase()))
     : [];
+  const hasExactSelectMatch = Boolean(
+    selectQuery && selectChoices.some(choice => choice.name.toLowerCase() === selectQuery.toLowerCase()),
+  );
+  const showCreateSelectOption = Boolean(
+    selectQuery && !hasExactSelectMatch && !activeView.locked && addSelectChoice,
+  );
+
+  const applySelectChoice = (choiceName: string, closeEditor = true) => {
+    if (!selectEditor || !selectField) return;
+    if (selectField.type === 'multi_select' && selectRecord) {
+      const current = getSelectValues(selectRecord, selectField);
+      const next = current.includes(choiceName)
+        ? current.filter(name => name !== choiceName)
+        : [...current, choiceName];
+      changeCell(selectEditor.recordId, selectEditor.fieldId, next);
+      if (closeEditor) setSelectEditor(null);
+      else setSelectEditor(current => current ? { ...current, query: '' } : current);
+      return;
+    }
+    changeCell(selectEditor.recordId, selectEditor.fieldId, choiceName);
+    if (closeEditor) setSelectEditor(null);
+  };
+
+  const handleCreateSelectOption = () => {
+    if (!selectEditor || !selectField || !selectQuery || !addSelectChoice) return;
+    const createdName = addSelectChoice(selectEditor.fieldId, selectQuery);
+    if (!createdName) return;
+    applySelectChoice(createdName, selectField.type !== 'multi_select');
+  };
+
   const selectEditorPortalStyle = (() => {
     if (!selectEditor) return null;
     const canvasRect = canvasRef.current?.getBoundingClientRect();
-    const width = Math.max(188, selectEditor.width);
-    const listHeight = filteredSelectChoices.length
-      ? Math.min(188, filteredSelectChoices.length * 32)
-      : 44;
-    const panelHeight = 12 + 34 + listHeight + (selectEditor.value ? 35 : 0);
+    const width = Math.max(200, selectEditor.width);
+    const listItemCount = filteredSelectChoices.length + (showCreateSelectOption ? 1 : 0);
+    const searchHeight = 36;
+    const listHeight = listItemCount > 0 ? Math.min(188, listItemCount * 32 + 4) : 0;
+    const showClear = selectField?.type === 'multi_select'
+      ? Boolean(selectRecord && getSelectValues(selectRecord, selectField).length > 0)
+      : Boolean(selectEditor.value);
+    const clearHeight = showClear ? 32 : 0;
+    const panelHeight = searchHeight + listHeight + clearHeight + (listHeight > 0 ? 1 : 0);
     const margin = 8;
     const rawLeft = (canvasRect?.left ?? 0) + selectEditor.left;
-    const rawTop = (canvasRect?.top ?? 0) + selectEditor.top + 4;
+    const cellTop = (canvasRect?.top ?? 0) + selectEditor.top;
+    const aboveTop = cellTop - panelHeight - 2;
+    const belowTop = cellTop + ROW_HEIGHT + 2;
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || rawLeft + width;
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || rawTop + panelHeight;
-    const aboveTop = (canvasRect?.top ?? 0) + selectEditor.top - ROW_HEIGHT - panelHeight - 4;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || belowTop + panelHeight;
+    const preferAbove = aboveTop >= margin;
     return {
       left: Math.max(margin, Math.min(rawLeft, viewportWidth - width - margin)),
-      top: rawTop + panelHeight > viewportHeight - margin
-        ? Math.max(margin, aboveTop)
-        : Math.max(margin, rawTop),
+      top: preferAbove
+        ? aboveTop
+        : (belowTop + panelHeight > viewportHeight - margin ? Math.max(margin, aboveTop) : belowTop),
       width,
     };
   })();
 
   return (
-    <div className="base-grid-shell" ref={shellRef}>
-      <div className="base-grid-scroll base-grid-canvas-scroll">
-        <div className="base-grid-canvas-view" style={{ width: canvasWidth, height: canvasHeight }}>
+    <div
+      className={`base-grid-wrap${hThumbDragging ? ' is-hscroll-dragging' : ''}${maxScrollLeft > 0 ? ' is-hscroll-active' : ''}`}
+      ref={wrapRef}
+      data-no-marquee-selection="true"
+      onMouseDown={event => event.stopPropagation()}
+    >
+    <div
+      className="base-grid-shell"
+      ref={shellRef}
+    >
+      <div className="base-grid-scroll base-grid-canvas-scroll" ref={canvasScrollRef}>
+        <div className={`base-grid-canvas-viewport${isFrozenScroll ? ' is-frozen-scroll' : ''}`}>
+        {isFrozenScroll && (
+          <div
+            className="base-grid-frozen-pane"
+            style={{ width: freezeWidth, height: canvasHeight }}
+            aria-hidden
+          >
+            <canvas ref={frozenCanvasRef} className="base-grid-frozen-canvas" />
+          </div>
+        )}
+        <div
+          className={`base-grid-index-rail base-grid-index-rail--pinned${isFrozenScroll ? ' is-shadow' : ''}`}
+          style={{ width: INDEX_WIDTH, height: canvasHeight }}
+        >
+          <label
+            className="base-grid-index-header"
+            style={{ width: INDEX_WIDTH, height: HEADER_HEIGHT }}
+            onMouseDown={event => event.stopPropagation()}
+            onContextMenu={suppressBrowserContextMenu}
+          >
+            <input
+              ref={selectAllRef}
+              type="checkbox"
+              className="base-grid-index-checkbox"
+              checked={isAllSelected}
+              disabled={activeView.locked || records.length === 0}
+              onChange={() => toggleAllRecordSelection()}
+              aria-label="全选"
+            />
+          </label>
+          {displayRecords.map((record, rowIndex) => {
+            const meta = treeMeta[rowIndex];
+            const displayNumber = getRootDisplayNumber(record, displayRecords, records);
+            const showControls = hoverRow === rowIndex || selectedIds.has(record.id);
+            return (
+              <div
+                key={record.id}
+                className={`base-grid-index-row${showControls ? ' is-active' : ''}${rowDrag?.overIndex === rowIndex ? ' is-drop-target' : ''}${meta.depth > 0 ? ' is-child' : ''}`}
+                style={{ top: HEADER_HEIGHT + rowIndex * ROW_HEIGHT, width: INDEX_WIDTH, height: ROW_HEIGHT }}
+                onMouseEnter={() => setHoverRow(rowIndex)}
+                onMouseLeave={() => setHoverRow(current => (current === rowIndex ? null : current))}
+                onMouseDown={event => event.stopPropagation()}
+                onContextMenu={event => handleIndexRowContextMenu(event, record, rowIndex)}
+              >
+                {showControls ? (
+                  <>
+                    <button
+                      type="button"
+                      className="base-grid-row-drag-handle"
+                      aria-label={displayNumber != null ? `拖拽第 ${displayNumber} 行` : '拖拽行'}
+                      disabled={activeView.locked}
+                      onPointerDown={event => {
+                        if (activeView.locked) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        setRowDrag({ fromIndex: rowIndex, overIndex: rowIndex });
+                      }}
+                      onPointerMove={event => {
+                        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                        const overIndex = rowIndexFromClientY(shellRef.current, event.clientY, displayRecords.length);
+                        if (overIndex == null) return;
+                        setRowDrag(current => {
+                          if (!current) return current;
+                          if (!isValidTreeDropTarget(records, displayRecords, current.fromIndex, overIndex)) {
+                            return { ...current, overIndex: current.fromIndex };
+                          }
+                          return { ...current, overIndex };
+                        });
+                      }}
+                      onPointerUp={event => {
+                        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                        event.currentTarget.releasePointerCapture(event.pointerId);
+                        setRowDrag(current => {
+                          if (current) {
+                            const fromRecord = displayRecords[current.fromIndex];
+                            const toRecord = displayRecords[current.overIndex];
+                            if (fromRecord && toRecord && isValidTreeDropTarget(records, displayRecords, current.fromIndex, current.overIndex)) {
+                              const fromIndex = records.findIndex(item => item.id === fromRecord.id);
+                              const toIndex = records.findIndex(item => item.id === toRecord.id);
+                              reorderRecords(fromIndex, toIndex);
+                            }
+                          }
+                          return null;
+                        });
+                      }}
+                      onPointerCancel={event => {
+                        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        }
+                        setRowDrag(null);
+                      }}
+                    >
+                      <span className="base-grid-row-drag-handle__dots" aria-hidden />
+                    </button>
+                    <input
+                      type="checkbox"
+                      className="base-grid-index-checkbox"
+                      checked={selectedIds.has(record.id)}
+                      disabled={activeView.locked}
+                      onChange={() => toggleRecordSelection(record.id)}
+                      aria-label={displayNumber != null ? `选择第 ${displayNumber} 行` : '选择行'}
+                    />
+                  </>
+                ) : displayNumber != null ? (
+                  <span className="base-grid-index-row__number">{displayNumber}</span>
+                ) : null}
+              </div>
+            );
+          })}
+          <BitableTooltip tip="新增记录" placement="top">
+            <button
+              type="button"
+              className="base-grid-add-row-hit base-grid-add-row-hit--footer base-grid-add-row-hit--index"
+              style={{
+                top: HEADER_HEIGHT + addRowIndex * ROW_HEIGHT,
+                left: 0,
+                width: INDEX_WIDTH,
+                height: ROW_HEIGHT,
+              }}
+              aria-label="新增记录"
+              disabled={activeView.locked}
+              onMouseDown={event => event.stopPropagation()}
+              onContextMenu={suppressBrowserContextMenu}
+              onClick={() => addFromAddRow(null)}
+            />
+          </BitableTooltip>
+        </div>
+        <div
+          className="base-grid-scroll-pane"
+          style={isFrozenScroll ? { marginLeft: freezeWidth, width: `calc(100% - ${freezeWidth}px)` } : undefined}
+        >
+        <div
+          className="base-grid-canvas-view"
+          style={{
+            width: canvasWidth,
+            height: canvasHeight,
+            transform: canvasScrollOffsetX ? `translate3d(${-canvasScrollOffsetX}px, 0, 0)` : undefined,
+          }}
+          onContextMenu={handleGridContextMenu}
+        >
           <canvas
             className="base-grid-canvas"
             ref={canvasRef}
             role="grid"
             aria-label="多维表格"
+            onMouseDown={event => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
             onPointerMove={handlePointerMove}
             onPointerLeave={handlePointerLeave}
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
-            onContextMenu={handleContextMenu}
           />
           <div className="base-grid-over-layer">
-            <div className="base-grid-index-rail" style={{ width: INDEX_WIDTH, height: canvasHeight }}>
-              <label
-                className="base-grid-index-header"
-                style={{ width: INDEX_WIDTH, height: HEADER_HEIGHT }}
-                onMouseDown={event => event.stopPropagation()}
-              >
-                <input
-                  ref={selectAllRef}
-                  type="checkbox"
-                  className="base-grid-index-checkbox"
-                  checked={isAllSelected}
-                  disabled={activeView.locked || records.length === 0}
-                  onChange={() => toggleAllRecordSelection()}
-                  aria-label="全选"
-                />
-              </label>
-              {records.map((record, rowIndex) => {
-                const showControls = hoverRow === rowIndex || selectedIds.has(record.id);
-                return (
-                  <div
-                    key={record.id}
-                    className={`base-grid-index-row${showControls ? ' is-active' : ''}${rowDrag?.overIndex === rowIndex ? ' is-drop-target' : ''}`}
-                    style={{ top: HEADER_HEIGHT + rowIndex * ROW_HEIGHT, width: INDEX_WIDTH, height: ROW_HEIGHT }}
-                    onMouseEnter={() => setHoverRow(rowIndex)}
-                    onMouseLeave={() => setHoverRow(current => (current === rowIndex ? null : current))}
-                    onMouseDown={event => event.stopPropagation()}
-                  >
-                    {showControls ? (
-                      <>
-                        <button
-                          type="button"
-                          className="base-grid-row-drag-handle"
-                          aria-label={`拖拽第 ${rowIndex + 1} 行`}
-                          disabled={activeView.locked}
-                          onPointerDown={event => {
-                            if (activeView.locked) return;
-                            event.preventDefault();
-                            event.stopPropagation();
-                            event.currentTarget.setPointerCapture(event.pointerId);
-                            setRowDrag({ fromIndex: rowIndex, overIndex: rowIndex });
-                          }}
-                          onPointerMove={event => {
-                            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-                            const overIndex = rowIndexFromClientY(shellRef.current, event.clientY, records.length);
-                            if (overIndex == null) return;
-                            setRowDrag(current => current ? { ...current, overIndex } : current);
-                          }}
-                          onPointerUp={event => {
-                            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-                            event.currentTarget.releasePointerCapture(event.pointerId);
-                            setRowDrag(current => {
-                              if (current) reorderRecords(current.fromIndex, current.overIndex);
-                              return null;
-                            });
-                          }}
-                          onPointerCancel={event => {
-                            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                              event.currentTarget.releasePointerCapture(event.pointerId);
-                            }
-                            setRowDrag(null);
-                          }}
-                        >
-                          <span className="base-grid-row-drag-handle__dots" aria-hidden />
-                        </button>
-                        <input
-                          type="checkbox"
-                          className="base-grid-index-checkbox"
-                          checked={selectedIds.has(record.id)}
-                          disabled={activeView.locked}
-                          onChange={() => toggleRecordSelection(record.id)}
-                          aria-label={`选择第 ${rowIndex + 1} 行`}
-                        />
-                      </>
-                    ) : (
-                      <span className="base-grid-index-row__number">{rowIndex + 1}</span>
-                    )}
-                  </div>
-                );
-              })}
-              <button
-                type="button"
-                className="base-grid-add-row-hit base-grid-add-row-hit--footer"
-                style={{
-                  top: HEADER_HEIGHT + addRowIndex * ROW_HEIGHT,
-                  left: 0,
-                  width: INDEX_WIDTH,
-                  height: ROW_HEIGHT,
-                }}
-                aria-label="新增记录"
-                disabled={activeView.locked}
-                onMouseDown={event => event.stopPropagation()}
-                onClick={() => addFromAddRow(null)}
-              />
-            </div>
             {columns.map(column => (
               <div
                 key={column.field.id}
@@ -978,22 +1797,67 @@ export function BitableGridView({
                   primaryFieldId={table.primaryFieldId}
                   isMenuOpen={fieldMenu?.fieldId === column.field.id}
                   onMenuClick={event => {
-                    const shellRect = shellRef.current?.getBoundingClientRect();
-                    const left = shellRect ? event.clientX - shellRect.left : column.left;
-                    openFieldMenuAt(column.field.id, left, HEADER_HEIGHT, column.left);
+                    openFieldMenuAt(column.field.id, event.clientX, event.clientY, column.left, false);
+                  }}
+                  onHeaderContextMenu={event => {
+                    openFieldMenuAt(column.field.id, event.clientX, event.clientY, column.left, false);
                   }}
                 />
               </div>
             ))}
-            <button
-              type="button"
-              className="base-grid-overlay-header-add"
-              style={{ left: dataWidth, top: 0, width: ADD_FIELD_WIDTH, height: HEADER_HEIGHT }}
-              aria-label="新增字段"
-              onClick={addField}
+            <div
+              className={`base-grid-add-field-column${hoverAddFieldHeader ? ' is-hovered' : ''}`}
+              style={{
+                left: dataWidth,
+                top: 0,
+                width: ADD_FIELD_WIDTH,
+                height: canvasHeight,
+              }}
             >
-              +
-            </button>
+              <BitableTooltip tip="新增字段" placement="bottom">
+                <button
+                  type="button"
+                  className="base-grid-add-field-column__header"
+                  aria-label="新增字段"
+                  disabled={activeView.locked}
+                  onMouseDown={event => event.stopPropagation()}
+                  onClick={event => {
+                    event.stopPropagation();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    openAddFieldPanelAt({
+                      left: rect.right - 320,
+                      top: rect.bottom + 4,
+                    });
+                  }}
+                >
+                  +
+                </button>
+              </BitableTooltip>
+            </div>
+            {(() => {
+              const primaryColumn = columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
+              if (!primaryColumn) return null;
+              return displayRecords.map((record, rowIndex) => {
+                const meta = treeMeta[rowIndex];
+                if (!meta?.hasChildren) return null;
+                const isCollapsed = collapsedRecordIds.has(record.id);
+                return (
+                  <button
+                    key={`tree-toggle-${record.id}`}
+                    type="button"
+                    tabIndex={-1}
+                    className={`base-grid-tree-toggle${isCollapsed ? ' is-collapsed' : ''}`}
+                    style={{
+                      left: primaryColumn.left + TREE_TOGGLE_LEFT,
+                      top: HEADER_HEIGHT + rowIndex * ROW_HEIGHT + (ROW_HEIGHT - TREE_TOGGLE_SIZE) / 2,
+                    }}
+                    aria-hidden
+                  >
+                    <span className="base-grid-tree-toggle__icon" aria-hidden />
+                  </button>
+                );
+              });
+            })()}
             {selectedCell && !editingCell && !selectEditor && (() => {
               const primaryColumn = columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
               if (!primaryColumn || selectedCell.fieldId !== primaryColumn.field.id) return null;
@@ -1007,9 +1871,10 @@ export function BitableGridView({
                 />
               );
             })()}
-            {hoverRow != null && !editingCell && !selectEditor && selectedCell?.rowIndex !== hoverRow && records[hoverRow] && (() => {
+            {hoverRow != null && !editingCell && !selectEditor && selectedCell?.rowIndex !== hoverRow && displayRecords[hoverRow] && (() => {
               const primaryColumn = columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
               if (!primaryColumn) return null;
+              const hoverRecord = displayRecords[hoverRow];
               return (
               <div
                 className="base-grid-row-hover-actions"
@@ -1025,34 +1890,38 @@ export function BitableGridView({
                   className="base-grid-row-hover-actions__view"
                   onClick={event => {
                     event.stopPropagation();
-                    openRecord?.(records[hoverRow].id);
+                    openRecord?.(hoverRecord.id);
                   }}
                 >
                   <span className="base-record-view-icon" aria-hidden />
                   查看
                 </button>
-                <button
-                  type="button"
-                  className="base-grid-row-hover-actions__add"
-                  aria-label="在下方新增记录"
-                  onClick={event => {
-                    event.stopPropagation();
-                    const focusColumn = primaryColumn ?? columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
-                    if (insertRecordAt) {
-                      const [recordId] = insertRecordAt(hoverRow + 1, 1);
-                      if (recordId && focusColumn) pendingCellFocusRef.current = { recordId, fieldId: focusColumn.field.id };
-                    } else {
-                      const recordId = addRecord();
-                      if (focusColumn) pendingCellFocusRef.current = { recordId, fieldId: focusColumn.field.id };
-                    }
-                  }}
-                >
-                  +
-                </button>
+                <BitableTooltip tip="添加子记录" tipClassName="bitable-portal-tooltip--sub-record" className="base-grid-row-hover-actions__add-tip">
+                  <button
+                    type="button"
+                    className="base-grid-row-hover-actions__add"
+                    aria-label="添加子记录"
+                    onClick={event => {
+                      event.stopPropagation();
+                      const focusColumn = primaryColumn ?? columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
+                      const recordId = insertChildRecord
+                        ? insertChildRecord(hoverRecord.id)
+                        : insertRecordAt
+                          ? insertRecordAt(hoverRow + 1, 1)[0]
+                          : addRecord();
+                      if (recordId) {
+                        expandRecord(hoverRecord.id);
+                        if (focusColumn) pendingCellFocusRef.current = { recordId, fieldId: focusColumn.field.id };
+                      }
+                    }}
+                  >
+                    +
+                  </button>
+                </BitableTooltip>
               </div>
               );
             })()}
-            {records.map((record, rowIndex) => columns.map(column => {
+            {displayRecords.map((record, rowIndex) => columns.map(column => {
               if (!isSelectField(column.field)) return null;
               const values = getSelectValues(record, column.field);
               if (!values.length) return null;
@@ -1111,11 +1980,29 @@ export function BitableGridView({
             <input
               ref={inputRef}
               className="base-grid-cell-editor"
-              style={{ left: editingCell.left, top: editingCell.top, width: editingCell.width, height: ROW_HEIGHT }}
+              autoFocus
+              style={{
+                left: editingCell.left,
+                top: editingCell.top,
+                width: editingCell.width,
+                height: ROW_HEIGHT,
+                paddingLeft: editingCell.paddingLeft,
+                paddingRight: editingCell.paddingRight,
+              }}
               value={editingCell.value}
+              onMouseDown={event => event.stopPropagation()}
+              onPointerDown={event => event.stopPropagation()}
               onChange={event => setEditingCell(current => current ? { ...current, value: event.target.value } : current)}
-              onBlur={commitEditingCell}
+              onBlur={() => {
+                requestAnimationFrame(() => {
+                  if (suppressBlurCommitRef.current) return;
+                  if (document.activeElement === inputRef.current) return;
+                  if (shellRef.current?.contains(document.activeElement)) return;
+                  commitEditingCell();
+                });
+              }}
               onKeyDown={event => {
+                event.stopPropagation();
                 if (event.key === 'Enter') commitEditingCell();
                 if (event.key === 'Escape') setEditingCell(null);
               }}
@@ -1130,51 +2017,62 @@ export function BitableGridView({
               data-no-marquee-selection="true"
               onMouseDown={event => event.stopPropagation()}
             >
-              <input
-                className="base-grid-select-editor__search"
-                type="text"
-                autoFocus
-                placeholder="查找选项"
-                value={selectEditor.query}
-                onChange={event => setSelectEditor(current => current ? { ...current, query: event.target.value } : current)}
-                onKeyDown={event => {
-                  if (event.key === 'Escape') {
-                    event.preventDefault();
-                    setSelectEditor(null);
-                  }
-                }}
-              />
-              <div className="base-grid-select-editor__list">
-                {filteredSelectChoices.length ? filteredSelectChoices.map(choice => {
-                  const selected = selectField?.type === 'multi_select' && selectRecord
-                    ? getSelectValues(selectRecord, selectField).includes(choice.name)
-                    : choice.name === selectEditor.value;
-                  return (
-                    <button
-                      key={choice.id}
-                      type="button"
-                      className={`base-grid-select-editor__item${selected ? ' is-selected' : ''}`}
-                      onClick={() => {
-                        if (selectField?.type === 'multi_select' && selectRecord) {
-                          const current = getSelectValues(selectRecord, selectField);
-                          const next = selected
-                            ? current.filter(name => name !== choice.name)
-                            : [...current, choice.name];
-                          changeCell(selectEditor.recordId, selectEditor.fieldId, next);
-                          return;
-                        }
-                        changeCell(selectEditor.recordId, selectEditor.fieldId, choice.name);
-                        setSelectEditor(null);
-                      }}
-                    >
-                      <span className="base-grid-select-editor__tag" style={{ backgroundColor: choice.color, color: textColorForBackground(choice.color) }}>{choice.name}</span>
-                      {selected && <span className="base-grid-select-editor__check" aria-hidden>✓</span>}
-                    </button>
-                  );
-                }) : (
-                  <div className="base-grid-select-editor__empty">{selectChoices.length ? '没有匹配选项' : '请先在字段设置中添加选项'}</div>
-                )}
+              <div className="base-grid-select-editor__search-wrap">
+                <input
+                  className="base-grid-select-editor__search"
+                  type="text"
+                  autoFocus
+                  placeholder={activeView.locked || !addSelectChoice ? '查找选项' : '查找或创建选项'}
+                  value={selectEditor.query}
+                  onChange={event => setSelectEditor(current => current ? { ...current, query: event.target.value } : current)}
+                  onKeyDown={event => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      setSelectEditor(null);
+                      return;
+                    }
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      if (showCreateSelectOption) {
+                        handleCreateSelectOption();
+                        return;
+                      }
+                      if (filteredSelectChoices.length === 1) {
+                        applySelectChoice(filteredSelectChoices[0].name);
+                      }
+                    }
+                  }}
+                />
               </div>
+              {(filteredSelectChoices.length > 0 || showCreateSelectOption) && (
+                <div className="base-grid-select-editor__list">
+                  {showCreateSelectOption && (
+                    <button
+                      type="button"
+                      className="base-grid-select-editor__create"
+                      onClick={handleCreateSelectOption}
+                    >
+                      创建选项 <strong>{selectQuery}</strong>
+                    </button>
+                  )}
+                  {filteredSelectChoices.map(choice => {
+                    const selected = selectField?.type === 'multi_select' && selectRecord
+                      ? getSelectValues(selectRecord, selectField).includes(choice.name)
+                      : choice.name === selectEditor.value;
+                    return (
+                      <button
+                        key={choice.id}
+                        type="button"
+                        className={`base-grid-select-editor__item${selected ? ' is-selected' : ''}`}
+                        onClick={() => applySelectChoice(choice.name)}
+                      >
+                        <span className="base-grid-select-editor__tag" style={{ backgroundColor: choice.color, color: textColorForBackground(choice.color) }}>{choice.name}</span>
+                        {selected && <span className="base-grid-select-editor__check" aria-hidden>✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {(selectField?.type === 'multi_select'
                 ? selectRecord && getSelectValues(selectRecord, selectField).length > 0
                 : Boolean(selectEditor.value)) && (
@@ -1193,8 +2091,10 @@ export function BitableGridView({
             document.body,
           )}
         </div>
+        </div>
+        </div>
       </div>
-      {fieldMenu && menuField && (
+      {fieldMenu && menuField && createPortal(
         <GridFieldContextMenu
           menuRef={menuRef}
           field={menuField}
@@ -1203,9 +2103,10 @@ export function BitableGridView({
           left={fieldMenu.left}
           top={fieldMenu.top}
           onAction={runFieldAction}
-        />
+        />,
+        fieldMenuPortalRoot,
       )}
-      {cellContextMenu && (
+      {cellContextMenu && createPortal(
         <GridCellContextMenu
           menuRef={cellMenuRef}
           left={cellContextMenu.left}
@@ -1227,8 +2128,11 @@ export function BitableGridView({
             setCellContextMenu(null);
           }}
           onAddChildRecord={() => {
-            if (insertRecordAt) {
-              insertRecordAt(cellContextMenu.rowIndex + 1, 1, '  子记录');
+            if (insertChildRecord) {
+              insertChildRecord(cellContextMenu.recordId);
+              expandRecord(cellContextMenu.recordId);
+            } else if (insertRecordAt) {
+              insertRecordAt(cellContextMenu.rowIndex + 1, 1);
             }
             setCellContextMenu(null);
           }}
@@ -1238,15 +2142,47 @@ export function BitableGridView({
           }}
           onDeleteRecord={() => {
             if (removeRecords) {
-              removeRecords([cellContextMenu.recordId], true);
+              removeRecords([cellContextMenu.recordId]);
             }
             setCellContextMenu(null);
           }}
         />
+        ,
+        document.body,
       )}
       <div className="base-grid-footer">
-        {`${records.length} 条记录`}
+        <span className="base-grid-footer__count">
+          {`${records.length} 条记录`}
+          <span className="base-grid-footer__chevron" aria-hidden>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+              <path d="M7.707 9.293a1 1 0 0 1 1.414 0L12 13.172l2.879-2.879a1 1 0 1 1 1.414 1.414l-3.586 3.586a1 1 0 0 1-1.414 0L7.707 10.707a1 1 0 0 1 0-1.414Z" fill="currentColor" />
+            </svg>
+          </span>
+        </span>
       </div>
+    </div>
+    <div className={`base-grid-hscroll${maxScrollLeft > 0 ? ' is-active' : ''}`}>
+      <div
+        ref={hTrackRef}
+        className="base-grid-hscroll__track"
+        style={hScrollMetrics.trackWidth > 0 ? { width: hScrollMetrics.trackWidth } : undefined}
+        onPointerDown={handleHTrackPointerDown}
+      >
+        {maxScrollLeft > 0 && (
+          <div
+            className={`base-grid-hscroll__thumb${hThumbDragging ? ' is-dragging' : ''}`}
+            style={{
+              width: hScrollMetrics.thumbWidth,
+              transform: `translate3d(${hScrollMetrics.thumbLeft}px, 0, 0)`,
+            }}
+            onPointerDown={handleHThumbPointerDown}
+            onPointerMove={handleHThumbPointerMove}
+            onPointerUp={finishHThumbDrag}
+            onPointerCancel={finishHThumbDrag}
+          />
+        )}
+      </div>
+    </div>
     </div>
   );
 }

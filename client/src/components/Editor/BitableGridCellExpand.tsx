@@ -8,7 +8,7 @@ export function BitableGridCellExpand({
   style: CSSProperties;
   onOpen: () => void;
 }) {
-  const { bind, renderTip } = useBitablePortalTooltip();
+  const { bind, renderTip } = useBitablePortalTooltip<HTMLButtonElement>();
   return (
     <>
       <button

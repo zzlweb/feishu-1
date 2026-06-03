@@ -4,6 +4,13 @@ import type { DropdownOption } from 'tdesign-react';
 import type { RefObject } from 'react';
 import type { Comment } from '../../types';
 import { resolveBlockElement } from '../Editor/blockDom';
+import {
+  CommentPanelComposer,
+  CommentPanelHeader,
+  CommentRail,
+  CommentPanelReply,
+  CommentPanelShell,
+} from './CommentPanelParts';
 
 interface CommentSidebarProps {
   comments: Comment[];
@@ -24,6 +31,13 @@ interface CommentSidebarProps {
   onClose: () => void;
   onJumpToBlock: (blockId: string) => void;
   mainScrollRef: RefObject<HTMLElement>;
+  /** 多维表格等外部评论卡片是否挂载在侧栏轨道内 */
+  hasExternalPanels?: boolean;
+  /** 外部评论未解决数量（如表格记录评论） */
+  externalUnresolvedCount?: number;
+  /** 侧栏是否可见（false 时保留挂载以便多维表格评论恢复） */
+  visible?: boolean;
+  onTrackElement?: (element: HTMLElement | null) => void;
 }
 
 function formatCommentTime(iso: string) {
@@ -140,8 +154,13 @@ export default function CommentSidebar({
   onClose,
   onJumpToBlock,
   mainScrollRef,
+  hasExternalPanels = false,
+  externalUnresolvedCount = 0,
+  visible = true,
+  onTrackElement,
 }: CommentSidebarProps) {
   const panelsContainerRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const [positions, setPositions] = useState<Map<string, number>>(new Map());
   const [replyingBlockId, setReplyingBlockId] = useState<string | null>(null);
@@ -150,7 +169,7 @@ export default function CommentSidebar({
   const [likedCommentIds, setLikedCommentIds] = useState<Record<string, true>>({});
   const [showHistory, setShowHistory] = useState(false);
 
-  const unresolvedCount = comments.filter(c => !Number(c.resolved)).length;
+  const unresolvedCount = comments.filter(c => !Number(c.resolved)).length + externalUnresolvedCount;
   const visibleComments = comments.filter(c => showHistory ? Number(c.resolved) || c.status === 'deleted' || c.status === 'anchor_lost' : !Number(c.resolved) && c.status !== 'deleted');
   const displayComments = pendingThread && !visibleComments.some(c => (c.thread_id || c.block_id || c.id) === pendingThread.threadId)
     ? [
@@ -275,30 +294,34 @@ export default function CommentSidebar({
     return Math.max(maxBottom, top + panelH + TRACK_TAIL_PAD);
   }, 0);
 
-  return (
-    <div className="comment-sidebar-positioned" aria-label="评论">
-      <div className="comment-sidebar-pos__header">
-        <span className="comment-sidebar-pos__header-left">
-          <span className="comment-sidebar-pos__title">评论（{unresolvedCount}）</span>
-        </span>
-        <button type="button" className="comment-sidebar-pos__close" onClick={onClose} title="关闭">
-          <svg className="comment-sidebar-pos__close-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-            <path d="m13.058 6.472 5.637 5.636-5.944 5.943-.835.84a1 1 0 1 0 1.419 1.409l.663-.667 6.818-6.818a1 1 0 0 0 0-1.414l-6.472-6.473-1.012-1.013a1 1 0 0 0-1.416 1.41l1.142 1.147Z" fill="currentColor" />
-            <path d="m4.15 6.472 5.637 5.636-5.943 5.943-.836.84A1 1 0 1 0 4.427 20.3l.663-.667 6.818-6.818a1 1 0 0 0 0-1.414L5.436 4.928 4.424 3.915a1 1 0 0 0-1.415 1.41L4.15 6.472Z" fill="currentColor" />
-          </svg>
-        </button>
-      </div>
+  const showDocumentTrack = displayComments.length > 0;
+  const showTrack = showDocumentTrack || hasExternalPanels;
 
-      <div className="comment-sidebar-pos__panels" ref={panelsContainerRef}>
-        {displayComments.length === 0 ? (
+  useEffect(() => {
+    onTrackElement?.(showTrack ? trackRef.current : null);
+    return () => onTrackElement?.(null);
+  }, [onTrackElement, showTrack, displayComments.length, hasExternalPanels]);
+
+  return (
+    <CommentRail
+      title={`评论（${unresolvedCount}）`}
+      className={visible ? '' : 'comment-sidebar-positioned--hidden'}
+      panelsRef={panelsContainerRef}
+      onClose={onClose}
+    >
+        {!showTrack ? (
           <div className="comment-sidebar-pos__empty">
             <div className="comment-sidebar-pos__empty-icon">💬</div>
             <div>暂无评论</div>
           </div>
         ) : (
-          <div className="comment-sidebar-pos__track" style={{ minHeight: `max(100%, ${Math.max(panelsScrollExtent, 1)}px)` }}>
+          <div
+            ref={trackRef}
+            className="comment-sidebar-pos__track"
+            style={{ minHeight: `max(100%, ${Math.max(panelsScrollExtent, 1)}px)` }}
+          >
             <input ref={attachInputRef} type="file" multiple accept="image/gif,image/jpg,image/jpeg,image/bmp,image/png" className="comment-panel__file-input" tabIndex={-1} aria-hidden />
-            {resolvedPanels.map(({ blockId, anchorBlockId, comments: blockComments, top }, panelIdx) => {
+            {showDocumentTrack && resolvedPanels.map(({ blockId, anchorBlockId, comments: blockComments, top }, panelIdx) => {
               const isActive = blockId === activeBlockId;
               const firstUnresolved = blockComments.find(c => !Number(c.resolved));
               const prevPanelBlockId = panelIdx > 0 ? resolvedPanels[panelIdx - 1]!.blockId : null;
@@ -315,26 +338,13 @@ export default function CommentSidebar({
 
               return (
                 <div key={blockId} className={`comment-panel-wrapper${isActive ? ' comment-panel-wrapper--active' : ''}`} style={{ transform: `translate3d(0px, ${top}px, 0px)` }}>
-                  <div className={`comment-panel js-panel-card${isActive ? ' comment-panel--active' : ''}`} data-id={blockId} data-comment-type="0">
-                    <div className="comment-panel__header comment-panel__header-v2">
-                      <div className="comment-panel__header-quote">
-                        <span
-                          className="comment-panel__quote-text"
-                          title={quoteLabel}
-                          onClick={() => onJumpToBlock(anchorBlockId || blockId)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              onJumpToBlock(anchorBlockId || blockId);
-                            }
-                          }}
-                          role="link"
-                          tabIndex={0}
-                        >
-                          {quoteLabel}
-                        </span>
-                      </div>
-                      <div className="comment-panel-controls">
+                  <CommentPanelShell id={blockId} active={isActive}>
+                    <CommentPanelHeader
+                      quoteLabel={quoteLabel}
+                      title={quoteLabel}
+                      onQuoteClick={() => onJumpToBlock(anchorBlockId || blockId)}
+                      controls={(
+                        <div className="comment-panel-controls">
                         <div className="comment-panel-controls__pill">
                           <button type="button" disabled={!nextPanelBlockId} className="comment-panel-controls__btn comment-panel-controls__go-next-btn" title="下一条" aria-label="下一条" onClick={() => nextPanelBlockId && onJumpToBlock(nextPanelBlockId)}>
                             <span className="universe-icon" style={{ fontSize: 12 }}>
@@ -369,8 +379,9 @@ export default function CommentSidebar({
                             </span>
                           </button>
                         </div>
-                      </div>
-                    </div>
+                        </div>
+                      )}
+                    />
 
                     <div className="comment-panel__reply-list">
                       {blockComments.filter(comment => comment.content.trim().length > 0).map(comment => {
@@ -399,16 +410,14 @@ export default function CommentSidebar({
                         };
 
                         return (
-                          <div className={`comment-panel__reply${comment.resolved ? ' comment-panel__reply--resolved' : ''}`} key={comment.id}>
-                            <div className="comment-panel__reply-main">
-                              <div className="comment-panel__avatar" aria-hidden>{comment.author.charAt(0)}</div>
-                              <div className="comment-panel__reply-main-right">
-                                <div className="comment-panel__reply-info-row">
-                                  <div className="comment-panel__reply-info-text">
-                                    <span className="comment-panel__reply-info-name">{comment.author}</span>
-                                    <span className="comment-panel__reply-info-time">{formatCommentTime(comment.updated_at || comment.created_at)}</span>
-                                  </div>
-                                  <div className="comment-panel__reply-actions">
+                          <CommentPanelReply
+                            key={comment.id}
+                            id={comment.id}
+                            author={comment.author}
+                            time={formatCommentTime(comment.updated_at || comment.created_at)}
+                            resolved={Boolean(comment.resolved)}
+                            actions={(
+                              <>
                                     <button
                                       type="button"
                                       className={`comment-panel__icon-btn${isLiked ? ' comment-panel__icon-btn--active' : ''}`}
@@ -444,8 +453,9 @@ export default function CommentSidebar({
                                         </svg>
                                       </button>
                                     </Dropdown>
-                                  </div>
-                                </div>
+                              </>
+                            )}
+                          >
                                 {isEditing ? (
                                   <div className="comment-panel__reply-edit">
                                     <textarea
@@ -473,89 +483,29 @@ export default function CommentSidebar({
                                 ) : (
                                   <div className="comment-panel__reply-content">{comment.content}</div>
                                 )}
-                              </div>
-                            </div>
-                          </div>
+                          </CommentPanelReply>
                         );
                       })}
                     </div>
 
-                    <div className="comment-panel__textarea card-panel-textarea">
-                      {replyingBlockId === blockId ? (
-                        <div className="comment-panel__textarea-inner">
-                          <div className="comment-panel__textarea-main-wrapper">
-                            <div className="comment-panel__textarea-main">
-                              <textarea
-                                className="comment-panel__textarea-editor"
-                                value={inputValue}
-                                placeholder="回复"
-                                rows={1}
-                                autoFocus
-                                onChange={e => onInputChange(e.target.value)}
-                                onInput={e => {
-                                  const ta = e.currentTarget;
-                                  ta.style.height = 'auto';
-                                  ta.style.height = `${Math.min(Math.max(ta.scrollHeight, 32), 120)}px`;
-                                }}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    if (inputValue.trim()) void submitReply(blockId);
-                                    return;
-                                  }
-                                  if (e.key === 'Escape') setReplyingBlockId(null);
-                                }}
-                              />
-                              <div className="comment-panel__textarea-operation">
-                                <div className="comment-panel__textarea-operation-inner">
-                                  <div className="comment-panel__textarea-image-select">
-                                    <span className="comment-panel__textarea-image-icon" aria-hidden>
-                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="m10.141 17.988-4.275-.01a.3.3 0 0 1-.212-.512l4.133-4.133a.4.4 0 0 1 .566 0l1.907 1.907 5.057-5.057a.4.4 0 0 1 .683.283V17.7a.3.3 0 0 1-.3.3h-7.476a.301.301 0 0 1-.083-.012ZM4 22c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h16c1.1 0 2 .9 2 2v16c0 1.1-.9 2-2 2H4Zm0-2h16V4H4v16ZM6 6h3v3H6V6Z" fill="currentColor" />
-                                      </svg>
-                                    </span>
-                                    <button type="button" tabIndex={-1} className="comment-panel__textarea-file-hitbox" aria-label="插入图片" onClick={() => attachInputRef.current?.click()} />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          {inputValue.trim().length > 0 && (
-                            <div className="comment-panel__textarea-actions">
-                              <button type="button" className="comment-panel__textarea-btn-cancel" onClick={() => setReplyingBlockId(null)}>取消</button>
-                              <button type="button" className="comment-panel__textarea-btn-submit" onClick={() => void submitReply(blockId)}>回复</button>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="comment-panel__textarea-inner comment-panel__textarea-inner--idle" onClick={openComposer} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openComposer(); } }} tabIndex={0} aria-label="回复">
-                          <div className="comment-panel__textarea-main-wrapper">
-                            <div className="comment-panel__textarea-main comment-panel__textarea-main--idle">
-                              <span className="comment-panel__textarea-placeholder">回复</span>
-                              <div className="comment-panel__textarea-operation">
-                                <div className="comment-panel__textarea-operation-inner">
-                                  <div className="comment-panel__textarea-image-select">
-                                    <span className="comment-panel__textarea-image-icon" aria-hidden>
-                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="m10.141 17.988-4.275-.01a.3.3 0 0 1-.212-.512l4.133-4.133a.4.4 0 0 1 .566 0l1.907 1.907 5.057-5.057a.4.4 0 0 1 .683.283V17.7a.3.3 0 0 1-.3.3h-7.476a.301.301 0 0 1-.083-.012ZM4 22c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h16c1.1 0 2 .9 2 2v16c0 1.1-.9 2-2 2H4Zm0-2h16V4H4v16ZM6 6h3v3H6V6Z" fill="currentColor" />
-                                      </svg>
-                                    </span>
-                                    <button type="button" tabIndex={-1} className="comment-panel__textarea-file-hitbox" aria-label="插入图片" onClick={e => { e.stopPropagation(); openComposer(); }} />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                    <CommentPanelComposer
+                      open={replyingBlockId === blockId}
+                      value={inputValue}
+                      placeholder="回复"
+                      idlePlaceholder="回复"
+                      autoFocus
+                      onOpen={openComposer}
+                      onChange={onInputChange}
+                      onSubmit={() => void submitReply(blockId)}
+                      onCancel={() => setReplyingBlockId(null)}
+                      onAttach={() => attachInputRef.current?.click()}
+                    />
+                  </CommentPanelShell>
                 </div>
               );
             })}
           </div>
         )}
-      </div>
-    </div>
+    </CommentRail>
   );
 }

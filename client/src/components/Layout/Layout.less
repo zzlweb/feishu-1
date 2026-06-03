@@ -471,6 +471,11 @@
     width: 100%;
     overflow-y: auto;
     overflow-x: hidden;
+
+    &:has(.feishu-bitable-block.is-grid-bleed-active),
+    &:has(.feishu-bitable-block.is-grid-hscroll-active) {
+      overflow-x: visible;
+    }
   }
 
   .doc-page-workspace-inner {
@@ -511,6 +516,11 @@
     flex: 1;
     min-width: 0;
     position: relative;
+
+    &:has(.feishu-bitable-block.is-grid-bleed-active),
+    &:has(.feishu-bitable-block.is-grid-hscroll-active) {
+      overflow-x: visible;
+    }
   }
 
   // ========================
@@ -529,6 +539,19 @@
     border-left: 1px solid #e8e8e8;
     background: #fff;
     z-index: 10;
+
+    &.comment-sidebar-positioned--hidden {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 280px;
+      min-width: 280px;
+      height: 0;
+      overflow: visible;
+      visibility: hidden;
+      pointer-events: none;
+      z-index: -1;
+    }
   }
 
   .comment-sidebar-pos__header {

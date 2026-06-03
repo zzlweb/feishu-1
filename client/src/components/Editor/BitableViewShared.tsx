@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useRef, useState, type MouseEvent, type MutableRefObject, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import * as React from 'react';
 import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
@@ -109,15 +109,41 @@ export function FileBadge({ attachment }: { attachment: AttachmentValue }) {
 
 const PRIMARY_FIELD_LOCK_TIP = '索引列：用来标识每条记录。不能被删除、移动或隐藏';
 
-export function useBitablePortalTooltip() {
-  const anchorRef = useRef<any>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+export type BitableTooltipPlacement = 'top' | 'bottom';
+
+function mergeRefs<T>(...refs: Array<Ref<T> | undefined | null>) {
+  return (node: T | null) => {
+    refs.forEach(ref => {
+      if (!ref) return;
+      if (typeof ref === 'function') ref(node);
+      else (ref as MutableRefObject<T | null>).current = node;
+    });
+  };
+}
+
+function mergeHandlers<E>(
+  theirs: ((event: E) => void) | undefined,
+  ours: (event: E) => void,
+) {
+  return (event: E) => {
+    theirs?.(event);
+    ours(event);
+  };
+}
+
+export function useBitablePortalTooltip<T extends HTMLElement = HTMLElement>(defaultPlacement: BitableTooltipPlacement = 'top') {
+  const anchorRef = useRef<T | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; placement: BitableTooltipPlacement } | null>(null);
 
   const showTip = useCallback(() => {
     const rect = anchorRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setPos({ left: rect.left + rect.width / 2, top: rect.top });
-  }, []);
+    setPos({
+      left: rect.left + rect.width / 2,
+      top: defaultPlacement === 'bottom' ? rect.bottom : rect.top,
+      placement: defaultPlacement,
+    });
+  }, [defaultPlacement]);
 
   const hideTip = useCallback(() => setPos(null), []);
 
@@ -131,7 +157,7 @@ export function useBitablePortalTooltip() {
 
   const renderTip = (tip: string, className?: string) => pos && createPortal(
     <div
-      className={`bitable-portal-tooltip${className ? ` ${className}` : ''}`}
+      className={`bitable-portal-tooltip bitable-portal-tooltip--${pos.placement}${className ? ` ${className}` : ''}`}
       role="tooltip"
       style={{ left: pos.left, top: pos.top }}
     >
@@ -141,6 +167,47 @@ export function useBitablePortalTooltip() {
   );
 
   return { bind, renderTip };
+}
+
+export function BitableTooltip({
+  tip,
+  placement = 'top',
+  className,
+  tipClassName,
+  children,
+}: {
+  tip: string;
+  placement?: BitableTooltipPlacement;
+  className?: string;
+  tipClassName?: string;
+  children: React.ReactElement;
+}) {
+  const { bind, renderTip } = useBitablePortalTooltip(placement);
+  const child = React.Children.only(children);
+  if (!React.isValidElement(child)) return children;
+
+  const childProps = child.props as {
+    className?: string;
+    onMouseEnter?: (event: React.MouseEvent<HTMLElement>) => void;
+    onMouseLeave?: (event: React.MouseEvent<HTMLElement>) => void;
+    onFocus?: (event: React.FocusEvent<HTMLElement>) => void;
+    onBlur?: (event: React.FocusEvent<HTMLElement>) => void;
+    ref?: Ref<HTMLElement>;
+  };
+
+  return (
+    <>
+      {React.cloneElement(child as React.ReactElement<typeof childProps>, {
+        ref: mergeRefs(childProps.ref, bind.ref),
+        className: [childProps.className, className, 'bitable-tooltip-anchor'].filter(Boolean).join(' '),
+        onMouseEnter: mergeHandlers(childProps.onMouseEnter, bind.onMouseEnter),
+        onMouseLeave: mergeHandlers(childProps.onMouseLeave, bind.onMouseLeave),
+        onFocus: mergeHandlers(childProps.onFocus, bind.onFocus),
+        onBlur: mergeHandlers(childProps.onBlur, bind.onBlur),
+      })}
+      {renderTip(tip, tipClassName)}
+    </>
+  );
 }
 
 function GridFieldLockWithTooltip() {
@@ -165,11 +232,13 @@ export function GridFieldHeader({
   primaryFieldId,
   isMenuOpen,
   onMenuClick,
+  onHeaderContextMenu,
 }: {
   field: BaseField;
   primaryFieldId: string;
   isMenuOpen?: boolean;
   onMenuClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  onHeaderContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <span className="base-grid-field-head">
@@ -185,6 +254,14 @@ export function GridFieldHeader({
           event.preventDefault();
           event.stopPropagation();
           onMenuClick?.(event);
+        }}
+        onMouseDown={event => {
+          event.stopPropagation();
+        }}
+        onContextMenu={event => {
+          event.preventDefault();
+          event.stopPropagation();
+          onHeaderContextMenu?.(event);
         }}
       >
         <SelGlyphChevronDown size={14} fill="currentColor" />

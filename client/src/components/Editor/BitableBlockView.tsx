@@ -5,17 +5,21 @@ import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
 import { SlashGlyphBitableGrid, SlashGlyphGallery, SlashGlyphGantt } from '../../icons/slashMenuGlyphs';
 import { BitableAddFieldPopover, BitableEditFieldPopover, buildNewFieldPayload, emptyDefaultValue, type CreateFieldInput, type UpdateFieldInput } from './BitableAddFieldPopover';
 import { FieldLockGlyph, fieldTypeGlyph } from './bitableFieldTypeIcons';
+import { BitableTooltip } from './BitableViewShared';
 import { parseJsonPayload } from '../../api/http';
 import {
   addView,
   appendRecordHistory,
   attachmentFromUpload,
+  collectRecordSubtreeIds,
   copyView,
   createGalleryConfig,
   createRecord,
   createRecordComment,
   deleteView,
   duplicateFieldName,
+  findInsertIndexAfterSubtree,
+  reorderRecordsInTree,
   getActiveView,
   getAttachments,
   getGanttConfig,
@@ -43,6 +47,17 @@ import { BitableKanbanView } from './BitableKanbanView';
 import { BitableGridView, type GridFieldMenuAction, type GridFieldMenuPosition } from './BitableGridView';
 import { BitableRecordCardModal } from './BitableRecordCardModal';
 import { BitableRecordCommentPanel } from './BitableRecordCommentPanel';
+import { createSelectChoice } from './BitableSelectFieldEditor';
+import { useCommentSidebarTrack } from '../Layout/CommentSidebarContext';
+import {
+  BITABLE_COMMENT_OPEN,
+  BITABLE_COMMENT_TOGGLE_SIDEBAR,
+  CLOSE_BITABLE_COMMENT_SIDEBAR,
+  dispatchBitableCommentClose,
+  dispatchBitableCommentMeta,
+  dispatchBitableCommentOpen,
+  dispatchBitableCommentToggleSidebar,
+} from '../Layout/commentSidebarBridge';
 import './BitableBlock.less';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -531,6 +546,7 @@ const GRID_ADD_ROW_HEIGHT = 36;
 export default function BitableBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const parsedTable = useMemo(() => parseBaseTable(node.attrs), [node.attrs.model, node.attrs.columns, node.attrs.rows, node.attrs.covers, node.attrs.view]);
   const tableRef = useRef(parsedTable);
+  const blockRef = useRef<HTMLDivElement>(null);
   tableRef.current = parsedTable;
   const table = parsedTable;
   const activeView = getActiveView(table);
@@ -554,8 +570,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const [cardRecordId, setCardRecordId] = useState<string | null>(null);
   const [commentPanelOpen, setCommentPanelOpen] = useState(false);
   const [commentTargetRecordId, setCommentTargetRecordId] = useState<string | null>(null);
+  const [commentCardTop, setCommentCardTop] = useState(0);
+  const commentTrackHost = useCommentSidebarTrack();
   const [gridFocusedRecordId, setGridFocusedRecordId] = useState<string | null>(null);
   const [editingFieldPanel, setEditingFieldPanel] = useState<{ fieldId: string; left: number; top: number } | null>(null);
+  const [addFieldPanel, setAddFieldPanel] = useState<{ left: number; top: number } | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [dropActive, setDropActive] = useState(false);
   const [ganttDraft, setGanttDraft] = useState<{ recordId: string; start: string; end: string } | null>(null);
@@ -622,6 +641,23 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   }, []); // migrate legacy nodes once on mount
 
   useEffect(() => {
+    const block = blockRef.current;
+    const parent = block?.parentElement;
+    if (!block || !parent) return;
+    const measureAnchorWidth = () => {
+      block.style.setProperty('--bitable-anchor-width', `${parent.clientWidth}px`);
+    };
+    measureAnchorWidth();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measureAnchorWidth) : null;
+    ro?.observe(parent);
+    window.addEventListener('resize', measureAnchorWidth);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measureAnchorWidth);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!showViewMenu && !showSettings && !activeToolbarPanel && !viewContextMenuId) return;
     const outside = (event: globalThis.MouseEvent) => {
       if (!(event.target instanceof Node)) return;
@@ -671,8 +707,26 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   }, [editingFieldPanel]);
 
   useEffect(() => {
+    if (!addFieldPanel) return;
+    const close = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest('.base-field-edit-popover-portal')) return;
+      if (event.target.closest('.base-b-field-type-picker-portal')) return;
+      if (event.target.closest('.base-b-select-color-panel')) return;
+      if (event.target.closest('.base-b-select-default-panel')) return;
+      if (event.target.closest('.base-b-field-type-picker')) return;
+      if (event.target.closest('.base-grid-add-field-column')) return;
+      setAddFieldPanel(null);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [addFieldPanel]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      setAddFieldPanel(null);
+      setEditingFieldPanel(null);
       setSelectedIds(new Set());
       selectionAnchorRef.current = null;
     };
@@ -814,27 +868,36 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     return records[0]?.id ?? null;
   }, [gridFocusedRecordId, records, selectedIds]);
 
+  const blockId = typeof node.attrs.blockId === 'string' ? node.attrs.blockId : '';
+
   const openCommentPanel = useCallback((recordId?: string | null) => {
     setShowViewMenu(false);
     setShowSettings(false);
     setActiveToolbarPanel(null);
     const targetId = recordId || resolveCommentRecordId();
-    if (!targetId) return;
+    if (!targetId || !blockId) return;
     setCommentTargetRecordId(targetId);
     setCommentPanelOpen(true);
+    dispatchBitableCommentOpen({ blockId, recordId: targetId });
     if (recordId) {
       selectionAnchorRef.current = recordId;
       setSelectedIds(new Set([recordId]));
     }
-  }, [resolveCommentRecordId]);
+  }, [blockId, resolveCommentRecordId]);
+
+  const closeCommentPanel = useCallback(() => {
+    setCommentPanelOpen(false);
+    setCommentTargetRecordId(null);
+    if (blockId) dispatchBitableCommentClose(blockId);
+  }, [blockId]);
 
   const toggleCommentPanel = useCallback(() => {
     if (commentPanelOpen) {
-      setCommentPanelOpen(false);
+      if (blockId) dispatchBitableCommentToggleSidebar(blockId);
       return;
     }
     openCommentPanel();
-  }, [commentPanelOpen, openCommentPanel]);
+  }, [blockId, commentPanelOpen, openCommentPanel]);
 
   const addRecordComment = useCallback((recordId: string, content: string) => {
     const comment = createRecordComment(content);
@@ -897,6 +960,73 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     return insertedIds;
   };
 
+  const cloneCellValue = (value: CellValue): CellValue => {
+    if (Array.isArray(value)) return JSON.parse(JSON.stringify(value)) as CellValue;
+    return value;
+  };
+
+  const duplicateRecord = (recordId: string) => {
+    if (activeView.locked) return;
+    mutate(current => {
+      const index = current.records.findIndex(record => record.id === recordId);
+      if (index < 0) return current;
+      const source = current.records[index];
+      const title = valueText(source.fields[current.primaryFieldId]);
+      const record = createRecord(current.id, current.fields, current.primaryFieldId, title ? `${title} 副本` : '');
+      current.fields.forEach(field => {
+        if (field.id !== current.primaryFieldId) {
+          record.fields[field.id] = cloneCellValue(source.fields[field.id]);
+        }
+      });
+      if (activeView.type === 'gallery' && galleryConfig.groupByFieldId) {
+        record.fields[galleryConfig.groupByFieldId] = cloneCellValue(source.fields[galleryConfig.groupByFieldId]);
+      }
+      const newRecords = [...current.records];
+      newRecords.splice(index + 1, 0, record);
+      return { ...current, records: newRecords };
+    });
+  };
+
+  const copyRecordLink = async (recordId: string) => {
+    const url = new URL(window.location.href);
+    url.hash = `record-${recordId}`;
+    try {
+      await navigator.clipboard.writeText(url.toString());
+    } catch {
+      window.prompt('复制记录链接', url.toString());
+    }
+  };
+
+  const insertRecordRelative = (recordId: string, offset: 0 | 1) => {
+    const index = table.records.findIndex(record => record.id === recordId);
+    if (index < 0) return;
+    insertRecordAt(index + offset, 1);
+  };
+
+  const insertChildRecord = (parentRecordId: string, initialTitle = '') => {
+    let insertedId = '';
+    mutate(current => {
+      const parentIndex = current.records.findIndex(record => record.id === parentRecordId);
+      if (parentIndex < 0) return current;
+      const record = createRecord(current.id, current.fields, current.primaryFieldId, initialTitle);
+      record.parentId = parentRecordId;
+      insertedId = record.id;
+      if (activeView.type === 'gallery' && galleryConfig.groupByFieldId) {
+        record.fields[galleryConfig.groupByFieldId] = '';
+      }
+      if (activeView.type === 'gantt' && ganttConfig.startDateFieldId && ganttConfig.endDateFieldId) {
+        const start = new Date();
+        record.fields[ganttConfig.startDateFieldId] = dateValue(start);
+        record.fields[ganttConfig.endDateFieldId] = dateValue(offsetDate(start, 3));
+      }
+      const insertIndex = findInsertIndexAfterSubtree(current.records, parentIndex);
+      const newRecords = [...current.records];
+      newRecords.splice(insertIndex, 0, record);
+      return { ...current, records: newRecords };
+    });
+    return insertedId;
+  };
+
   const changeCell = (recordId: string, fieldId: string, value: CellValue) => {
     mutate(current => updateRecord(current, recordId, record => {
       const field = current.fields.find(item => item.id === fieldId);
@@ -906,14 +1036,21 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
 
   const removeRecords = (recordIds: string[], requireConfirm = false) => {
     if (requireConfirm && !window.confirm(`确认删除 ${recordIds.length} 条记录？`)) return false;
-    mutate(current => ({ ...current, records: current.records.filter(record => !recordIds.includes(record.id)) }));
+    mutate(current => {
+      const removeIds = collectRecordSubtreeIds(current.records, recordIds);
+      return { ...current, records: current.records.filter(record => !removeIds.has(record.id)) };
+    });
     setSelectedIds(new Set());
     return true;
   };
 
-  const addField = () => {
+  const openAddFieldPanel = (anchor?: { left: number; top: number }) => {
     if (activeView.locked) return;
-    createField({ name: nextAutoFieldName(tableRef.current.fields), type: 'text' });
+    setEditingFieldPanel(null);
+    setAddFieldPanel({
+      left: anchor?.left ?? Math.max(8, (window.innerWidth - 320) / 2),
+      top: anchor?.top ?? 120,
+    });
   };
 
   const createField = (input: CreateFieldInput) => {
@@ -929,11 +1066,6 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         fields: { ...record.fields, [id]: defaultValue },
       })),
     }));
-  };
-
-  const cloneCellValue = (value: CellValue): CellValue => {
-    if (Array.isArray(value)) return JSON.parse(JSON.stringify(value)) as CellValue;
-    return value;
   };
 
   const editField = (fieldId: string) => {
@@ -1094,6 +1226,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         left: Math.max(8, position?.anchorLeft ?? position?.left ?? 320),
         top: Math.max(8, (position?.anchorTop ?? 88) + 32),
       });
+      setAddFieldPanel(null);
       return;
     }
     if (action === 'description') {
@@ -1283,6 +1416,12 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     );
   };
 
+  const openGalleryRecord = (recordId: string) => {
+    setCardRecordId(recordId);
+    selectionAnchorRef.current = recordId;
+    setSelectedIds(new Set([recordId]));
+  };
+
   const renderGallery = () => (
     <BitableGalleryView
       table={table}
@@ -1298,8 +1437,42 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       cardClick={cardClick}
       removeRecords={removeRecords}
       addRecord={() => addRecord()}
+      locked={activeView.locked}
+      onInsertRecordLeft={recordId => insertRecordRelative(recordId, 0)}
+      onInsertRecordRight={recordId => insertRecordRelative(recordId, 1)}
+      onShareRecord={() => openToolbarPanel('share')}
+      onCopyRecordLink={copyRecordLink}
+      onDuplicateRecord={duplicateRecord}
+      onOpenRecord={openGalleryRecord}
+      onOpenComment={recordId => openCommentPanel(recordId)}
     />
   );
+
+  const addSelectChoice = useCallback((fieldId: string, name: string): string | null => {
+    if (activeView.locked) return null;
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    let result: string | null = null;
+    mutate(current => {
+      const field = current.fields.find(item => item.id === fieldId);
+      if (!field || (field.type !== 'single_select' && field.type !== 'multi_select')) return current;
+      const choices = field.options?.choices ?? [];
+      const existing = choices.find(choice => choice.name.toLowerCase() === trimmed.toLowerCase());
+      if (existing) {
+        result = existing.name;
+        return current;
+      }
+      const nextChoice = { ...createSelectChoice(choices.length), name: trimmed };
+      result = trimmed;
+      return {
+        ...current,
+        fields: current.fields.map(item => item.id === fieldId
+          ? { ...item, options: { ...item.options, choices: [...choices, nextChoice] } }
+          : item),
+      };
+    });
+    return result;
+  }, [activeView.locked, mutate]);
 
   const renderGrid = () => (
     <BitableGridView
@@ -1307,9 +1480,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       activeView={activeView}
       records={records}
       selectedIds={selectedIds}
-      addField={addField}
+      addField={openAddFieldPanel}
       addRecord={() => addRecord()}
       insertRecordAt={insertRecordAt}
+      insertChildRecord={insertChildRecord}
       removeRecords={removeRecords}
       changeCell={changeCell}
       pickFiles={pickFiles}
@@ -1338,6 +1512,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           },
         })));
       }}
+      addSelectChoice={addSelectChoice}
     />
   );
 
@@ -1406,12 +1581,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const reorderRecords = (fromIndex: number, toIndex: number) => {
     if (activeView.locked || fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
     if (fromIndex >= records.length || toIndex >= records.length) return;
-    mutate(current => {
-      const nextRecords = [...current.records];
-      const [moved] = nextRecords.splice(fromIndex, 1);
-      nextRecords.splice(toIndex, 0, moved);
-      return { ...current, records: nextRecords };
-    });
+    mutate(current => ({
+      ...current,
+      records: reorderRecordsInTree(current.records, fromIndex, toIndex),
+    }));
   };
 
   const draftGanttAt = (drag: NonNullable<typeof ganttDragRef.current>, clientX: number) => {
@@ -1565,13 +1738,90 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         changeCell(recordId, statusField.id, statusValue);
       }
     };
+    const changeRecordStatus = (recordId: string, statusValue: string) => {
+      if (!statusField || activeView.locked) return;
+      changeCell(recordId, statusField.id, statusValue);
+    };
+    const addGroup = () => {
+      if (!statusField || activeView.locked) return;
+      mutate(current => {
+        const field = current.fields.find(item => item.id === statusField.id);
+        if (!field) return current;
+        const choices = field.options?.choices ?? [];
+        let index = choices.length + 1;
+        let name = `新分组 ${index}`;
+        while (choices.some(choice => choice.name === name)) {
+          index += 1;
+          name = `新分组 ${index}`;
+        }
+        const colors = ['#dee8ff', '#f8e6c2', '#c7effb', '#e8f2d8', '#f0e7ff', '#ffe1e1'];
+        const nextChoice = {
+          id: `opt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+          name,
+          color: colors[choices.length % colors.length],
+        };
+        return {
+          ...current,
+          fields: current.fields.map(item => item.id === field.id
+            ? { ...item, options: { ...item.options, choices: [...choices, nextChoice] } }
+            : item),
+        };
+      });
+    };
+    const renameGroup = (choiceId: string, name: string) => {
+      if (!statusField || activeView.locked) return;
+      mutate(current => {
+        const field = current.fields.find(item => item.id === statusField.id);
+        const choices = field?.options?.choices ?? [];
+        const choice = choices.find(item => item.id === choiceId);
+        const nextName = name.trim();
+        if (!field || !choice || !nextName || choices.some(item => item.id !== choiceId && item.name === nextName)) return current;
+        return {
+          ...current,
+          fields: current.fields.map(item => item.id === field.id
+            ? { ...item, options: { ...item.options, choices: choices.map(option => option.id === choiceId ? { ...option, name: nextName } : option) } }
+            : item),
+          records: current.records.map(record => valueText(record.fields[field.id]) === choice.name
+            ? withUpdatedValue(record, field.id, nextName, field.name)
+            : record),
+        };
+      });
+    };
+    const deleteGroup = (choiceId: string) => {
+      if (!statusField || activeView.locked) return;
+      mutate(current => {
+        const field = current.fields.find(item => item.id === statusField.id);
+        const choices = field?.options?.choices ?? [];
+        const choice = choices.find(item => item.id === choiceId);
+        if (!field || !choice || choices.length <= 1) return current;
+        return {
+          ...current,
+          fields: current.fields.map(item => item.id === field.id
+            ? { ...item, options: { ...item.options, choices: choices.filter(option => option.id !== choiceId) } }
+            : item),
+          records: current.records.map(record => valueText(record.fields[field.id]) === choice.name
+            ? withUpdatedValue(record, field.id, '', field.name)
+            : record),
+        };
+      });
+    };
 
     return (
       <BitableKanbanView
         table={table}
         config={galleryConfig}
         records={records}
+        locked={activeView.locked}
         addRecordToColumn={addRecordToColumn}
+        changeRecordStatus={changeRecordStatus}
+        openRecord={recordId => {
+          setCardRecordId(recordId);
+          selectionAnchorRef.current = recordId;
+          setSelectedIds(new Set([recordId]));
+        }}
+        addGroup={addGroup}
+        renameGroup={renameGroup}
+        deleteGroup={deleteGroup}
       />
     );
   };
@@ -1597,16 +1847,94 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
 
   useEffect(() => {
     if (commentTargetRecordId && !table.records.some(record => record.id === commentTargetRecordId)) {
-      setCommentPanelOpen(false);
+      closeCommentPanel();
       setCommentTargetRecordId(null);
     }
-  }, [commentTargetRecordId, table.records]);
+  }, [closeCommentPanel, commentTargetRecordId, table.records]);
+
+  useEffect(() => {
+    if (!blockId) return;
+    const handleOtherBitableOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ blockId?: string }>).detail;
+      if (!detail?.blockId || detail.blockId === blockId) return;
+      setCommentPanelOpen(false);
+      setCommentTargetRecordId(null);
+    };
+    window.addEventListener(BITABLE_COMMENT_OPEN, handleOtherBitableOpen);
+    return () => window.removeEventListener(BITABLE_COMMENT_OPEN, handleOtherBitableOpen);
+  }, [blockId]);
+
+  useEffect(() => {
+    const handleCloseSidebar = () => {
+      setCommentPanelOpen(false);
+      setCommentTargetRecordId(null);
+    };
+    window.addEventListener(CLOSE_BITABLE_COMMENT_SIDEBAR, handleCloseSidebar);
+    return () => window.removeEventListener(CLOSE_BITABLE_COMMENT_SIDEBAR, handleCloseSidebar);
+  }, [blockId]);
+
+  useEffect(() => {
+    if (!commentPanelOpen || !commentTargetRecord || !blockId) return;
+    dispatchBitableCommentMeta({
+      blockId,
+      recordId: commentTargetRecord.id,
+      unresolvedCount: commentTargetRecord.comments?.length ?? 0,
+    });
+  }, [blockId, commentPanelOpen, commentTargetRecord]);
+
+  const updateCommentCardTop = useCallback(() => {
+    if (!commentPanelOpen || !commentTrackHost || !commentTargetRecord) return;
+    const blockRect = blockRef.current?.getBoundingClientRect();
+    const hostRect = commentTrackHost.getBoundingClientRect();
+    if (!blockRect) return;
+    const rowTop = activeView.type === 'grid'
+      ? 52 + GRID_HEADER_HEIGHT + commentTargetRecordIndex * GRID_ROW_HEIGHT
+      : 52;
+    setCommentCardTop(blockRect.top - hostRect.top + rowTop);
+  }, [activeView.type, commentPanelOpen, commentTargetRecord, commentTargetRecordIndex, commentTrackHost]);
+
+  useLayoutEffect(() => {
+    updateCommentCardTop();
+  }, [updateCommentCardTop]);
+
+  useEffect(() => {
+    if (!blockId) return;
+    const handleToggleSidebar = (event: Event) => {
+      const detail = (event as CustomEvent<{ blockId?: string }>).detail;
+      if (!detail?.blockId || detail.blockId !== blockId) return;
+      requestAnimationFrame(() => updateCommentCardTop());
+    };
+    window.addEventListener(BITABLE_COMMENT_TOGGLE_SIDEBAR, handleToggleSidebar);
+    return () => window.removeEventListener(BITABLE_COMMENT_TOGGLE_SIDEBAR, handleToggleSidebar);
+  }, [blockId, updateCommentCardTop]);
+
+  useEffect(() => {
+    if (!commentPanelOpen) return;
+    const workspace = document.querySelector<HTMLElement>('.doc-page-workspace');
+    workspace?.addEventListener('scroll', updateCommentCardTop);
+    window.addEventListener('resize', updateCommentCardTop);
+    return () => {
+      workspace?.removeEventListener('scroll', updateCommentCardTop);
+      window.removeEventListener('resize', updateCommentCardTop);
+    };
+  }, [commentPanelOpen, updateCommentCardTop]);
+
+  const bitableCommentPanel = commentPanelOpen && commentTargetRecord && commentTrackHost ? (
+    <BitableRecordCommentPanel
+      record={commentTargetRecord}
+      recordIndex={commentTargetRecordIndex}
+      cardTop={commentCardTop}
+      locked={activeView.locked}
+      onSubmit={content => addRecordComment(commentTargetRecord.id, content)}
+    />
+  ) : null;
 
   return (
     <NodeViewWrapper
       className={`feishu-bitable-block feishu-base-block${selected ? ' is-selected' : ''}${isViewToolsVisible ? ' is-view-tools-visible' : ''}${showSettings || showViewMenu || activeToolbarPanel || commentPanelOpen ? ' is-panel-open' : ''}${commentPanelOpen ? ' is-comment-open' : ''}`}
       {...blockAttrs(node.attrs)}
       data-base-view-type={activeView.type}
+      ref={blockRef}
       contentEditable={false}
       onContextMenu={(event: React.MouseEvent) => event.stopPropagation()}
     >
@@ -1696,29 +2024,31 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             )}
           </div>
           {!isRenamingView && !activeView.locked && (
-            <button
-              type="button"
-              className="base-viewbar__rename"
-              aria-label="重命名视图"
-              title="重命名"
-              onClick={startRenameView}
-            >
-              <ToolGlyphRename />
-            </button>
+            <BitableTooltip tip="重命名" placement="bottom">
+              <button
+                type="button"
+                className="base-viewbar__rename"
+                aria-label="重命名视图"
+                onClick={startRenameView}
+              >
+                <ToolGlyphRename />
+              </button>
+            </BitableTooltip>
           )}
         </div>
 
         <div className="base-viewbar__tools">
           <span className="base-viewbar__tool-anchor" ref={fieldPanelAnchorRef}>
-            <button
-              type="button"
-              className={`base-viewbar__tool${activeToolbarPanel === 'fields' ? ' is-active' : ''}`}
-              aria-label="字段配置"
-              title="字段配置"
-              onClick={() => openToolbarPanel('fields')}
-            >
-              <ToolGlyphSettings />
-            </button>
+            <BitableTooltip tip="字段配置" placement="bottom">
+              <button
+                type="button"
+                className={`base-viewbar__tool${activeToolbarPanel === 'fields' ? ' is-active' : ''}`}
+                aria-label="字段配置"
+                onClick={() => openToolbarPanel('fields')}
+              >
+                <ToolGlyphSettings />
+              </button>
+            </BitableTooltip>
             {activeToolbarPanel === 'fields' && (
               <FieldConfigPanel
                 table={table}
@@ -1732,33 +2062,46 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               />
             )}
           </span>
-          <button
-            type="button"
-            className={`base-viewbar__tool${showSettings ? ' is-active' : ''}`}
-            aria-label={settingsLabel}
-            title={settingsLabel}
-            onClick={() => {
-              setActiveToolbarPanel(null);
-              setShowSettings(open => !open);
-            }}
-          >
-            <SlashGlyphBitableGrid size={16} fill="currentColor" />
-          </button>
-          {activeView.type === 'gantt' && (
-            <button type="button" className="base-viewbar__tool" aria-label="甘特设置" title="甘特设置" onClick={() => {
-              setActiveToolbarPanel(null);
-              setShowSettings(true);
-            }}>
-              <ToolGlyphGantt />
+          <BitableTooltip tip={settingsLabel} placement="bottom">
+            <button
+              type="button"
+              className={`base-viewbar__tool${showSettings ? ' is-active' : ''}`}
+              aria-label={settingsLabel}
+              onClick={() => {
+                setActiveToolbarPanel(null);
+                setShowSettings(open => !open);
+              }}
+            >
+              <SlashGlyphBitableGrid size={16} fill="currentColor" />
             </button>
+          </BitableTooltip>
+          {activeView.type === 'gantt' && (
+            <BitableTooltip tip="甘特设置" placement="bottom">
+              <button type="button" className="base-viewbar__tool" aria-label="甘特设置" onClick={() => {
+                setActiveToolbarPanel(null);
+                setShowSettings(true);
+              }}>
+                <ToolGlyphGantt />
+              </button>
+            </BitableTooltip>
           )}
-          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'filter' ? ' is-active' : ''}`} aria-label="筛选" title="筛选" onClick={() => openToolbarPanel('filter')}><ToolGlyphFilter /></button>
-          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' ? ' is-active' : ''}`} aria-label="分组" title="分组" onClick={() => openToolbarPanel('group')}><ToolGlyphGroup /></button>
-          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' || activeView.sorts?.length ? ' is-active' : ''}`} aria-label="排序" title="排序" onClick={() => openToolbarPanel('sort')}><ToolGlyphSort /></button>
+          <BitableTooltip tip="筛选" placement="bottom">
+            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'filter' ? ' is-active' : ''}`} aria-label="筛选" onClick={() => openToolbarPanel('filter')}><ToolGlyphFilter /></button>
+          </BitableTooltip>
+          <BitableTooltip tip="分组" placement="bottom">
+            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' ? ' is-active' : ''}`} aria-label="分组" onClick={() => openToolbarPanel('group')}><ToolGlyphGroup /></button>
+          </BitableTooltip>
+          <BitableTooltip tip="排序" placement="bottom">
+            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' || activeView.sorts?.length ? ' is-active' : ''}`} aria-label="排序" onClick={() => openToolbarPanel('sort')}><ToolGlyphSort /></button>
+          </BitableTooltip>
           <span className="base-viewbar__tool-sep" aria-hidden />
-          <button type="button" className={`base-viewbar__tool${commentPanelOpen ? ' is-active' : ''}`} aria-label="评论" title="评论" onClick={toggleCommentPanel}><ToolGlyphComment /></button>
+          <BitableTooltip tip="评论" placement="bottom">
+            <button type="button" className={`base-viewbar__tool${commentPanelOpen ? ' is-active' : ''}`} aria-label="评论" onClick={toggleCommentPanel}><ToolGlyphComment /></button>
+          </BitableTooltip>
           <span className="base-viewbar__tool-sep" aria-hidden />
-          <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'share' ? ' is-active' : ''}`} aria-label="分享" title="在新窗口打开" onClick={() => openToolbarPanel('share')}><ToolGlyphShare /></button>
+          <BitableTooltip tip="在新窗口打开" placement="bottom">
+            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'share' ? ' is-active' : ''}`} aria-label="分享" onClick={() => openToolbarPanel('share')}><ToolGlyphShare /></button>
+          </BitableTooltip>
           {activeToolbarPanel && activeToolbarPanel !== 'fields' && activeToolbarPanel !== 'comment' && (
             <ToolbarQuickPanel
               panel={activeToolbarPanel}
@@ -1773,19 +2116,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         </div>
         </div>
       </header>
-      <div className="base-view-content" data-no-marquee-selection="true">
+      <div className="base-view-content" data-no-marquee-selection="true" onMouseDown={event => event.stopPropagation()}>
         {activeView.type === 'gallery' ? renderGallery() : activeView.type === 'gantt' ? renderGantt() : activeView.type === 'kanban' ? renderKanban() : renderGrid()}
-        {commentPanelOpen && commentTargetRecord && (
-          <BitableRecordCommentPanel
-            record={commentTargetRecord}
-            recordIndex={commentTargetRecordIndex}
-            locked={activeView.locked}
-            onClose={() => setCommentPanelOpen(false)}
-            onSubmit={content => addRecordComment(commentTargetRecord.id, content)}
-          />
-        )}
       </div>
       </div>
+      {bitableCommentPanel && commentTrackHost && createPortal(bitableCommentPanel, commentTrackHost)}
       {showSettings && activeView.type === 'gallery' && (
         <GallerySettings
           table={table}
@@ -1824,6 +2159,27 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           onConfirm={confirmDeleteView}
         />
       )}
+      {addFieldPanel && createPortal(
+        <div
+          className="base-field-edit-popover-portal"
+          style={{
+            left: Math.min(addFieldPanel.left, Math.max(8, window.innerWidth - 336)),
+            top: Math.min(addFieldPanel.top, Math.max(8, window.innerHeight - 520)),
+          }}
+          data-no-marquee-selection="true"
+          data-floating-panel="true"
+        >
+          <BitableAddFieldPopover
+            defaultName={nextAutoFieldName(table.fields)}
+            onCancel={() => setAddFieldPanel(null)}
+            onConfirm={input => {
+              createField(input);
+              setAddFieldPanel(null);
+            }}
+          />
+        </div>,
+        document.body,
+      )}
       {editingFieldPanel && editingField && createPortal(
         <div
           className="base-field-edit-popover-portal"
@@ -1857,7 +2213,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               setCardRecordId(null);
             }
           }}
-          onAddField={addField}
+          onAddField={() => openAddFieldPanel()}
         />,
         document.body,
       )}

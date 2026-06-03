@@ -8,6 +8,13 @@ import Editor from '../Editor/Editor';
 import Sidebar from './Sidebar';
 import DocumentHeader from './DocumentHeader';
 import CommentSidebar from './CommentSidebar';
+import { CommentSidebarTrackContext } from './CommentSidebarContext';
+import {
+  BITABLE_COMMENT_CLOSE,
+  BITABLE_COMMENT_META,
+  BITABLE_COMMENT_OPEN,
+  BITABLE_COMMENT_TOGGLE_SIDEBAR,
+} from './commentSidebarBridge';
 import {
   dispatchRemoveCommentHighlights,
   findOrphanedComments,
@@ -28,6 +35,9 @@ export default function DocumentPage() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'idle'>('idle');
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentSidebarVisible, setCommentSidebarVisible] = useState(false);
+  const [bitableCommentActive, setBitableCommentActive] = useState(false);
+  const [bitableUnresolvedCount, setBitableUnresolvedCount] = useState(0);
+  const [commentTrackHost, setCommentTrackHost] = useState<HTMLElement | null>(null);
   const [activeCommentBlockId, setActiveCommentBlockId] = useState('');
   const [commentInput, setCommentInput] = useState('');
   const [pendingCommentAnchor, setPendingCommentAnchor] = useState<{
@@ -128,8 +138,54 @@ export default function DocumentPage() {
     setActiveCommentBlockId('');
     setCommentInput('');
     setCommentSidebarVisible(false);
+    setBitableCommentActive(false);
+    setBitableUnresolvedCount(0);
     loadComments();
   }, [loadComments]);
+
+  const closeCommentSidebar = useCallback(() => {
+    setCommentSidebarVisible(false);
+    setActiveCommentBlockId('');
+    setCommentInput('');
+    setPendingCommentAnchor(null);
+  }, []);
+
+  const commentSidebarOpen = commentSidebarVisible;
+  const commentSidebarMounted = commentSidebarVisible || bitableCommentActive;
+
+  useEffect(() => {
+    const handleBitableOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ blockId?: string; recordId?: string }>).detail;
+      if (!detail?.blockId || !detail.recordId) return;
+      setBitableCommentActive(true);
+      setCommentSidebarVisible(true);
+    };
+    const handleBitableClose = (event: Event) => {
+      const detail = (event as CustomEvent<{ blockId?: string }>).detail;
+      if (!detail?.blockId) return;
+      setBitableCommentActive(false);
+      setBitableUnresolvedCount(0);
+    };
+    const handleBitableMeta = (event: Event) => {
+      const detail = (event as CustomEvent<{ unresolvedCount?: number }>).detail;
+      setBitableUnresolvedCount(Math.max(0, detail?.unresolvedCount ?? 0));
+    };
+    const handleBitableToggleSidebar = (event: Event) => {
+      const detail = (event as CustomEvent<{ blockId?: string }>).detail;
+      if (!detail?.blockId) return;
+      setCommentSidebarVisible(current => !current);
+    };
+    window.addEventListener(BITABLE_COMMENT_OPEN, handleBitableOpen);
+    window.addEventListener(BITABLE_COMMENT_CLOSE, handleBitableClose);
+    window.addEventListener(BITABLE_COMMENT_META, handleBitableMeta);
+    window.addEventListener(BITABLE_COMMENT_TOGGLE_SIDEBAR, handleBitableToggleSidebar);
+    return () => {
+      window.removeEventListener(BITABLE_COMMENT_OPEN, handleBitableOpen);
+      window.removeEventListener(BITABLE_COMMENT_CLOSE, handleBitableClose);
+      window.removeEventListener(BITABLE_COMMENT_META, handleBitableMeta);
+      window.removeEventListener(BITABLE_COMMENT_TOGGLE_SIDEBAR, handleBitableToggleSidebar);
+    };
+  }, []);
 
   useEffect(() => {
     const handleOpenCommentSidebar = (event: Event) => {
@@ -166,22 +222,21 @@ export default function DocumentPage() {
         resolveBlockElement(mainScrollRef.current, blockId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       }, 0);
     };
+    const handleCloseCommentSidebar = () => closeCommentSidebar();
     window.addEventListener('feishu-open-comment-sidebar', handleOpenCommentSidebar);
-    return () => window.removeEventListener('feishu-open-comment-sidebar', handleOpenCommentSidebar);
-  }, [comments, id]);
-
-  const closeCommentSidebar = useCallback(() => {
-    setCommentSidebarVisible(false);
-    setActiveCommentBlockId('');
-    setCommentInput('');
-    setPendingCommentAnchor(null);
-  }, []);
+    window.addEventListener('feishu-close-comment-sidebar', handleCloseCommentSidebar);
+    return () => {
+      window.removeEventListener('feishu-open-comment-sidebar', handleOpenCommentSidebar);
+      window.removeEventListener('feishu-close-comment-sidebar', handleCloseCommentSidebar);
+    };
+  }, [closeCommentSidebar, comments, id]);
 
   useEffect(() => {
     if (!commentSidebarVisible) return;
+    if (bitableCommentActive) return;
     if (hasOpenCommentSidebarContent(comments, pendingCommentAnchor)) return;
     closeCommentSidebar();
-  }, [closeCommentSidebar, commentSidebarVisible, comments, pendingCommentAnchor]);
+  }, [bitableCommentActive, closeCommentSidebar, commentSidebarVisible, comments, pendingCommentAnchor]);
 
   const handleSave = useCallback(async (data: { title?: string; content?: string; icon?: string; cover_url?: string }) => {
     if (!id) return;
@@ -386,7 +441,7 @@ export default function DocumentPage() {
   return (
     <div className="doc-page">
       <DocumentHeader doc={doc} saveStatus={saveStatus} readOnly={readOnly} onReadOnlyChange={setReadOnly} />
-      <div className={`doc-page-body${commentSidebarVisible ? ' doc-page-body--comment-open' : ''}`}>
+      <div className={`doc-page-body${commentSidebarOpen ? ' doc-page-body--comment-open' : ''}`}>
         <div className="doc-page-workspace" ref={mainScrollRef}>
           {doc.cover_url && (
             <div className="doc-cover-strip">
@@ -400,6 +455,7 @@ export default function DocumentPage() {
               </div>
             </div>
           )}
+          <CommentSidebarTrackContext.Provider value={commentTrackHost}>
           <div className="doc-page-workspace-inner">
             <main className="doc-page-main">
               <div className="doc-page-catalogue-rail" aria-hidden={!showOutlineSidebar}>
@@ -435,8 +491,9 @@ export default function DocumentPage() {
                 onToggleHeadingCollapse={handleToggleHeadingCollapse}
               />
             </main>
-            {commentSidebarVisible && (
+            {commentSidebarMounted && (
               <CommentSidebar
+                visible={commentSidebarVisible}
                 comments={comments}
                 activeBlockId={activeCommentBlockId}
                 pendingThread={pendingCommentAnchor}
@@ -450,9 +507,13 @@ export default function DocumentPage() {
                 onClose={closeCommentSidebar}
                 onJumpToBlock={handleJumpToCommentBlock}
                 mainScrollRef={mainScrollRef}
+                hasExternalPanels={bitableCommentActive}
+                externalUnresolvedCount={bitableUnresolvedCount}
+                onTrackElement={setCommentTrackHost}
               />
             )}
           </div>
+          </CommentSidebarTrackContext.Provider>
         </div>
       </div>
     </div>

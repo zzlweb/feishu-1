@@ -58,7 +58,7 @@ const noAttachmentModel = {
         showFieldNames: false,
         showEmptyFields: false,
         showAttachmentCount: true,
-        showRecordActions: true,
+        showRecordActions: false,
         emptyCoverMode: 'placeholder',
       },
     },
