@@ -239,16 +239,22 @@ test('applies grouping and filtering as gallery view configuration only', async 
   await expect(page.locator('.base-grid-footer')).toContainText('3 条记录');
 });
 
-test('supports multi selection and escape clearing without opening details', async ({ page }) => {
+test('opens record modal on card click and supports multi selection', async ({ page }) => {
   await openGallery(page);
 
-  await page.locator('.base-gallery-card').first().click({ modifiers: ['Control'] });
-  await page.locator('.base-gallery-card').nth(1).click({ modifiers: ['Shift'] });
-  await expect(page.locator('.base-gallery-card.is-selected')).toHaveCount(2);
-  await expect(page.locator('.base-detail')).toHaveCount(0);
+  await page.locator('.base-gallery-canvas-card-hit').first().click();
+  await expect(page.locator('.bitable-record-card-mask')).toBeVisible();
+  await expect(page.locator('.bitable-card-modal-header-v2-title')).toContainText('产品 A');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.bitable-record-card-mask')).toHaveCount(0);
+
+  await page.locator('.base-gallery-canvas-card-hit').first().click({ modifiers: ['Control'] });
+  await page.locator('.base-gallery-canvas-card-hit').nth(1).click({ modifiers: ['Shift'] });
+  await expect(page.locator('.base-gallery-canvas-card-hit.is-selected')).toHaveCount(2);
+  await expect(page.locator('.bitable-record-card-mask')).toHaveCount(0);
 
   await page.keyboard.press('Escape');
-  await expect(page.locator('.base-gallery-card.is-selected')).toHaveCount(0);
+  await expect(page.locator('.base-gallery-canvas-card-hit.is-selected')).toHaveCount(0);
 });
 
 test('locks gallery view configuration controls', async ({ page }) => {

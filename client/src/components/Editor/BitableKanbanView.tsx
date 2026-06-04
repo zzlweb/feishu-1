@@ -183,6 +183,7 @@ export function BitableKanbanView({
     block.style.setProperty('--bitable-display-width', `${displayWidth || anchor}px`);
     block.style.setProperty('--bitable-block-shift', `${blockShift}px`);
     block.classList.toggle('is-grid-bleed-active', blockShift > 0 || contentWidth > baseScrollWidth);
+    block.dispatchEvent(new CustomEvent('bitable-grid-scroll', { bubbles: true }));
   }, [anchor, baseScrollWidth, blockShift, contentWidth, displayWidth]);
 
   useEffect(() => {

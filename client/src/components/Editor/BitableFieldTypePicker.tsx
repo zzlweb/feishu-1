@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { fieldTypeGlyph } from './bitableFieldTypeIcons';
 import { filterFieldTypeGroups, type FieldTypeGroupDef } from './bitableFieldTypes';
 import type { BaseFieldType } from './bitableModel';
+import { useAnchoredFloatingPosition } from './floatingPanel';
 
 function GlyphSearch({ size = 16 }: { size?: number }) {
   return (
@@ -38,37 +39,6 @@ function GlyphDone({ size = 16 }: { size?: number }) {
 }
 
 const PANEL_WIDTH = 240;
-
-function usePickerPosition(anchorRef: RefObject<HTMLElement | null>, open: boolean) {
-  const [style, setStyle] = useState<{ top: number; left: number; maxHeight: number }>({ top: 0, left: 0, maxHeight: 480 });
-
-  useLayoutEffect(() => {
-    if (!open || !anchorRef.current) return;
-    const update = () => {
-      const anchor = anchorRef.current;
-      if (!anchor) return;
-      const rect = anchor.getBoundingClientRect();
-      const viewportPadding = 12;
-      const gap = 4;
-      let left = rect.right + gap;
-      if (left + PANEL_WIDTH > window.innerWidth - viewportPadding) {
-        left = Math.max(viewportPadding, rect.left - PANEL_WIDTH - gap);
-      }
-      const top = Math.max(viewportPadding, rect.top);
-      const maxHeight = Math.max(160, window.innerHeight - top - viewportPadding);
-      setStyle({ top, left, maxHeight });
-    };
-    update();
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    return () => {
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-    };
-  }, [anchorRef, open]);
-
-  return style;
-}
 
 function FieldTypeGroupList({
   groups,
@@ -130,7 +100,14 @@ export function BitableFieldTypePicker({
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
-  const position = usePickerPosition(anchorRef, open);
+  const position = useAnchoredFloatingPosition(anchorRef, panelRef, open, {
+    placement: 'right-start',
+    fallbackWidth: PANEL_WIDTH,
+    fallbackHeight: 480,
+    pad: 12,
+    gap: 4,
+    minMaxHeight: 160,
+  });
   const filteredGroups = filterFieldTypeGroups(query);
 
   useEffect(() => {
@@ -169,7 +146,7 @@ export function BitableFieldTypePicker({
     <div
       ref={panelRef}
       className="base-b-field-type-picker-portal"
-      style={{ top: position.top, left: position.left }}
+      style={{ top: position.top, left: position.left, visibility: position.visibility }}
       data-floating-panel="true"
       data-no-marquee-selection="true"
       role="presentation"

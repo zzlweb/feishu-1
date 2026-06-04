@@ -402,8 +402,9 @@
   }
 }
 
-/* 图片块左侧块菜单 — 飞书 docx-menu-wrapper 结构 */
-.docx-menu-wrapper.image-context-menu {
+/* 图片 / 多维表格块左侧块菜单 — 飞书 docx-menu-wrapper 结构 */
+.docx-menu-wrapper.image-context-menu,
+.docx-menu-wrapper.bitable-context-menu {
   --icon-n1: #646a73;
   --border-color: #e8e9eb;
   --text-primary: #1f2329;
@@ -422,13 +423,15 @@
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
-.docx-menu-wrapper.image-context-menu .docx-menu-container--vertical {
+.docx-menu-wrapper.image-context-menu .docx-menu-container--vertical,
+.docx-menu-wrapper.bitable-context-menu .docx-menu-container--vertical {
   display: flex;
   flex-direction: column;
   padding: 4px 0;
 }
 
-.docx-menu-wrapper.image-context-menu .panel-menu-item {
+.docx-menu-wrapper.image-context-menu .panel-menu-item,
+.docx-menu-wrapper.bitable-context-menu .panel-menu-item {
   display: flex;
   align-items: center;
   min-height: 34px;
@@ -440,6 +443,19 @@
   &:hover,
   &.is-submenu-open {
     background: var(--bg-hover);
+  }
+
+  &.menu-item-disabled {
+    cursor: default;
+    color: #bbbfc4;
+
+    &:hover {
+      background: transparent;
+    }
+
+    .universe-icon {
+      color: #bbbfc4;
+    }
   }
 
   .menu-item-content {
@@ -515,7 +531,8 @@
   }
 }
 
-.docx-menu-wrapper.image-context-menu .menu-divider-item {
+.docx-menu-wrapper.image-context-menu .menu-divider-item,
+.docx-menu-wrapper.bitable-context-menu .menu-divider-item {
   height: 1px;
   margin: 4px 0;
   background: var(--border-color);

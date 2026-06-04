@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from 'react';
 import {
+  applyBoxSelectionToEditor,
   canStartBoxSelect,
   collectSelectableUnits,
   findSelectableUnitAtPoint,
@@ -37,6 +38,7 @@ interface DragState {
 interface Props {
   editor: Editor | null;
   editorAreaRef: RefObject<HTMLDivElement | null>;
+  editorContainerRef: RefObject<HTMLDivElement | null>;
   readOnly?: boolean;
 }
 
@@ -73,7 +75,7 @@ function scrollContainerBy(container: HTMLElement | Window, deltaY: number): voi
   else container.scrollTop += deltaY;
 }
 
-export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly }: Props) {
+export default function BoxBlockSelectionLayer({ editor, editorAreaRef, editorContainerRef, readOnly }: Props) {
   const [dragging, setDragging] = useState(false);
   const [dragRect, setDragRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const [selectedUnits, setSelectedUnits] = useState<SelectableUnit[]>([]);
@@ -139,7 +141,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
     editorAreaRef.current?.removeAttribute('data-selection-mode');
     if (units.length > 0) {
       shiftAnchorIdRef.current = units[0].id;
-      ed.view.focus();
+      applyBoxSelectionToEditor(ed, units);
     }
   }, [editorAreaRef, selectUnits]);
 
@@ -281,18 +283,23 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
       ensureAutoScroll();
     };
 
+    const releasePointerCapture = (pointerId: number) => {
+      editorContainerRef.current?.releasePointerCapture?.(pointerId);
+      editorAreaRef.current?.releasePointerCapture?.(pointerId);
+    };
+
     const onDocPointerUp = (e: PointerEvent) => {
       if (!draggingRef.current && pendingDragRef.current) {
-        editorAreaRef.current?.releasePointerCapture?.(pendingDragRef.current.pointerId);
+        releasePointerCapture(pendingDragRef.current.pointerId);
         pendingDragRef.current = null;
         return;
       }
-      editorAreaRef.current?.releasePointerCapture?.(e.pointerId);
+      releasePointerCapture(e.pointerId);
       finishDrag(e.clientX, e.clientY);
     };
 
     const onDocPointerCancel = (e: PointerEvent) => {
-      editorAreaRef.current?.releasePointerCapture?.(e.pointerId);
+      releasePointerCapture(e.pointerId);
       pendingDragRef.current = null;
       draggingRef.current = false;
       setDragging(false);
@@ -315,15 +322,17 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
       document.body.classList.remove('feishu-box-select-dragging');
       stopAutoScroll();
     };
-  }, [beginDrag, clearSelection, editorAreaRef, ensureAutoScroll, finalizeSelection, readOnly, selectUnits, stopAutoScroll, syncSelectionBands, updateDragOverlay]);
+  }, [beginDrag, clearSelection, editorAreaRef, editorContainerRef, ensureAutoScroll, finalizeSelection, readOnly, selectUnits, stopAutoScroll, syncSelectionBands, updateDragOverlay]);
 
   useEffect(() => {
     if (readOnly || !editor) return;
     const area = editorAreaRef.current;
-    if (!area) return;
+    const container = editorContainerRef.current ?? area;
+    if (!area || !container) return;
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 || isUiChrome(e.target)) return;
+      if (!container.contains(e.target as Node)) return;
 
       if (e.shiftKey && selectedRef.current.length > 0) {
         const unit = findSelectableUnitAtPoint(editor, e.clientX, e.clientY);
@@ -334,8 +343,9 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
         if (anchorIndex >= 0 && targetIndex >= 0) {
           e.preventDefault();
           const [from, to] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
-          selectUnits(allUnits.slice(from, to + 1));
-          editor.view.focus();
+          const rangeUnits = allUnits.slice(from, to + 1);
+          selectUnits(rangeUnits);
+          applyBoxSelectionToEditor(editor, rangeUnits);
           return;
         }
       }
@@ -353,12 +363,12 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
       ) {
         if (selectedRef.current.length > 0) clearSelection();
         e.preventDefault();
-        area.setPointerCapture?.(e.pointerId);
+        container.setPointerCapture?.(e.pointerId);
         pendingDragRef.current = { startX: e.clientX, startY: e.clientY, pointerId: e.pointerId };
         return;
       }
 
-      const canStart = canStartBoxSelect(e.target, area, e.clientX, e.clientY);
+      const canStart = canStartBoxSelect(e.target, area, e.clientX, e.clientY, container);
 
       if (!canStart) {
         if (selectedRef.current.length > 0) {
@@ -374,15 +384,15 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, readOnly
 
       e.preventDefault();
       window.getSelection()?.removeAllRanges();
-      area.setPointerCapture?.(e.pointerId);
+      container.setPointerCapture?.(e.pointerId);
       pendingDragRef.current = { startX: e.clientX, startY: e.clientY, pointerId: e.pointerId };
     };
 
-    area.addEventListener('pointerdown', onPointerDown, true);
+    container.addEventListener('pointerdown', onPointerDown, true);
     return () => {
-      area.removeEventListener('pointerdown', onPointerDown, true);
+      container.removeEventListener('pointerdown', onPointerDown, true);
     };
-  }, [beginDrag, clearSelection, disarm, editor, editorAreaRef, readOnly]);
+  }, [beginDrag, clearSelection, disarm, editor, editorAreaRef, editorContainerRef, readOnly]);
 
   useEffect(() => {
     if (!editor) return;

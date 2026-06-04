@@ -1,6 +1,7 @@
 import { Extension, type CommandProps } from '@tiptap/core';
 import type { Editor } from '@tiptap/react';
 import type { ResolvedPos } from '@tiptap/pm/model';
+import { NodeSelection } from '@tiptap/pm/state';
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -12,6 +13,63 @@ declare module '@tiptap/core' {
 }
 
 export const MAX_BLOCK_INDENT = 8;
+export const ATOM_INDENT_BLOCK_TYPES = ['localBitableBlock'] as const;
+export type AtomIndentBlockType = (typeof ATOM_INDENT_BLOCK_TYPES)[number];
+
+function readIndentLevel(raw: unknown): number {
+  return typeof raw === 'number' && raw > 0 ? raw : 0;
+}
+
+function getActiveAtomIndentBlock(editor: Editor): AtomIndentBlockType | null {
+  for (const type of ATOM_INDENT_BLOCK_TYPES) {
+    if (editor.isActive(type)) return type;
+  }
+  return null;
+}
+
+function getAtomIndentLevel(editor: Editor, type: AtomIndentBlockType): number {
+  return readIndentLevel(editor.getAttributes(type).indentLevel);
+}
+
+function resolveAtomIndentTarget(state: CommandProps['state']) {
+  const { selection } = state;
+  if (selection instanceof NodeSelection) {
+    const typeName = selection.node.type.name;
+    if (ATOM_INDENT_BLOCK_TYPES.includes(typeName as AtomIndentBlockType)) {
+      return { pos: selection.from, node: selection.node };
+    }
+  }
+  const { $from } = selection;
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const node = $from.node(depth);
+    if (ATOM_INDENT_BLOCK_TYPES.includes(node.type.name as AtomIndentBlockType)) {
+      return { pos: $from.before(depth), node };
+    }
+  }
+  return null;
+}
+
+function mutateAtomBlockIndent(
+  state: CommandProps['state'],
+  dispatch: CommandProps['dispatch'],
+  delta: 1 | -1,
+): boolean {
+  const target = resolveAtomIndentTarget(state);
+  if (!target) return false;
+
+  const current = readIndentLevel(target.node.attrs.indentLevel);
+  const next = current + delta;
+  if (next < 0 || next > MAX_BLOCK_INDENT) return false;
+  if (dispatch) {
+    dispatch(
+      state.tr.setNodeMarkup(target.pos, undefined, {
+        ...target.node.attrs,
+        indentLevel: next,
+      }),
+    );
+  }
+  return true;
+}
 
 function ancestorHasListOrTask($from: ResolvedPos): boolean {
   for (let depth = 0; depth < $from.depth; depth++) {
@@ -39,6 +97,19 @@ export interface EditorIndentUiState {
 
 /** 选区工具栏 / 右键对齐浮层共用：列表嵌套 + 正文/标题块缩进 */
 export function getEditorIndentUiState(editor: Editor): EditorIndentUiState {
+  const atomType = getActiveAtomIndentBlock(editor);
+  if (atomType) {
+    const level = getAtomIndentLevel(editor, atomType);
+    const canIncrease = level < MAX_BLOCK_INDENT;
+    const canDecrease = level > 0;
+    return {
+      canIncrease,
+      canDecrease,
+      ...(!canIncrease ? { increaseDisabledTitle: '当前内容块已达最大缩进层级' } : {}),
+      ...(!canDecrease ? { decreaseDisabledTitle: '当前无法再减少缩进' } : {}),
+    };
+  }
+
   const inTask = editor.isActive('taskItem');
   const inList = editor.isActive('listItem');
   const canSinkList = inTask
@@ -113,7 +184,7 @@ export const BlockIndent = Extension.create({
   addGlobalAttributes() {
     return [
       {
-        types: ['paragraph', 'heading'],
+        types: ['paragraph', 'heading', ...ATOM_INDENT_BLOCK_TYPES],
         attributes: {
           indentLevel: {
             default: 0,
@@ -139,6 +210,8 @@ export const BlockIndent = Extension.create({
       increaseBlockIndent:
         () =>
         ({ state, dispatch }: CommandProps) => {
+          if (mutateAtomBlockIndent(state, dispatch, 1)) return true;
+
           const { $from } = state.selection;
           if (ancestorHasListOrTask($from)) return false;
 
@@ -170,6 +243,8 @@ export const BlockIndent = Extension.create({
       decreaseBlockIndent:
         () =>
         ({ state, dispatch }: CommandProps) => {
+          if (mutateAtomBlockIndent(state, dispatch, -1)) return true;
+
           const { $from } = state.selection;
           if (ancestorHasListOrTask($from)) return false;
 

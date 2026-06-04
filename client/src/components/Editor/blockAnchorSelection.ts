@@ -125,6 +125,22 @@ export function syncEditorSelectionToAnchoredBlock(editor: Editor, blockEl: HTML
 
   if (syncImageNodeSelection(editor, blockEl)) return;
 
+  const bitableEl = blockEl.classList.contains('feishu-bitable-block')
+    ? blockEl
+    : (blockEl.closest('.feishu-bitable-block') as HTMLElement | null);
+  if (bitableEl?.isConnected && view.dom.contains(bitableEl)) {
+    try {
+      const pos = view.posAtDOM(bitableEl, 0);
+      const node = editor.state.doc.nodeAt(pos);
+      if (node?.type.name === 'localBitableBlock' && NodeSelection.isSelectable(node)) {
+        editor.chain().focus().setNodeSelection(pos).run();
+        return;
+      }
+    } catch {
+      /* keep selection */
+    }
+  }
+
   const selectableAtom = blockEl.closest(
     '.feishu-button-block, .feishu-formula-editor, .feishu-local-card, .feishu-bitable-block, .feishu-div-table, .feishu-file-block, .feishu-sync-block',
   );

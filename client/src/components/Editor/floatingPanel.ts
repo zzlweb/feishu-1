@@ -5,6 +5,212 @@ export interface FloatingPanelPosition {
   y: number;
 }
 
+export type FloatingPanelPlacement = 'bottom-start' | 'top-start' | 'right-start' | 'left-start';
+
+export interface FloatingPanelRect {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+export interface AnchoredFloatingPanelPosition {
+  left: number;
+  top: number;
+  maxHeight: number;
+  placement: FloatingPanelPlacement;
+  visibility: 'hidden' | 'visible';
+}
+
+export interface AnchoredFloatingPanelOptions {
+  placement?: FloatingPanelPlacement;
+  gap?: number;
+  pad?: number;
+  fallbackWidth?: number;
+  fallbackHeight?: number;
+  matchAnchorWidth?: boolean;
+  minMaxHeight?: number;
+}
+
+function viewportRect() {
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  };
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (max < min) return min;
+  return Math.max(min, Math.min(value, max));
+}
+
+export function pointToFloatingRect(left: number, top: number, size = 1): FloatingPanelRect {
+  return { left, top, right: left + size, bottom: top + size, width: size, height: size };
+}
+
+export function elementToFloatingRect(element: HTMLElement): FloatingPanelRect {
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+export function computeAnchoredFloatingPosition(
+  anchor: FloatingPanelRect,
+  panelWidth: number,
+  panelHeight: number,
+  options: AnchoredFloatingPanelOptions = {},
+): AnchoredFloatingPanelPosition {
+  const {
+    placement = 'bottom-start',
+    gap = 4,
+    pad = 8,
+    minMaxHeight = 120,
+  } = options;
+  const viewport = viewportRect();
+  const width = Math.max(1, panelWidth);
+  const height = Math.max(1, panelHeight);
+  let nextPlacement = placement;
+  let left = anchor.left;
+  let top = anchor.bottom + gap;
+
+  if (placement === 'top-start') {
+    top = anchor.top - gap - height;
+    if (top < pad && anchor.bottom + gap + height <= viewport.height - pad) {
+      nextPlacement = 'bottom-start';
+      top = anchor.bottom + gap;
+    }
+  } else if (placement === 'bottom-start') {
+    top = anchor.bottom + gap;
+    if (top + height > viewport.height - pad && anchor.top - gap - height >= pad) {
+      nextPlacement = 'top-start';
+      top = anchor.top - gap - height;
+    }
+  } else if (placement === 'right-start') {
+    left = anchor.right + gap;
+    top = anchor.top;
+    if (left + width > viewport.width - pad && anchor.left - gap - width >= pad) {
+      nextPlacement = 'left-start';
+      left = anchor.left - gap - width;
+    }
+  } else if (placement === 'left-start') {
+    left = anchor.left - gap - width;
+    top = anchor.top;
+    if (left < pad && anchor.right + gap + width <= viewport.width - pad) {
+      nextPlacement = 'right-start';
+      left = anchor.right + gap;
+    }
+  }
+
+  if (nextPlacement === 'bottom-start' || nextPlacement === 'top-start') {
+    left = clampNumber(left, pad, viewport.width - width - pad);
+  } else {
+    left = clampNumber(left, pad, viewport.width - width - pad);
+    top = clampNumber(top, pad, viewport.height - height - pad);
+  }
+
+  top = clampNumber(top, pad, viewport.height - Math.min(height, viewport.height - pad * 2) - pad);
+  const maxHeight = Math.max(minMaxHeight, viewport.height - top - pad);
+
+  return {
+    left,
+    top,
+    maxHeight,
+    placement: nextPlacement,
+    visibility: 'visible',
+  };
+}
+
+export function useAnchoredFloatingPosition(
+  anchorRef: RefObject<HTMLElement | null> | undefined,
+  panelRef: RefObject<HTMLElement | null>,
+  open: boolean,
+  options: AnchoredFloatingPanelOptions & { anchorRect?: FloatingPanelRect | null } = {},
+) {
+  const {
+    anchorRect,
+    fallbackWidth = 240,
+    fallbackHeight = 320,
+    matchAnchorWidth = false,
+    ...positionOptions
+  } = options;
+  const [style, setStyle] = useState<AnchoredFloatingPanelPosition & { width?: number }>({
+    left: 0,
+    top: 0,
+    maxHeight: fallbackHeight,
+    placement: positionOptions.placement || 'bottom-start',
+    visibility: 'hidden',
+    width: matchAnchorWidth ? fallbackWidth : undefined,
+  });
+
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+
+    let raf = 0;
+    const update = () => {
+      const anchorEl = anchorRef?.current;
+      const anchor = anchorEl?.isConnected ? elementToFloatingRect(anchorEl) : anchorRect;
+      if (!anchor) return;
+      const panelRect = panelRef.current?.getBoundingClientRect();
+      const panelWidth = matchAnchorWidth ? anchor.width : (panelRect?.width || fallbackWidth);
+      const panelHeight = panelRect?.height || fallbackHeight;
+      const next = computeAnchoredFloatingPosition(anchor, panelWidth, panelHeight, positionOptions);
+      const width = matchAnchorWidth ? anchor.width : undefined;
+      setStyle(prev => (
+        prev.left === next.left
+        && prev.top === next.top
+        && prev.maxHeight === next.maxHeight
+        && prev.placement === next.placement
+        && prev.visibility === next.visibility
+        && prev.width === width
+          ? prev
+          : { ...next, width }
+      ));
+    };
+
+    update();
+    raf = window.requestAnimationFrame(update);
+    const resizeObserver = typeof ResizeObserver !== 'undefined' && panelRef.current
+      ? new ResizeObserver(update)
+      : null;
+    if (panelRef.current) resizeObserver?.observe(panelRef.current);
+    window.addEventListener('resize', update);
+    document.addEventListener('scroll', update, true);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', update);
+      document.removeEventListener('scroll', update, true);
+    };
+  }, [
+    anchorRef,
+    panelRef,
+    open,
+    anchorRect?.left,
+    anchorRect?.top,
+    anchorRect?.right,
+    anchorRect?.bottom,
+    anchorRect?.width,
+    anchorRect?.height,
+    fallbackWidth,
+    fallbackHeight,
+    matchAnchorWidth,
+    positionOptions.placement,
+    positionOptions.gap,
+    positionOptions.pad,
+    positionOptions.minMaxHeight,
+  ]);
+
+  return style;
+}
+
 export function clampPanelY(anchor: DOMRect, menuH: number, pad: number): number {
   const vh = window.innerHeight;
   const anchorCenterY = anchor.top + anchor.height / 2;

@@ -19,6 +19,7 @@ import 'katex/dist/katex.min.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { MessagePlugin } from 'tdesign-react';
 import ContextMenu from './ContextMenu';
+import BitableContextMenu from './BitableContextMenu';
 import ImageContextMenu from './ImageContextMenu';
 import TableContextMenu from './TableContextMenu';
 import { computeBlockPanelPosition, useHoverFloatingGroup } from './floatingPanel';
@@ -540,7 +541,7 @@ function isPlusMenuHoverBridgeTarget(target: EventTarget | null): boolean {
 }
 
 const CONTEXT_MENU_SHELL_SELECTOR =
-  '.context-menu, .context-submenu-flyout, .context-add-below-flyout, .docx-menu-wrapper.image-context-menu';
+  '.context-menu, .context-submenu-flyout, .context-add-below-flyout, .docx-menu-wrapper.image-context-menu, .docx-menu-wrapper.bitable-context-menu';
 
 function isPointerInContextMenuShell(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest(CONTEXT_MENU_SHELL_SELECTOR));
@@ -1996,10 +1997,26 @@ function getBlockToolsAnchorTop(
   return rr.top + rr.height / 2 - areaRectTop;
 }
 
+function readBitableBlockShift(blockEl: HTMLElement) {
+  const raw = getComputedStyle(blockEl).getPropertyValue('--bitable-block-shift').trim();
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function readBitableHeaderFollowX(blockEl: HTMLElement) {
+  const followRaw = getComputedStyle(blockEl).getPropertyValue('--bitable-grid-header-follow-x').trim();
+  if (followRaw) {
+    const follow = Number.parseFloat(followRaw);
+    if (Number.isFinite(follow)) return follow;
+  }
+  return readBitableBlockShift(blockEl);
+}
+
 function getBlockToolsAnchorLeft(blockEl: HTMLElement, areaRectLeft: number, columnContent: HTMLElement | null): number {
   if (columnContent) return columnContent.getBoundingClientRect().left - areaRectLeft;
   if (blockEl.classList.contains('feishu-bitable-block')) {
-    return blockEl.getBoundingClientRect().left - areaRectLeft;
+    const blockRect = blockEl.getBoundingClientRect();
+    return blockRect.left - areaRectLeft - readBitableHeaderFollowX(blockEl);
   }
   return 0;
 }
@@ -2087,7 +2104,7 @@ export default function Editor({
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
-    variant: 'block' | 'table' | 'image';
+    variant: 'block' | 'table' | 'image' | 'bitable';
   } | null>(null);
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
   const [slashMenuPos, setSlashMenuPos] = useState({ top: 0, left: 0 });
@@ -2120,6 +2137,7 @@ export default function Editor({
   const lastEditorPointerRef = useRef<{ x: number; y: number } | null>(null);
   const contextMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const blockAddButtonRef = useRef<HTMLButtonElement>(null);
   const blockDragRowRef = useRef<HTMLButtonElement>(null);
   const tableHandleRef = useRef<HTMLButtonElement>(null);
@@ -3461,11 +3479,24 @@ export default function Editor({
     slashMenuFromPlus,
   ]);
 
+  useEffect(() => {
+    if (readOnly || !blockTools.visible || !isBitableToolType(blockTools.type)) return;
+    const block = activeBlockElRef.current;
+    if (!block?.isConnected || !block.classList.contains('feishu-bitable-block')) return;
+    const onGridScroll = () => {
+      const editorInstance = editorRefForCatalogue.current;
+      if (editorInstance) updateBlockTools(editorInstance);
+    };
+    block.addEventListener('bitable-grid-scroll', onGridScroll);
+    return () => block.removeEventListener('bitable-grid-scroll', onGridScroll);
+  }, [blockTools.type, blockTools.visible, readOnly, updateBlockTools]);
+
   const openBlockConfigMenu = (options?: { skipCooldown?: boolean }) => {
     if (slashMenuVisible && slashMenuFromPlus) return;
     const isTableTarget = blockTools.type === 'table';
     const isImageTarget = blockTools.type === 'image';
-    const openVariant = isTableTarget ? 'table' : isImageTarget ? 'image' : 'block';
+    const isBitableTarget = isBitableToolType(blockTools.type);
+    const openVariant = isTableTarget ? 'table' : isImageTarget ? 'image' : isBitableTarget ? 'bitable' : 'block';
     if (contextMenu?.variant === openVariant) {
       cancelContextMenuClose();
       return;
@@ -3516,17 +3547,35 @@ export default function Editor({
     const btn = blockDragRowRef.current;
     if (btn?.isConnected) {
       const pos = computeBlockPanelPosition(btn.getBoundingClientRect());
-      setContextMenu({ ...pos, variant: isImageTarget ? 'image' : 'block' });
+      setContextMenu({
+        ...pos,
+        variant: isImageTarget ? 'image' : isBitableTarget ? 'bitable' : 'block',
+      });
       return;
     }
     const area = editorAreaRef.current;
     if (area) {
       const ar = area.getBoundingClientRect();
-      setContextMenu({ x: ar.left - 8, y: ar.top + blockTools.top + 30, variant: isImageTarget ? 'image' : 'block' });
+      setContextMenu({
+        x: ar.left - 8,
+        y: ar.top + blockTools.top + 30,
+        variant: isImageTarget ? 'image' : isBitableTarget ? 'bitable' : 'block',
+      });
     } else {
-      setContextMenu({ x: 24, y: blockTools.top + 30, variant: isImageTarget ? 'image' : 'block' });
+      setContextMenu({
+        x: 24,
+        y: blockTools.top + 30,
+        variant: isImageTarget ? 'image' : isBitableTarget ? 'bitable' : 'block',
+      });
     }
   };
+
+  const handleBlockDragRowClick = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    if (!isBitableToolType(blockTools.type)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openBlockConfigMenu({ skipCooldown: true });
+  }, [blockTools.type, openBlockConfigMenu]);
 
   const focusPlusMenuTarget = useCallback(() => {
     const row = activeBlockElRef.current;
@@ -3641,7 +3690,7 @@ export default function Editor({
   return (
     <div className="editor-wrap" onMouseLeave={handleEditorWrapMouseLeave}>
       <div className="editor-scroll">
-        <div className="editor-container">
+        <div className="editor-container" ref={editorContainerRef}>
           {/* Title area wrapper for hover detection */}
           <div
             className="editor-title-area"
@@ -3764,7 +3813,12 @@ export default function Editor({
               </div>
             )}
             {!readOnly && (
-              <BoxBlockSelectionLayer editor={editor} editorAreaRef={editorAreaRef} readOnly={readOnly} />
+              <BoxBlockSelectionLayer
+                editor={editor}
+                editorAreaRef={editorAreaRef}
+                editorContainerRef={editorContainerRef}
+                readOnly={readOnly}
+              />
             )}
             {(blockTools.visible || (slashMenuVisible && slashMenuFromPlus)) && !readOnly && blockTools.type !== 'table' && !(blockTools.isInColumns && blockTools.isEmpty && !(slashMenuVisible && slashMenuFromPlus)) && (
               <div
@@ -3814,8 +3868,11 @@ export default function Editor({
                     onPointerDown={event => beginBlockDrag(event)}
                     onPointerEnter={blockTools.type === 'table' ? undefined : () => {
                       blockHoverFloatingGroup.cancelClose();
-                      openBlockConfigMenu({ skipCooldown: true });
+                      if (!isBitableToolType(blockTools.type)) {
+                        openBlockConfigMenu({ skipCooldown: true });
+                      }
                     }}
+                    onClick={handleBlockDragRowClick}
                     onMouseLeave={(e) => {
                       const next = getRelatedNode(e.relatedTarget);
                       if (next && e.currentTarget.contains(next)) return;
@@ -3986,6 +4043,18 @@ export default function Editor({
       )}
       {contextMenu?.variant === 'block' && (
         <ContextMenu
+          editor={editor}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          anchorRef={blockDragRowRef}
+          blockAnchorRef={activeBlockElRef}
+          onClose={closeContextMenu}
+          onHoverDismiss={dismissContextMenuFromHover}
+          onMouseEnterCancel={cancelContextMenuClose}
+        />
+      )}
+      {contextMenu?.variant === 'bitable' && (
+        <BitableContextMenu
           editor={editor}
           x={contextMenu.x}
           y={contextMenu.y}

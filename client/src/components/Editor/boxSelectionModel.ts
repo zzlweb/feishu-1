@@ -62,6 +62,9 @@ const INTERACTIVE_CONTROL_SELECTOR =
 const WIDGET_BLOCK_SELECTOR =
   '[data-local-block], [contenteditable="false"], img, video, audio, iframe, .feishu-image-block, .feishu-local-card, .feishu-button-block, .feishu-formula-editor, .feishu-bitable-block, .feishu-sync-block, .feishu-media-preview, .feishu-file-actions, .feishu-divider, .feishu-code-block__toolbar, .feishu-highlight-block-wrap';
 
+const BITABLE_VIEW_INTERACTION_SELECTOR =
+  '.base-grid-wrap, .base-grid-shell, .base-grid-canvas-scroll, .base-grid-canvas, .base-kanban-board, .base-gallery-surface, .base-gantt-shell, .base-toolbar-panel, .base-settings, .base-field-edit-popover-portal, .base-delete-view-overlay';
+
 /** 判断 li 是否为任务列表项 */
 export function isTaskListItem(li: Element | null): boolean {
   if (!li) return false;
@@ -148,39 +151,77 @@ function isTableInteractionTarget(element: Element): boolean {
   return Boolean(element.closest(TABLE_INTERACTION_SELECTOR));
 }
 
-/** 点击是否落在顶层块之间的空白区（含最后一个块下方） */
+/** 块在页面上实际占位的矩形（大块只算工具栏 + 视图区，不把整块外壳算满） */
+function getBlockOccupiedRects(child: HTMLElement): DOMRect[] {
+  if (child.classList.contains('feishu-bitable-block')) {
+    const rects: DOMRect[] = [];
+    child.querySelectorAll(':scope .base-viewbar, :scope .base-view-content').forEach(part => {
+      if (part instanceof HTMLElement) rects.push(part.getBoundingClientRect());
+    });
+    if (rects.length > 0) return rects;
+  }
+
+  if (child.matches('.feishu-table-host, .tableWrapper')) {
+    const table = child.querySelector('table.feishu-table, table');
+    if (table instanceof HTMLElement) return [table.getBoundingClientRect()];
+  }
+
+  if (child.matches('p, h1, h2, h3, h4, h5, h6, blockquote, pre, li')) {
+    const text = child.textContent?.replace(/\u200b/g, '').trim() ?? '';
+    if (!text) {
+      const rect = child.getBoundingClientRect();
+      return [new DOMRect(rect.left, rect.top, rect.width, Math.max(4, Math.min(rect.height, 28)))];
+    }
+  }
+
+  return [child.getBoundingClientRect()];
+}
+
+function isPointInsideRects(clientX: number, clientY: number, rects: DOMRect[]): boolean {
+  return rects.some(rect => (
+    clientX >= rect.left
+    && clientX <= rect.right
+    && clientY >= rect.top
+    && clientY <= rect.bottom
+  ));
+}
+
+function isPointInsideBlockContent(clientX: number, clientY: number, child: HTMLElement): boolean {
+  return isPointInsideRects(clientX, clientY, getBlockOccupiedRects(child));
+}
+
+/** 点击是否落在顶层块之间的空白区（含块左右边距、块间缝隙、文末空白） */
 function isBlankEditorPoint(clientX: number, clientY: number, tiptap: HTMLElement): boolean {
   const editorRect = tiptap.getBoundingClientRect();
-  if (clientX < editorRect.left || clientX > editorRect.right) return false;
+  if (clientY < editorRect.top - 4 || clientY > editorRect.bottom + 120) return false;
 
   const children = Array.from(tiptap.children).filter(
     (child): child is HTMLElement => child instanceof HTMLElement,
   );
-  if (children.length === 0) return true;
+  if (children.length === 0) return clientX >= editorRect.left && clientX <= editorRect.right;
 
-  for (const child of children) {
-    const rect = child.getBoundingClientRect();
-    if (
-      clientX >= rect.left
-      && clientX <= rect.right
-      && clientY >= rect.top
-      && clientY <= rect.bottom
-    ) {
-      return false;
-    }
+  return !children.some(child => isPointInsideBlockContent(clientX, clientY, child));
+}
+
+function isBitableViewInteractionPoint(element: Element): boolean {
+  if (!element.closest('.feishu-bitable-block')) return false;
+  if (element.closest('.base-viewbar')) return true;
+  return Boolean(element.closest(BITABLE_VIEW_INTERACTION_SELECTOR));
+}
+
+function isBoxSelectStartBlocked(element: Element, clientX: number, clientY: number): boolean {
+  if (element.closest('ul[data-type="taskList"] > li > label')) return true;
+  if (element.closest(INTERACTIVE_CONTROL_SELECTOR)) return true;
+  if (isBitableViewInteractionPoint(element)) return true;
+  if (isListItemTextArea(element) && isListTextPoint(element, clientX, clientY)) return true;
+
+  const textBlock = element.closest('p, h1, h2, h3, h4, h5, h6, blockquote, pre, .feishu-code-block__body');
+  if (textBlock instanceof HTMLElement) {
+    const text = textBlock.textContent?.replace(/\u200b/g, '').trim() ?? '';
+    if (text && isPointInsideBlockContent(clientX, clientY, textBlock)) return true;
   }
 
-  const firstRect = children[0].getBoundingClientRect();
-  if (clientY < firstRect.top - 4) return true;
-
-  for (let i = 0; i < children.length - 1; i += 1) {
-    const topRect = children[i].getBoundingClientRect();
-    const bottomRect = children[i + 1].getBoundingClientRect();
-    if (clientY > topRect.bottom + 2 && clientY < bottomRect.top - 2) return true;
-  }
-
-  const lastRect = children[children.length - 1].getBoundingClientRect();
-  return clientY > lastRect.bottom + 4;
+  return false;
 }
 
 function resolveListItemRange(editor: Editor, li: HTMLElement): { from: number; to: number } | null {
@@ -516,30 +557,58 @@ export function moveSelectableUnits(editor: Editor, units: SelectableUnit[], dir
   return true;
 }
 
-/** 文档编辑区域：仅从块间空白或编辑区边距按下左键拖动框选。 */
+/** 将框选结果同步到编辑器（单块用 NodeSelection，多块仅保留框选层状态） */
+export function applyBoxSelectionToEditor(editor: Editor, units: SelectableUnit[]): void {
+  if (units.length === 0) {
+    editor.commands.focus();
+    return;
+  }
+  if (units.length === 1) {
+    try {
+      editor.chain().setNodeSelection(units[0].from).focus().run();
+      return;
+    } catch {
+      /* fall through */
+    }
+  }
+  const tr = editor.state.tr.setSelection(
+    TextSelection.create(editor.state.doc, Math.min(units[0].from, editor.state.doc.content.size)),
+  );
+  editor.view.dispatch(tr);
+  editor.view.focus();
+}
+
+/** 文档编辑区域：从块间空白、左右边距或编辑容器留白按下左键拖动框选。 */
 export function canStartBoxSelect(
   target: EventTarget | null,
   editorArea: HTMLElement,
   clientX?: number,
   clientY?: number,
+  editorContainer?: HTMLElement | null,
 ): boolean {
   const element = resolvePointElement(target, clientX, clientY);
   if (!element) return false;
-  if (!editorArea.contains(element)) return false;
+
+  const container = editorContainer?.isConnected ? editorContainer : editorArea;
+  if (!container.contains(element) && !editorArea.contains(element)) return false;
+  if (element.closest('.editor-title-area, .editor-meta, .editor-title-input, .editor-doc-icon')) return false;
   if (isUiChrome(element)) return false;
   if (isTableInteractionTarget(element)) return false;
-  if (isControlOccupiedElement(element)) return false;
+  if (clientX == null || clientY == null) return false;
+  if (isBoxSelectStartBlocked(element, clientX, clientY)) return false;
 
   const tiptap = getTiptapRoot(editorArea);
-  if (!tiptap || clientX == null || clientY == null) return false;
+  if (!tiptap) return false;
 
+  const containerRect = container.getBoundingClientRect();
   const areaRect = editorArea.getBoundingClientRect();
   const tiptapRect = tiptap.getBoundingClientRect();
+  const inVerticalRange = clientY >= areaRect.top && clientY <= areaRect.bottom + 120;
+  if (!inVerticalRange) return false;
+
   if (
-    clientX >= areaRect.left
-    && clientX <= areaRect.right
-    && clientY >= areaRect.top
-    && clientY <= areaRect.bottom
+    clientX >= containerRect.left
+    && clientX <= containerRect.right
     && (clientX < tiptapRect.left || clientX > tiptapRect.right)
   ) {
     return true;

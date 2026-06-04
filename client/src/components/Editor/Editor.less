@@ -16,7 +16,10 @@
 /** 版心宽度：视口变窄时不缩小该宽度，超出部分由外层横向裁切，正文不因容器变窄而重排换行 */
 @editor-page-width: 860px;
 /** 目录轨与正文之间的固定间距（轨宽由 Layout 中 .doc-page-catalogue-rail 占位） */
-@editor-content-rail-gap: 24px;
+@editor-content-rail-gap: 20px;
+/** 正文左右留白：左侧留给块柄，右侧留给评论/裁切 */
+@editor-container-padding-left: 38px;
+@editor-container-padding-right: 50px;
 
 .editor-wrap {
   display: flex;
@@ -58,8 +61,7 @@
     flex-shrink: 0;
     margin-left: max(calc((100% - @editor-page-width) / 2), @editor-content-rail-gap);
     margin-right: auto;
-    padding: 0 56px 0 48px;
-    overflow-x: visible;
+    padding: 0 @editor-container-padding-right 0 @editor-container-padding-left;
 
     // Title area wrapper (hover detection zone)
     .editor-title-area {
@@ -215,7 +217,6 @@
       position: relative;
       min-height: 400px;
       padding-bottom: 120px;
-      overflow-x: visible;
 
       .block-row-gutter-highlight-band {
         position: absolute;
@@ -315,6 +316,14 @@
           }
         }
         .loop-block-indent(8);
+
+        .loop-bitable-indent(@i) when (@i > 0) {
+          .loop-bitable-indent(@i - 1);
+          .feishu-bitable-block[data-indent-level="@{i}"] {
+            margin-left: (@i * 24px);
+          }
+        }
+        .loop-bitable-indent(8);
 
         // Placeholder
         h1.is-empty::before,
@@ -2996,8 +3005,6 @@
           border-radius: 0;
           background: #fff;
           overflow: visible;
-          width: 100%;
-          max-width: 100%;
         }
 
         .feishu-bitable-block.is-selected,

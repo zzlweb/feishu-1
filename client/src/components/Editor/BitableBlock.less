@@ -1,5 +1,5 @@
 @base-doc-page-width: 860px;
-@base-doc-content-padding-x: 104px; // 与 .editor-container 左右 padding 48+56 一致
+@base-doc-content-padding-x: 88px; // 与 .editor-container 左右 padding 38+50 一致
 @base-doc-content-width: calc(@base-doc-page-width - @base-doc-content-padding-x);
 
 .feishu-base-block {
@@ -42,6 +42,10 @@
     border-bottom: 1px solid #e8e9eb;
     background: #fff;
     border-radius: 0;
+  }
+
+  .base-viewbar.bitable-toolbar-doc {
+    position: relative;
   }
 
   .base-viewbar__page {
@@ -129,9 +133,8 @@
     background: #f2f3f5;
   }
 
-  &:hover .base-viewbar__rename,
-  &.is-selected .base-viewbar__rename,
-  .base-view-title-group.is-renaming .base-viewbar__rename {
+  .base-view-title-group:hover .base-viewbar__rename,
+  .base-view-title-group:focus-within .base-viewbar__rename {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
@@ -227,7 +230,7 @@
     position: absolute;
     top: 35px;
     left: 0;
-    z-index: 45;
+    z-index: 50;
     width: 248px;
     overflow: visible;
     padding: 4px 4px 4px 2px;
@@ -435,7 +438,7 @@
     position: absolute;
     top: 4px;
     left: calc(100% + 4px);
-    z-index: 1;
+    z-index: 51;
     display: none;
     width: 168px;
     margin: 0;
@@ -736,9 +739,16 @@
 
   .base-view-hover-zone > .base-viewbar.bitable-toolbar-doc,
   .base-view-hover-zone > .base-viewbar {
+    position: relative;
+    z-index: 30;
     width: min(100%, var(--bitable-anchor-width, 100%));
     max-width: var(--bitable-anchor-width, 100%);
     flex: 0 0 auto;
+  }
+
+  .base-view-hover-zone > .base-view-content {
+    position: relative;
+    z-index: 1;
   }
 
   .base-view-content {
@@ -781,18 +791,17 @@
   }
 
   .base-gallery-surface--canvas {
+    min-height: 0;
     overflow: hidden;
   }
 
   .base-gallery-canvas-stage {
     position: relative;
-    min-height: 400px;
   }
 
   .base-gallery-canvas {
     display: block;
     width: 100%;
-    min-height: 400px;
   }
 
   .base-gallery-hit-layer {
@@ -1035,6 +1044,11 @@
   }
 
   .base-cell-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    box-sizing: border-box;
     overflow: hidden;
     padding: 1px 8px;
     border-radius: 10px;
@@ -1191,15 +1205,35 @@
     height: 100%;
   }
 
+  /* 冻结列 HTML 层：表头/树形按钮等，压在冻结 canvas 之上，避免横滚后被 scroll-pane 裁切 */
+  .base-grid-frozen-overlays {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 7;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .base-grid-frozen-overlays .base-grid-overlay-header,
+  .base-grid-frozen-overlays .base-grid-tree-toggle,
+  .base-grid-frozen-overlays .base-grid-row-hover-actions,
+  .base-grid-frozen-overlays .base-grid-select-cell,
+  .base-grid-frozen-overlays .base-grid-cell-editor,
+  .base-grid-frozen-overlays .base-grid-cell-expand {
+    pointer-events: auto;
+  }
+
+  .base-grid-frozen-overlay-header {
+    z-index: 8;
+    background: #fff;
+  }
+
   .base-grid-scroll-pane {
     position: relative;
     width: 100%;
     min-width: 0;
     overflow: hidden;
-  }
-
-  .base-grid-canvas-viewport.is-frozen-scroll .base-grid-index-rail--pinned.is-shadow {
-    box-shadow: 6px 0 8px -4px rgba(31, 35, 41, 0.12);
   }
 
   .base-grid-index-rail--pinned {
@@ -1259,11 +1293,6 @@
     cursor: pointer;
     touch-action: none;
     transition: background-color .12s ease;
-  }
-
-  .base-grid-hscroll.is-active .base-grid-hscroll__thumb,
-  .base-grid-wrap.is-hscroll-active .base-grid-hscroll__thumb {
-    background: #c9cdd4;
   }
 
   .base-grid-wrap:hover .base-grid-hscroll__thumb,
@@ -1403,8 +1432,11 @@
   .base-grid-select-editor__tag {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     max-width: 100%;
+    min-width: 32px;
     min-height: 20px;
+    box-sizing: border-box;
     padding: 1px 8px;
     border-radius: 10px;
     overflow: hidden;
@@ -1506,6 +1538,7 @@
     left: 0;
     top: 0;
     margin: 0;
+    border-top: 1px solid #dee0e3;
     cursor: default;
   }
 
@@ -1524,10 +1557,10 @@
       justify-content: flex-start;
       padding: 0 6px 0 4px;
     }
-  }
 
-  .base-grid-index-row.is-drop-target {
-    box-shadow: inset 0 2px 0 #3370ff;
+    &.is-cell-active {
+      background: #e8f3ff;
+    }
   }
 
   .base-grid-index-row__number {
@@ -1557,7 +1590,8 @@
     border: 0;
     border-radius: 3px;
     background: transparent;
-    pointer-events: none;
+    cursor: pointer;
+    pointer-events: auto;
   }
 
   .base-grid-tree-toggle__icon {
@@ -1667,6 +1701,43 @@
     background: rgba(242, 243, 245, .88);
   }
 
+  .base-grid-row-drop-guide {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 7;
+    height: 2px;
+    background: #3370ff;
+    pointer-events: none;
+  }
+
+  .base-grid-column-resize-guide {
+    position: absolute;
+    z-index: 8;
+    width: 2px;
+    margin-left: -1px;
+    background: #3370ff;
+    pointer-events: none;
+
+    &::before,
+    &::after {
+      content: '';
+      position: absolute;
+      top: 7px;
+      width: 1px;
+      height: 18px;
+      background: #8f959e;
+    }
+
+    &::before {
+      left: -4px;
+    }
+
+    &::after {
+      right: -4px;
+    }
+  }
+
   .base-grid-row-hover-actions {
     position: absolute;
     z-index: 6;
@@ -1755,6 +1826,10 @@
     padding: 0 26px 0 8px;
     overflow: hidden;
     pointer-events: none;
+
+    &.is-active {
+      z-index: 5;
+    }
   }
 
   .base-grid-select-cell__tags {
@@ -1768,15 +1843,39 @@
 
   .base-grid-select-tag {
     display: inline-flex;
+    flex-shrink: 0;
     align-items: center;
-    max-width: 100%;
+    justify-content: center;
+    max-width: 96px;
+    min-width: 32px;
     min-height: 20px;
-    padding: 0 2px 0 8px;
+    box-sizing: border-box;
+    padding: 0 8px;
     border-radius: 10px;
     font-size: 12px;
     line-height: 20px;
     white-space: nowrap;
     pointer-events: auto;
+
+    &:has(.base-grid-select-tag__remove) {
+      justify-content: flex-start;
+      min-width: 44px;
+      padding: 0 2px 0 8px;
+    }
+  }
+
+  .base-grid-select-tag--more {
+    flex-shrink: 0;
+    min-width: 28px;
+    padding: 0 8px;
+    color: #646a73;
+    background: #eff0f1;
+    cursor: pointer;
+    pointer-events: auto;
+
+    &:hover {
+      background: #e5e6eb;
+    }
   }
 
   .base-grid-select-tag__label {
@@ -1874,7 +1973,6 @@
       border: 0;
       border-top: 1px solid #dee0e3;
       border-left: 1px solid #dee0e3;
-      border-bottom: 1px solid #dee0e3;
       background: #fff;
       color: #8f959e;
       font-size: 16px;
@@ -3094,10 +3192,6 @@
     transition: background-color .12s ease;
   }
 
-  .base-kanban-hscroll.is-active .base-kanban-hscroll__thumb {
-    background: #c9cdd4;
-  }
-
   .base-kanban:hover .base-kanban-hscroll__thumb,
   .base-kanban:focus-within .base-kanban-hscroll__thumb,
   .base-kanban.is-hscroll-dragging .base-kanban-hscroll__thumb,
@@ -4287,10 +4381,14 @@
   }
 }
 
+.feishu-bitable-block.feishu-base-block {
+  margin-left: var(--bitable-doc-indent, 0px);
+  transition: margin-left 0s;
+}
+
 .feishu-base-block[data-base-view-type="grid"] {
   width: 100%;
   max-width: 100%;
-  margin-left: 0;
   margin-right: 0;
   left: auto;
   transform: none;
@@ -4299,6 +4397,32 @@
   .base-viewbar {
     width: min(100%, var(--bitable-anchor-width, 100%));
     max-width: var(--bitable-anchor-width, 100%);
+    position: relative;
+    z-index: 120;
+    overflow: visible;
+  }
+
+  .base-view-hover-zone > .base-view-content {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* 左侧视图名（表格 ▼）随表格横向滚动平移；右侧工具栏在 __page 外，不受 transform 影响 */
+  .base-viewbar__page {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-right: 248px;
+    transform: translate3d(calc(-1 * var(--bitable-grid-header-follow-x, var(--bitable-block-shift, 0px))), 0, 0);
+  }
+
+  .base-viewbar__tools {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    z-index: 121;
+    flex: 0 0 auto;
+    margin-left: 0;
+    transform: translateY(-50%);
   }
 
   .base-view-content {
@@ -4457,6 +4581,162 @@
   &.is-menu-open {
     z-index: 10052;
   }
+}
+
+.bitable-hierarchy-bar-settings {
+  position: absolute;
+  top: 34px;
+  left: -140px;
+  z-index: 10052;
+  min-width: 344px;
+  color: #1f2329;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.bitable-float-toolbar-btn-arrow {
+  position: absolute;
+  top: 0;
+  left: 140px;
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid #dee0e3;
+  border-left: 1px solid #dee0e3;
+  background: #fff;
+  transform: translateY(-5px) rotate(45deg);
+}
+
+.hierarchy-config-panel {
+  box-sizing: border-box;
+  min-width: 344px;
+  padding: 16px;
+  border: 1px solid #dee0e3;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(31, 35, 41, .12);
+}
+
+.bitable-field__title-wrap {
+  margin-bottom: 16px;
+}
+
+.bitable-field__title {
+  color: #1f2329;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bitable-guide-video-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  border: 1px solid #bbbfc4;
+  border-radius: 50%;
+  color: #8f959e;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.hierarchy-content-config {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hierarchy-field-title {
+  flex: 0 0 auto;
+  color: #1f2329;
+}
+
+.hierarchy-field-select {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hierarchy-field-select .ud__select__selector {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #3370ff;
+  border-radius: 4px;
+  color: #1f2329;
+  background: #fff;
+  cursor: pointer;
+}
+
+.bitable-field-item {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.bitable-field-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: #646a73;
+}
+
+.bitable-field-name {
+  overflow: hidden;
+  margin-left: 8px;
+  margin-right: 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ud__select__selector__arrow {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: #646a73;
+}
+
+.hierarchy-field-select__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 1;
+  overflow: hidden;
+  padding: 4px 0;
+  border: 1px solid #dee0e3;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(31, 35, 41, .12);
+}
+
+.hierarchy-field-select__option {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  color: #1f2329;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.hierarchy-field-select__option:hover,
+.hierarchy-field-select__option.is-active {
+  background: #f5f8ff;
+}
+
+.hierarchy-field-select__check {
+  margin-left: auto;
+  color: #3370ff;
 }
 
 .base-field-panel {
@@ -4717,7 +4997,7 @@
 }
 
 .base-field-popover-new__scroll {
-  max-height: min(576px, calc(100vh - 160px));
+  max-height: var(--field-popover-max-height, min(576px, calc(100vh - 160px)));
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -5806,8 +6086,11 @@
   .base-grid-select-editor__tag {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     max-width: 100%;
+    min-width: 32px;
     min-height: 20px;
+    box-sizing: border-box;
     padding: 1px 8px;
     border-radius: 10px;
     overflow: hidden;
@@ -6373,8 +6656,11 @@
 .bitable-card-select-tag {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   max-width: 100%;
+  min-width: 32px;
   min-height: 22px;
+  box-sizing: border-box;
   padding: 0 8px;
   border-radius: 10px;
   font-size: 12px;

@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { BaseFieldType, SelectChoice } from './bitableModel';
+import { useAnchoredFloatingPosition } from './floatingPanel';
 
 export const SELECT_OPTION_COLORS = [
   '#dee8ff',
@@ -86,6 +87,13 @@ function ColorPicker({
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const position = useAnchoredFloatingPosition(anchorRef, panelRef, open, {
+    placement: 'bottom-start',
+    fallbackWidth: 160,
+    fallbackHeight: 48,
+    pad: 8,
+    gap: 4,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -116,8 +124,9 @@ function ColorPicker({
           ref={panelRef}
           className="base-b-select-color-panel"
           style={{
-            top: (anchorRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
-            left: anchorRef.current?.getBoundingClientRect().left ?? 0,
+            top: position.top,
+            left: position.left,
+            visibility: position.visibility,
           }}
           data-floating-panel="true"
           onMouseDown={event => event.stopPropagation()}
@@ -249,27 +258,6 @@ export function BitableSelectOptionsEditor({
   );
 }
 
-function useDropdownPosition(anchorRef: RefObject<HTMLElement | null>, open: boolean) {
-  const [style, setStyle] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 296 });
-
-  useLayoutEffect(() => {
-    if (!open || !anchorRef.current) return;
-    const update = () => {
-      const rect = anchorRef.current!.getBoundingClientRect();
-      setStyle({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-    };
-    update();
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    return () => {
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-    };
-  }, [anchorRef, open]);
-
-  return style;
-}
-
 export function BitableSelectDefaultPicker({
   fieldType,
   choices,
@@ -285,7 +273,15 @@ export function BitableSelectDefaultPicker({
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const position = useDropdownPosition(triggerRef, open);
+  const position = useAnchoredFloatingPosition(triggerRef, panelRef, open, {
+    placement: 'bottom-start',
+    fallbackWidth: 296,
+    fallbackHeight: 228,
+    matchAnchorWidth: true,
+    pad: 8,
+    gap: 4,
+    minMaxHeight: 120,
+  });
 
   const namedChoices = choices.filter(choice => choice.name.trim());
   const filtered = namedChoices.filter(choice => choice.name.toLowerCase().includes(query.trim().toLowerCase()));
@@ -353,7 +349,7 @@ export function BitableSelectDefaultPicker({
         <div
           ref={panelRef}
           className="base-b-select-default-panel"
-          style={{ top: position.top, left: position.left, width: position.width }}
+          style={{ top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight, visibility: position.visibility }}
           data-floating-panel="true"
           onMouseDown={event => event.stopPropagation()}
         >

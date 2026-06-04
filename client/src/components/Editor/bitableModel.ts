@@ -116,9 +116,24 @@ export interface GalleryViewConfig {
   search?: string;
 }
 
+export type GridRowHeightMode = 'low' | 'medium' | 'high';
+
+export const GRID_ROW_HEIGHT_PRESETS: Record<GridRowHeightMode, number> = {
+  low: 32,
+  medium: 56,
+  high: 88,
+};
+
+export function resolveGridRowHeight(config?: GridViewConfig): number {
+  const mode = config?.rowHeight || 'low';
+  return GRID_ROW_HEIGHT_PRESETS[mode] ?? GRID_ROW_HEIGHT_PRESETS.low;
+}
+
 export interface GridViewConfig {
   search?: string;
   fieldWidths?: Record<FieldId, number>;
+  rowHeight?: GridRowHeightMode;
+  parentFieldId?: FieldId;
 }
 
 export interface GanttViewConfig {
@@ -204,7 +219,58 @@ export function textColorForBackground(hex: string) {
 }
 
 export function findSelectChoice(field: BaseField, value: string): SelectChoice | null {
-  return field.options?.choices?.find(choice => choice.name === value) ?? null;
+  const choices = field.options?.choices ?? [];
+  return choices.find(choice => choice.id === value)
+    ?? choices.find(choice => choice.name === value)
+    ?? null;
+}
+
+/** 多选单元格统一按选项 id 读写，兼容旧数据里存的 name。 */
+export function normalizeMultiSelectIds(field: BaseField, value: CellValue): string[] {
+  const choices = field.options?.choices ?? [];
+  if (!choices.length) return [];
+
+  let raw: string[] = [];
+  if (Array.isArray(value) && value.length && typeof value[0] !== 'object') {
+    raw = (value as string[]).map(item => String(item).trim()).filter(Boolean);
+  } else if (value != null && value !== '') {
+    raw = valueText(value).split(',').map(item => item.trim()).filter(Boolean);
+  }
+  if (!raw.length) return [];
+
+  const byId = new Map(choices.map(choice => [choice.id, choice]));
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  for (const item of raw) {
+    let choice: SelectChoice | undefined;
+    if (byId.has(item)) {
+      choice = byId.get(item);
+    } else {
+      const nameMatches = choices.filter(entry => entry.name === item);
+      if (nameMatches.length === 1) {
+        choice = nameMatches[0];
+      } else if (nameMatches.length > 1) {
+        choice = nameMatches.find(entry => !seen.has(entry.id)) ?? nameMatches[0];
+      }
+    }
+    if (choice && !seen.has(choice.id)) {
+      seen.add(choice.id);
+      ids.push(choice.id);
+    }
+  }
+  return ids;
+}
+
+export function getMultiSelectChoices(field: BaseField, value: CellValue): SelectChoice[] {
+  const choices = field.options?.choices ?? [];
+  return normalizeMultiSelectIds(field, value)
+    .map(id => choices.find(choice => choice.id === id))
+    .filter((choice): choice is SelectChoice => Boolean(choice));
+}
+
+export function multiSelectDisplayText(field: BaseField, value: CellValue): string {
+  return getMultiSelectChoices(field, value).map(choice => choice.name).join(', ');
 }
 
 export function createRecordComment(content: string, author = DEFAULT_RECORD_OPERATOR): RecordComment {
@@ -496,7 +562,7 @@ function normalizeTable(raw: BaseTable): BaseTable {
     id: tableId,
     name: raw.name || '多维表格',
     fields,
-    records,
+    records: normalizeRecordTreeOrder(records),
     views: normalizedViews,
     primaryFieldId,
     activeViewId: normalizedViews.some(view => view.id === raw.activeViewId) ? raw.activeViewId : normalizedViews[0].id,
@@ -786,10 +852,27 @@ export function valueText(value: CellValue): string {
   return value == null ? '' : String(value);
 }
 
-export function visibleRecords(table: BaseTable, view: BaseView): BaseRecord[] {
+function compareRecordsBySorts(a: BaseRecord, b: BaseRecord, sorts: SortRule[]): number {
+  for (const sort of sorts) {
+    const result = valueText(a.fields[sort.fieldId]).localeCompare(
+      valueText(b.fields[sort.fieldId]),
+      'zh-CN',
+      { numeric: true },
+    );
+    if (result) return sort.direction === 'asc' ? result : -result;
+  }
+  return 0;
+}
+
+export function filterRecordsForView(table: BaseTable, view: BaseView): BaseRecord[] {
   const search = String((view.config as { search?: string }).search || '').trim().toLocaleLowerCase();
-  let records = table.records.filter(record => {
-    if (search && !table.fields.some(field => valueText(record.fields[field.id]).toLocaleLowerCase().includes(search))) return false;
+  return table.records.filter(record => {
+    if (search && !table.fields.some(field => {
+      const text = field.type === 'multi_select'
+        ? multiSelectDisplayText(field, record.fields[field.id])
+        : valueText(record.fields[field.id]);
+      return text.toLocaleLowerCase().includes(search);
+    })) return false;
     return (view.filters || []).every(rule => {
       const text = valueText(record.fields[rule.fieldId]).toLocaleLowerCase();
       const needle = String(rule.value || '').toLocaleLowerCase();
@@ -799,17 +882,64 @@ export function visibleRecords(table: BaseTable, view: BaseView): BaseRecord[] {
       return text.includes(needle);
     });
   });
-  const sorts = view.sorts || [];
-  if (sorts.length) {
-    records = records.map((record, index) => ({ record, index })).sort((a, b) => {
-      for (const sort of sorts) {
-        const result = valueText(a.record.fields[sort.fieldId]).localeCompare(valueText(b.record.fields[sort.fieldId]), 'zh-CN', { numeric: true });
-        if (result) return sort.direction === 'asc' ? result : -result;
-      }
-      return a.index - b.index;
-    }).map(item => item.record);
+}
+
+/** 表格视图：先归一化树序，再仅在同级兄弟间排序，保证子记录紧跟父记录 */
+export function orderRecordsForTreeView(records: BaseRecord[], sorts: SortRule[] = []): BaseRecord[] {
+  const normalized = normalizeRecordTreeOrder(records);
+  if (!sorts.length) return normalized;
+
+  const recordById = new Map(normalized.map(record => [record.id, record]));
+  const childrenByParent = new Map<string | null, BaseRecord[]>();
+  normalized.forEach(record => {
+    const parentKey = record.parentId && recordById.has(record.parentId) ? record.parentId : null;
+    const siblings = childrenByParent.get(parentKey);
+    if (siblings) siblings.push(record);
+    else childrenByParent.set(parentKey, [record]);
+  });
+
+  const result: BaseRecord[] = [];
+  const walk = (parentKey: string | null) => {
+    const siblings = childrenByParent.get(parentKey) || [];
+    siblings.sort((left, right) => compareRecordsBySorts(left, right, sorts));
+    siblings.forEach(record => {
+      result.push(record);
+      walk(record.id);
+    });
+  };
+  walk(null);
+  return result;
+}
+
+export function gridVisibleRecords(table: BaseTable, view: BaseView): BaseRecord[] {
+  return orderRecordsForTreeView(filterRecordsForView(table, view), view.sorts || []);
+}
+
+export function resolveRecordInsertIndex(
+  records: BaseRecord[],
+  targetRecordId: string,
+  position: 'before' | 'after-subtree',
+): number {
+  const recordIndex = records.findIndex(record => record.id === targetRecordId);
+  if (recordIndex < 0) return records.length;
+  if (position === 'before') return recordIndex;
+  return findInsertIndexAfterSubtree(records, recordIndex);
+}
+
+export function visibleRecords(table: BaseTable, view: BaseView): BaseRecord[] {
+  const filtered = filterRecordsForView(table, view);
+  if (view.type === 'grid') {
+    return orderRecordsForTreeView(filtered, view.sorts || []);
   }
-  return records;
+  const sorts = view.sorts || [];
+  if (!sorts.length) return filtered;
+  return filtered.map((record, index) => ({ record, index })).sort((a, b) => {
+    for (const sort of sorts) {
+      const result = compareRecordsBySorts(a.record, b.record, sorts);
+      if (result) return result;
+    }
+    return a.index - b.index;
+  }).map(item => item.record);
 }
 
 export function groupRecords(table: BaseTable, view: BaseView, records: BaseRecord[]) {
@@ -993,4 +1123,34 @@ export function attachmentFromUpload(file: File, url = '', progress = 0): Attach
     uploadStatus: url ? 'success' : 'uploading',
     uploadProgress: progress,
   };
+}
+
+/** 块级横移时内容左缘不得越过该 x（避免被 overflow:hidden 的祖先裁切） */
+export function resolveBitableHorizontalClipLeft(
+  block: HTMLElement,
+  bleedLeft: number,
+  options?: { assumeBleed?: boolean },
+): number {
+  let clipLeft = bleedLeft;
+  const bleedActive = options?.assumeBleed
+    || block.classList.contains('is-grid-bleed-active')
+    || block.classList.contains('is-grid-hscroll-active');
+
+  for (let node: HTMLElement | null = block.parentElement; node; node = node.parentElement) {
+    if (bleedActive && (
+      node.classList.contains('doc-page-workspace')
+      || node.classList.contains('doc-page-workspace-inner')
+      || node.classList.contains('doc-content-col')
+    )) {
+      continue;
+    }
+    const { overflowX } = getComputedStyle(node);
+    if (overflowX === 'hidden' || overflowX === 'clip') {
+      clipLeft = Math.max(clipLeft, node.getBoundingClientRect().left);
+    }
+    if (node.classList.contains('editor-wrap') || node.classList.contains('doc-page')) {
+      break;
+    }
+  }
+  return clipLeft;
 }

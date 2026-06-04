@@ -31,6 +31,7 @@ import {
   selectCoverAttachment,
   serializeBaseTable,
   valueText,
+  normalizeMultiSelectIds,
   visibleRecords,
   type AttachmentValue,
   type BaseField,
@@ -40,6 +41,8 @@ import {
   type CellValue,
   type GalleryViewConfig,
   type GanttViewConfig,
+  type GridRowHeightMode,
+  type GridViewConfig,
 } from './bitableModel';
 import { BitableGalleryView } from './BitableGalleryView';
 import { BitableGanttView } from './BitableGanttView';
@@ -58,6 +61,7 @@ import {
   dispatchBitableCommentOpen,
   dispatchBitableCommentToggleSidebar,
 } from '../Layout/commentSidebarBridge';
+import { BITABLE_BLOCK_EXPAND_ALL, BITABLE_BLOCK_OPEN_COMMENT } from './BitableContextMenu';
 import './BitableBlock.less';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -98,22 +102,28 @@ function ViewIcon({ type, size = 16, fill = '#646a73' }: { type: BaseView['type'
 function viewSettingsLabel(type: BaseView['type']) {
   if (type === 'gallery') return '画册设置';
   if (type === 'gantt') return '甘特图设置';
-  if (type === 'grid') return '表格设置';
   if (type === 'kanban') return '看板设置';
   return '视图设置';
+}
+
+function viewHierarchySettingsLabel(type: BaseView['type']) {
+  if (type === 'grid') return '层级设置';
+  if (type === 'gantt') return '甘特设置';
+  return viewSettingsLabel(type);
 }
 
 function toolbarPanelTitle(panel: ToolbarPanel) {
   if (panel === 'filter') return '筛选';
   if (panel === 'group') return '分组';
   if (panel === 'sort') return '排序';
+  if (panel === 'rowHeight') return '行高';
   if (panel === 'comment') return '评论';
   if (panel === 'share') return '打开方式';
   return '字段配置';
 }
 
 type GlyphProps = { size?: number };
-type ToolbarPanel = 'fields' | 'filter' | 'group' | 'sort' | 'comment' | 'share';
+type ToolbarPanel = 'fields' | 'filter' | 'group' | 'sort' | 'rowHeight' | 'comment' | 'share';
 
 function svgProps(size: number) {
   return { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', xmlns: 'http://www.w3.org/2000/svg' } as const;
@@ -133,6 +143,9 @@ const ToolGlyphGroup = ({ size = 18 }: GlyphProps) => (
 );
 const ToolGlyphSort = ({ size = 18 }: GlyphProps) => (
   <svg {...svgProps(size)}><path d="M17 1.333h-1.803s-.419.137-.498.343l-3.664 9.598a.533.533 0 0 0 .498.724h.978a.533.533 0 0 0 .5-.347l.664-1.785h4.841l.663 1.786c.078.21.277.348.5.348h.987a.533.533 0 0 0 .498-.724l-3.666-9.6A.533.533 0 0 0 17 1.333Zm.725 6.4h-3.264l1.605-4.316h.05l1.61 4.316Zm-6.175 6.4c0-.294.238-.533.533-.533h8.522c.295 0 .534.239.534.534v.703c0 .154-.067.3-.183.402l-6.068 5.298h5.717c.295 0 .534.24.534.534v1.063a.533.533 0 0 1-.534.533h-8.522a.533.533 0 0 1-.534-.534v-.973c0-.154.067-.3.183-.402l5.763-5.027h-5.412a.533.533 0 0 1-.534-.534v-1.063Zm-8.923 2.534h2.705V3.2c0-.294.238-.533.533-.533h.933c.295 0 .534.239.534.533v19.16a.533.533 0 0 1-.965.314l-4-5.499a.32.32 0 0 1 .26-.508Z" fill="currentColor"/></svg>
+);
+const ToolGlyphRowHeight = ({ size = 18 }: GlyphProps) => (
+  <svg {...svgProps(size)}><path d="M19 2.5a1 1 0 0 1 .76.35l3 3.5a1 1 0 0 1-1.52 1.3L20 6.204v11.594l1.24-1.448a1 1 0 1 1 1.52 1.302l-3 3.5a1 1 0 0 1-1.52 0l-3-3.5a1 1 0 1 1 1.52-1.302L18 17.797V6.203l-1.24 1.448a1 1 0 0 1-1.52-1.302l3-3.5A1 1 0 0 1 19 2.5ZM2 4a1 1 0 0 0 0 2h9a1 1 0 1 0 0-2H2Zm0 7a1 1 0 1 0 0 2h9a1 1 0 1 0 0-2H2Zm-1 8a1 1 0 0 1 1-1h9a1 1 0 1 1 0 2H2a1 1 0 0 1-1-1Z" fill="currentColor"/></svg>
 );
 const ToolGlyphComment = ({ size = 18 }: GlyphProps) => (
   <svg {...svgProps(size)}><path d="M7 11a1 1 0 0 1 1-1h8a1 1 0 1 1 0 2H8a1 1 0 0 1-1-1Z" fill="currentColor"/><path d="M2 5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v11.5a2 2 0 0 1-2 2h-3.812a.5.5 0 0 0-.33.124l-2.541 2.224a2 2 0 0 1-2.634 0l-2.542-2.224a.5.5 0 0 0-.329-.124H4a2 2 0 0 1-2-2V5Zm2 0v11.5h3.812a2.5 2.5 0 0 1 1.646.619L12 19.343l2.542-2.224a2.5 2.5 0 0 1 1.646-.619H20V5H4Z" fill="currentColor"/></svg>
@@ -190,7 +203,14 @@ const GlyphHelp = ({ size = 14 }: GlyphProps) => (
 
 function blockAttrs(attrs: Record<string, unknown>) {
   const id = typeof attrs.blockId === 'string' ? attrs.blockId : '';
-  return id ? { id, 'data-block-id': id } : {};
+  const indentLevel = typeof attrs.indentLevel === 'number' ? attrs.indentLevel : 0;
+  return {
+    ...(id ? { id, 'data-block-id': id } : {}),
+    ...(indentLevel > 0 ? { 'data-indent-level': String(indentLevel) } : {}),
+    style: {
+      '--bitable-doc-indent': `${Math.max(0, indentLevel) * 24}px`,
+    } as CSSProperties,
+  };
 }
 
 function updateRecord(table: BaseTable, recordId: string, update: (record: BaseRecord) => BaseRecord): BaseTable {
@@ -617,12 +637,31 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const handleViewHoverLeave = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const next = event.relatedTarget;
     if (next instanceof Node && viewHoverZoneRef.current?.contains(next)) return;
+    if (next instanceof Element && next.closest('.block-inline-tools, .block-drag-row')) return;
+    if (blockRef.current?.classList.contains('is-block-gutter-active')) return;
     hideViewTools();
   }, [hideViewTools]);
 
   useEffect(() => () => {
     if (viewToolsLeaveTimerRef.current != null) window.clearTimeout(viewToolsLeaveTimerRef.current);
   }, []);
+
+  /* 左侧块柄（多维表格按钮）在 Editor 中渲染，hover 时同步显示右侧工具栏 */
+  useEffect(() => {
+    const block = blockRef.current;
+    if (!block) return;
+    const syncToolsFromGutter = () => {
+      if (block.classList.contains('is-block-gutter-active')) {
+        showViewTools();
+      } else if (!viewHoverZoneRef.current?.matches(':hover')) {
+        hideViewTools();
+      }
+    };
+    syncToolsFromGutter();
+    const observer = new MutationObserver(syncToolsFromGutter);
+    observer.observe(block, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, [hideViewTools, showViewTools]);
 
   const commit = (next: BaseTable) => {
     tableRef.current = next;
@@ -1030,7 +1069,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const changeCell = (recordId: string, fieldId: string, value: CellValue) => {
     mutate(current => updateRecord(current, recordId, record => {
       const field = current.fields.find(item => item.id === fieldId);
-      return withUpdatedValue(record, fieldId, value, field?.name);
+      const nextValue = field?.type === 'multi_select'
+        ? normalizeMultiSelectIds(field, value)
+        : value;
+      return withUpdatedValue(record, fieldId, nextValue, field?.name);
     }));
   };
 
@@ -1168,11 +1210,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     });
   };
 
-  const coerceFieldValue = (value: CellValue, type: BaseField['type']): CellValue => {
-    if (type === 'attachment') return Array.isArray(value) && typeof value[0] === 'object' ? value : [];
-    if (type === 'checkbox') return typeof value === 'boolean' ? value : Boolean(valueText(value));
-    if (type === 'number') return Number(valueText(value)) || 0;
-    if (type === 'multi_select') return Array.isArray(value) && typeof value[0] !== 'object' ? value as string[] : valueText(value).split(',').map(item => item.trim()).filter(Boolean);
+  const coerceFieldValue = (value: CellValue, field: BaseField): CellValue => {
+    if (field.type === 'attachment') return Array.isArray(value) && typeof value[0] === 'object' ? value : [];
+    if (field.type === 'checkbox') return typeof value === 'boolean' ? value : Boolean(valueText(value));
+    if (field.type === 'number') return Number(valueText(value)) || 0;
+    if (field.type === 'multi_select') return normalizeMultiSelectIds(field, value);
     return valueText(value);
   };
 
@@ -1203,13 +1245,22 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           return nextField;
         }),
         records: typeChanged
-          ? current.records.map(record => ({
-              ...record,
-              fields: {
-                ...record.fields,
-                [fieldId]: coerceFieldValue(record.fields[fieldId], input.type),
-              },
-            }))
+          ? current.records.map(record => {
+              const coercedField: BaseField = {
+                ...oldField,
+                type: input.type,
+                options: (input.type === 'single_select' || input.type === 'multi_select')
+                  ? { choices: input.options?.choices ?? oldField.options?.choices ?? [] }
+                  : oldField.options,
+              };
+              return {
+                ...record,
+                fields: {
+                  ...record.fields,
+                  [fieldId]: coerceFieldValue(record.fields[fieldId], coercedField),
+                },
+              };
+            })
           : current.records,
       };
     });
@@ -1387,6 +1438,9 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     }
     selectionAnchorRef.current = recordId;
     setSelectedIds(new Set([recordId]));
+    if (activeView.type === 'gallery') {
+      setCardRecordId(recordId);
+    }
   };
 
   const selectBlock = () => {
@@ -1459,11 +1513,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       const choices = field.options?.choices ?? [];
       const existing = choices.find(choice => choice.name.toLowerCase() === trimmed.toLowerCase());
       if (existing) {
-        result = existing.name;
+        result = existing.id;
         return current;
       }
       const nextChoice = { ...createSelectChoice(choices.length), name: trimmed };
-      result = trimmed;
+      result = nextChoice.id;
       return {
         ...current,
         fields: current.fields.map(item => item.id === fieldId
@@ -1835,6 +1889,9 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     ? Math.max(0, records.findIndex(record => record.id === commentTargetRecord.id))
     : 0;
   const settingsLabel = viewSettingsLabel(activeView.type);
+  const hierarchySettingsLabel = viewHierarchySettingsLabel(activeView.type);
+  const useHierarchySettingsIcon = activeView.type === 'grid' || activeView.type === 'gantt';
+  const gridRowHeight = (activeView.config as GridViewConfig).rowHeight || 'low';
 
   useEffect(() => {
     if (cardRecordId && !table.records.some(record => record.id === cardRecordId)) setCardRecordId(null);
@@ -1907,6 +1964,19 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     window.addEventListener(BITABLE_COMMENT_TOGGLE_SIDEBAR, handleToggleSidebar);
     return () => window.removeEventListener(BITABLE_COMMENT_TOGGLE_SIDEBAR, handleToggleSidebar);
   }, [blockId, updateCommentCardTop]);
+
+  useEffect(() => {
+    const el = blockRef.current;
+    if (!el) return;
+    const onExpandAll = () => setCollapsedGroups(new Set());
+    const onOpenComment = () => openCommentPanel();
+    el.addEventListener(BITABLE_BLOCK_EXPAND_ALL, onExpandAll);
+    el.addEventListener(BITABLE_BLOCK_OPEN_COMMENT, onOpenComment);
+    return () => {
+      el.removeEventListener(BITABLE_BLOCK_EXPAND_ALL, onExpandAll);
+      el.removeEventListener(BITABLE_BLOCK_OPEN_COMMENT, onOpenComment);
+    };
+  }, [openCommentPanel]);
 
   useEffect(() => {
     if (!commentPanelOpen) return;
@@ -2036,6 +2106,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             </BitableTooltip>
           )}
         </div>
+        </div>
 
         <div className="base-viewbar__tools">
           <span className="base-viewbar__tool-anchor" ref={fieldPanelAnchorRef}>
@@ -2062,29 +2133,29 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               />
             )}
           </span>
-          <BitableTooltip tip={settingsLabel} placement="bottom">
-            <button
-              type="button"
-              className={`base-viewbar__tool${showSettings ? ' is-active' : ''}`}
-              aria-label={settingsLabel}
-              onClick={() => {
-                setActiveToolbarPanel(null);
-                setShowSettings(open => !open);
-              }}
-            >
-              <SlashGlyphBitableGrid size={16} fill="currentColor" />
-            </button>
-          </BitableTooltip>
-          {activeView.type === 'gantt' && (
-            <BitableTooltip tip="甘特设置" placement="bottom">
-              <button type="button" className="base-viewbar__tool" aria-label="甘特设置" onClick={() => {
-                setActiveToolbarPanel(null);
-                setShowSettings(true);
-              }}>
-                <ToolGlyphGantt />
+          <span className="base-viewbar__tool-anchor">
+            <BitableTooltip tip={useHierarchySettingsIcon ? hierarchySettingsLabel : settingsLabel} placement="bottom">
+              <button
+                type="button"
+                className={`base-viewbar__tool${showSettings ? ' is-active' : ''}`}
+                aria-label={useHierarchySettingsIcon ? hierarchySettingsLabel : settingsLabel}
+                onClick={() => {
+                  setActiveToolbarPanel(null);
+                  setShowSettings(open => !open);
+                }}
+              >
+                {useHierarchySettingsIcon ? <ToolGlyphGantt /> : <SlashGlyphBitableGrid size={16} fill="currentColor" />}
               </button>
             </BitableTooltip>
-          )}
+            {showSettings && activeView.type === 'grid' && (
+              <HierarchySettingsPanel
+                table={table}
+                view={activeView}
+                panelRef={settingsRef}
+                onTable={mutate}
+              />
+            )}
+          </span>
           <BitableTooltip tip="筛选" placement="bottom">
             <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'filter' ? ' is-active' : ''}`} aria-label="筛选" onClick={() => openToolbarPanel('filter')}><ToolGlyphFilter /></button>
           </BitableTooltip>
@@ -2092,8 +2163,20 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' ? ' is-active' : ''}`} aria-label="分组" onClick={() => openToolbarPanel('group')}><ToolGlyphGroup /></button>
           </BitableTooltip>
           <BitableTooltip tip="排序" placement="bottom">
-            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' || activeView.sorts?.length ? ' is-active' : ''}`} aria-label="排序" onClick={() => openToolbarPanel('sort')}><ToolGlyphSort /></button>
+            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' ? ' is-active' : ''}`} aria-label="排序" onClick={() => openToolbarPanel('sort')}><ToolGlyphSort /></button>
           </BitableTooltip>
+          {activeView.type === 'grid' && (
+            <BitableTooltip tip="行高" placement="bottom">
+              <button
+                type="button"
+                className={`base-viewbar__tool${activeToolbarPanel === 'rowHeight' || gridRowHeight !== 'low' ? ' is-active' : ''}`}
+                aria-label="行高"
+                onClick={() => openToolbarPanel('rowHeight')}
+              >
+                <ToolGlyphRowHeight />
+              </button>
+            </BitableTooltip>
+          )}
           <span className="base-viewbar__tool-sep" aria-hidden />
           <BitableTooltip tip="评论" placement="bottom">
             <button type="button" className={`base-viewbar__tool${commentPanelOpen ? ' is-active' : ''}`} aria-label="评论" onClick={toggleCommentPanel}><ToolGlyphComment /></button>
@@ -2113,7 +2196,6 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               onTable={mutate}
             />
           )}
-        </div>
         </div>
       </header>
       <div className="base-view-content" data-no-marquee-selection="true" onMouseDown={event => event.stopPropagation()}>
@@ -2143,7 +2225,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           onTable={mutate}
         />
       )}
-      {showSettings && (activeView.type === 'grid' || activeView.type === 'kanban') && (
+      {showSettings && activeView.type === 'kanban' && (
         <GridSettings
           table={table}
           view={activeView}
@@ -2607,6 +2689,29 @@ function ToolbarQuickPanel({
         </>
       )}
 
+      {panel === 'rowHeight' && view.type === 'grid' && (
+        <div className="base-toolbar-panel__segmented" aria-label="行高">
+          {([
+            ['low', '低'],
+            ['medium', '中'],
+            ['high', '高'],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              disabled={view.locked}
+              className={((view.config as GridViewConfig).rowHeight || 'low') === mode ? 'is-active' : ''}
+              onClick={() => updateCurrentView(item => ({
+                ...item,
+                config: { ...(item.config as GridViewConfig), rowHeight: mode as GridRowHeightMode },
+              }))}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {panel === 'group' && (
         <>
           <label>字段
@@ -2782,6 +2887,153 @@ function GanttSettings({
         <button type="button" onClick={() => onTable(current => updateView(current, view.id, item => ({ ...item, locked: !item.locked })))}>{view.locked ? '解锁视图' : '锁定视图'}</button>
       </footer>
     </aside>
+  );
+}
+
+function HierarchySettingsPanel({
+  table,
+  view,
+  panelRef,
+  onTable,
+}: {
+  table: BaseTable;
+  view: BaseView;
+  panelRef: RefObject<HTMLDivElement>;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectRef = useRef<HTMLDivElement>(null);
+  const config = view.config as GridViewConfig;
+  const relationFields = table.fields.filter(field => field.id !== table.primaryFieldId && field.type === 'relation');
+  const selectedField = table.fields.find(field => field.id === config.parentFieldId)
+    ?? relationFields.find(field => field.name === '父记录')
+    ?? relationFields[0]
+    ?? null;
+  const createParentField = () => {
+    if (view.locked) return;
+    const id = `fld_relation_${Date.now().toString(36)}`;
+    onTable(current => {
+      const baseName = '父记录';
+      const existingNames = new Set(current.fields.map(field => field.name));
+      let name = baseName;
+      let index = 2;
+      while (existingNames.has(name)) {
+        name = `${baseName} ${index}`;
+        index += 1;
+      }
+      const field: BaseField = { id, name, type: 'relation' };
+      return {
+        ...current,
+        fields: [...current.fields, field],
+        records: current.records.map(record => ({
+          ...record,
+          fields: { ...record.fields, [id]: [] },
+        })),
+        views: current.views.map(item => item.id === view.id
+          ? {
+              ...item,
+              hiddenFieldIds: item.hiddenFieldIds?.filter(fieldId => fieldId !== id),
+              config: { ...item.config, parentFieldId: id },
+            }
+          : item),
+      };
+    });
+    setOpen(false);
+  };
+  const selectField = (fieldId: string) => {
+    if (view.locked) return;
+    onTable(current => updateView(current, view.id, item => ({
+      ...item,
+      config: { ...item.config, parentFieldId: fieldId },
+    })));
+    setOpen(false);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: globalThis.PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (selectRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
+  }, [open]);
+
+  return (
+    <div
+      ref={panelRef}
+      className="bitable-hierarchy-bar-settings"
+      data-no-marquee-selection="true"
+      data-floating-panel="true"
+    >
+      <div className="bitable-float-toolbar-btn-arrow" aria-hidden />
+      <div className="hierarchy-config-panel hierarchy-config-panel-new">
+        <div className="bitable-field__title-wrap">
+          <div className="bitable-noselect bitable-field__title bitable-field__item">
+            <span>视图配置 <span className="bitable-guide-video-container">?</span></span>
+          </div>
+        </div>
+        <div className="bitable-layout-row bitable-flex hierarchy-content-config hierarchy-content-config--clearable">
+          <span className="hierarchy-field-title">选择父记录字段</span>
+          <div
+            ref={selectRef}
+            className={`ud__select hierarchy-field-select${open ? ' is-open' : ''}`}
+          >
+            <button
+              type="button"
+              className="ud__select__selector"
+              aria-label="选择父记录字段"
+              aria-expanded={open}
+              onClick={() => setOpen(current => !current)}
+              disabled={view.locked}
+            >
+              <span className="bitable-field-item">
+                <span className="bitable-field-icon" aria-hidden>
+                  <SlashGlyphBitableGrid size={14} fill="currentColor" />
+                </span>
+                <span className="bitable-field-name">{selectedField?.name || '父记录'}</span>
+              </span>
+              <span className="ud__select__selector__arrow" aria-hidden>
+                <SelGlyphChevronDown size={12} fill="currentColor" />
+              </span>
+            </button>
+            {open && (
+              <div className="hierarchy-field-select__menu">
+                {relationFields.map(field => (
+                  <button
+                    key={field.id}
+                    type="button"
+                    className={`hierarchy-field-select__option${selectedField?.id === field.id ? ' is-active' : ''}`}
+                    onMouseDown={event => {
+                      event.preventDefault();
+                      selectField(field.id);
+                    }}
+                  >
+                    <span className="bitable-field-icon" aria-hidden>
+                      <SlashGlyphBitableGrid size={14} fill="currentColor" />
+                    </span>
+                    <span>{field.name}</span>
+                    {selectedField?.id === field.id && <span className="hierarchy-field-select__check" aria-hidden>✓</span>}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="hierarchy-field-select__option"
+                  onMouseDown={event => {
+                    event.preventDefault();
+                    createParentField();
+                  }}
+                >
+                  <span aria-hidden>+</span>
+                  <span>新建父记录</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

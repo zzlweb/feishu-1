@@ -238,10 +238,17 @@ export function GridFieldHeader({
   primaryFieldId: string;
   isMenuOpen?: boolean;
   onMenuClick?: (event: MouseEvent<HTMLButtonElement>) => void;
-  onHeaderContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
+  onHeaderContextMenu?: (event: MouseEvent<HTMLElement>) => void;
 }) {
   return (
-    <span className="base-grid-field-head">
+    <span
+      className="base-grid-field-head"
+      onContextMenu={event => {
+        event.preventDefault();
+        event.stopPropagation();
+        onHeaderContextMenu?.(event);
+      }}
+    >
       {field.id === primaryFieldId && <GridFieldLockWithTooltip />}
       <span className="base-grid-field-icon" aria-hidden>{fieldTypeGlyph(field.type, 16)}</span>
       <span className="base-grid-field-name">{field.name}</span>
@@ -257,11 +264,6 @@ export function GridFieldHeader({
         }}
         onMouseDown={event => {
           event.stopPropagation();
-        }}
-        onContextMenu={event => {
-          event.preventDefault();
-          event.stopPropagation();
-          onHeaderContextMenu?.(event);
         }}
       >
         <SelGlyphChevronDown size={14} fill="currentColor" />

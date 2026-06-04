@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { getAttachments, selectCoverAttachment, valueText, type AttachmentValue, type BaseRecord, type BaseTable, type GalleryViewConfig } from './bitableModel';
 import { BitableGalleryRecordContextMenu } from './BitableGalleryRecordContextMenu';
@@ -21,7 +21,7 @@ export interface BitableGalleryViewProps {
   setCollapsedGroups: (update: (current: Set<string>) => Set<string>) => void;
   onDropFiles: (event: DragEvent, recordId?: string) => void;
   setDropActive: (active: boolean) => void;
-  cardClick: (event: MouseEvent, recordId: string) => void;
+  cardClick: (event: ReactMouseEvent, recordId: string) => void;
   removeRecords: (recordIds: string[], requireConfirm?: boolean) => boolean;
   addRecord: () => void;
   locked?: boolean;
@@ -439,7 +439,7 @@ export function BitableGalleryView({
     };
   }, [closeRecordMenu, recordMenu]);
 
-  const openRecordMenu = useCallback((event: MouseEvent, recordId: string) => {
+  const openRecordMenu = useCallback((event: ReactMouseEvent, recordId: string) => {
     event.preventDefault();
     event.stopPropagation();
     cardClick(event, recordId);
@@ -498,12 +498,12 @@ export function BitableGalleryView({
     let addRect: { x: number; y: number; width: number; height: number } | null = null;
     let height: number;
     if (records.length === 0) {
-      height = Math.max(400, GALLERY_PADDING_TOP + EMPTY_HEIGHT + GALLERY_PADDING_BOTTOM);
+      height = GALLERY_PADDING_TOP + EMPTY_HEIGHT + GALLERY_PADDING_BOTTOM;
       addRect = { x: surfaceWidth / 2 - 48, y: GALLERY_PADDING_TOP + EMPTY_HEIGHT / 2 + 4, width: 96, height: 32 };
     } else {
       const addY = y + ADD_RECORD_MARGIN_TOP;
       addRect = { x: GALLERY_PADDING_X, y: addY, width: ADD_RECORD_WIDTH, height: ADD_RECORD_HEIGHT };
-      height = Math.max(400, addY + ADD_RECORD_HEIGHT + GALLERY_PADDING_BOTTOM);
+      height = addY + ADD_RECORD_HEIGHT + GALLERY_PADDING_BOTTOM;
     }
 
     return {
