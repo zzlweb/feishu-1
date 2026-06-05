@@ -632,7 +632,9 @@ function pointFromCanvas(
   scrollOffsetX: number,
 ) {
   const rect = event.currentTarget.getBoundingClientRect();
-  return { x: event.clientX - rect.left + scrollOffsetX, y: event.clientY - rect.top };
+  /* rect 已包含父级 translateX(-scrollOffsetX)，这里不能再叠加 scrollOffsetX */
+  void scrollOffsetX;
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
 }
 
 function rowIndexFromClientY(shell: HTMLDivElement | null, clientY: number, recordCount: number, rowHeight: number) {
@@ -1679,7 +1681,7 @@ export function BitableGridView({
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
     return {
-      x: clientX - rect.left + canvasScrollOffsetX,
+      x: clientX - rect.left,
       y: clientY - rect.top,
     };
   };

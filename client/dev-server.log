@@ -1899,3 +1899,17 @@
 [2m17:37:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlockView.tsx[22m
 [2m17:38:51[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlock.less[22m
 [2m17:39:52[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlock.less[22m
+[2m17:49:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/Editor.tsx, /src/components/Editor/SlashMenu.tsx, /src/components/Editor/ImageContextMenu.tsx, /src/components/Editor/ContextMenu.tsx, /src/components/Editor/TableContextMenu.tsx, /src/components/Editor/FeishuTableOverlay.tsx, /src/components/Editor/SelectionBubble.tsx, /src/components/Editor/TableGridPicker.tsx, /src/components/Editor/BitableContextMenu.tsx, /src/components/Editor/TableSelectionToolbar.tsx, /src/components/Editor/ButtonTypePicker.tsx, /src/components/Editor/AddBelowSlashSections.tsx, /src/components/Editor/columnsNodeViews.tsx, /src/components/Editor/ColumnsCountPicker.tsx, /src/components/Editor/BitableGanttView.tsx, /src/components/Editor/BitableGridView.tsx, /src/components/Editor/BitableViewShared.tsx, /src/components/Editor/BitableRecordCommentPanel.tsx, /src/components/Editor/BitableKanbanView.tsx, /src/components/Editor/BitableGalleryView.tsx, /src/components/Editor/BitableRecordCardModal.tsx, /src/components/Editor/BitableBlockView.tsx[22m
+[2m17:50:01[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlockView.tsx[22m
+[2m17:52:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlockView.tsx[22m
+[2m17:52:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlockView.tsx[22m
+[2m17:56:04[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableViewShared.tsx[22m
+[2m17:58:02[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableGridView.tsx[22m
+[2m17:58:02[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableGridView.tsx[22m
+[2m17:58:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableGridView.tsx[22m
+[2m17:58:26[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlock.less[22m
+[2m17:58:36[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlock.less[22m
+[2m17:59:58[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableGalleryView.tsx[22m
+[2m18:00:07[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlock.less[22m
+[2m09:54:08[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableGridView.tsx[22m
+[2m09:57:08[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Editor/BitableBlockView.tsx[22m

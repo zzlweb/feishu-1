@@ -39,6 +39,7 @@ import {
   type BaseTable,
   type BaseView,
   type CellValue,
+  type FilterRule,
   type GalleryViewConfig,
   type GanttViewConfig,
   type GridRowHeightMode,
@@ -897,6 +898,14 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     setShowViewMenu(false);
     setShowSettings(false);
     setCommentPanelOpen(false);
+    const opening = activeToolbarPanel !== panel;
+    if (opening && panel === 'filter' && !activeView.locked && !(activeView.filters || []).length && table.fields[0]) {
+      const firstFieldId = table.fields[0].id;
+      mutate(current => updateView(current, activeView.id, view => ({
+        ...view,
+        filters: [{ id: `filter_${Date.now().toString(36)}`, fieldId: firstFieldId, operator: 'equals', value: '' }],
+      })));
+    }
     setActiveToolbarPanel(current => current === panel ? null : panel);
   };
 
@@ -2602,9 +2611,8 @@ function ToolbarQuickPanel({
   onClose: () => void;
   onTable: (update: (table: BaseTable) => BaseTable) => void;
 }) {
-  const filter = view.filters?.[0];
+  const filters = view.filters || [];
   const sort = view.sorts?.[0];
-  const search = String((view.config as { search?: string }).search || '');
   const canGroup = view.type === 'gallery';
   const groupBy = canGroup ? (view.config as GalleryViewConfig).groupByFieldId || '' : '';
 
@@ -2612,62 +2620,102 @@ function ToolbarQuickPanel({
     if (view.locked) return;
     onTable(current => updateView(current, view.id, update));
   };
+  const firstFieldId = table.fields[0]?.id || '';
+  const addFilter = () => {
+    if (!firstFieldId) return;
+    updateCurrentView(item => ({
+      ...item,
+      filters: [
+        ...(item.filters || []),
+        { id: `filter_${Date.now().toString(36)}`, fieldId: firstFieldId, operator: 'equals', value: '' },
+      ],
+    }));
+  };
+  const updateFilter = (filterId: string, patch: Partial<FilterRule>) => {
+    updateCurrentView(item => ({
+      ...item,
+      filters: (item.filters || []).map(rule => (rule.id === filterId ? { ...rule, ...patch } : rule)),
+    }));
+  };
+  const removeFilter = (filterId: string) => {
+    updateCurrentView(item => ({
+      ...item,
+      filters: (item.filters || []).filter(rule => rule.id !== filterId),
+    }));
+  };
 
   return (
     <div ref={panelRef} className={`base-toolbar-panel base-toolbar-panel--${panel}`} data-no-marquee-selection="true" data-floating-panel="true">
-      <header>
-        <strong>{toolbarPanelTitle(panel)}</strong>
-        <button type="button" onClick={onClose} aria-label="关闭">×</button>
-      </header>
+      {panel !== 'filter' && (
+        <header>
+          <strong>{toolbarPanelTitle(panel)}</strong>
+          <button type="button" onClick={onClose} aria-label="关闭">×</button>
+        </header>
+      )}
 
       {panel === 'filter' && (
-        <>
-          <label>搜索记录
-            <input
-              disabled={view.locked}
-              value={search}
-              placeholder="搜索当前视图"
-              onChange={event => updateCurrentView(item => ({ ...item, config: { ...item.config, search: event.target.value } }))}
-            />
-          </label>
-          <div className="base-toolbar-panel__row">
-            <label>字段
-              <select
-                disabled={view.locked}
-                value={filter?.fieldId || ''}
-                onChange={event => updateCurrentView(item => ({
-                  ...item,
-                  filters: event.target.value ? [{ id: filter?.id || `filter_${Date.now().toString(36)}`, fieldId: event.target.value, operator: filter?.operator || 'contains', value: filter?.value || '' }] : [],
-                }))}
-              >
-                <option value="">不筛选</option>
-                {table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-              </select>
-            </label>
-            <label>鏉′欢
-              <select
-                disabled={view.locked || !filter}
-                value={filter?.operator || 'contains'}
-                onChange={event => updateCurrentView(item => ({ ...item, filters: item.filters?.length ? [{ ...item.filters[0], operator: event.target.value as 'contains' | 'equals' | 'is_empty' | 'is_not_empty' }] : [] }))}
-              >
-                <option value="contains">鍖呭惈</option>
-                <option value="equals">绛変簬</option>
-                <option value="is_empty">为空</option>
-                <option value="is_not_empty">不为空</option>
-              </select>
-            </label>
+        <div className="base-toolbar-panel__filter-content">
+          <div className="base-toolbar-panel__filter-title">
+            <span className="base-toolbar-panel__filter-title-main">
+              <span>设置筛选条件</span>
+              <span className="base-toolbar-panel__hint" aria-hidden>?</span>
+            </span>
+            <button type="button" className="base-toolbar-panel__filter-close" onClick={onClose} aria-label="关闭">×</button>
           </div>
-          {filter && !['is_empty', 'is_not_empty'].includes(filter.operator) && (
-            <label>值
-              <input
-                disabled={view.locked}
-                value={filter.value || ''}
-                placeholder="输入筛选值"
-                onChange={event => updateCurrentView(item => ({ ...item, filters: item.filters?.length ? [{ ...item.filters[0], value: event.target.value }] : [] }))}
-              />
-            </label>
-          )}
-        </>
+          <div className="base-toolbar-panel__filter-conditions">
+            {(filters.length ? filters : []).map(rule => (
+              <div className="base-toolbar-panel__filter-row" key={rule.id}>
+                <select
+                  className="base-toolbar-panel__filter-field"
+                  disabled={view.locked}
+                  value={rule.fieldId}
+                  onChange={event => updateFilter(rule.id, { fieldId: event.target.value })}
+                  title={table.fields.find(field => field.id === rule.fieldId)?.name}
+                >
+                  {table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
+                </select>
+                <select
+                  className="base-toolbar-panel__filter-operator"
+                  disabled={view.locked}
+                  value={rule.operator}
+                  onChange={event => updateFilter(rule.id, { operator: event.target.value as FilterRule['operator'] })}
+                >
+                  <option value="equals">等于</option>
+                  <option value="contains">包含</option>
+                  <option value="is_empty">为空</option>
+                  <option value="is_not_empty">不为空</option>
+                </select>
+                {!['is_empty', 'is_not_empty'].includes(rule.operator) && (
+                  <input
+                    className="base-toolbar-panel__filter-value"
+                    disabled={view.locked}
+                    value={rule.value || ''}
+                    placeholder="请输入"
+                    onChange={event => updateFilter(rule.id, { value: event.target.value })}
+                  />
+                )}
+                <button
+                  type="button"
+                  className="base-toolbar-panel__filter-remove"
+                  aria-label="删除筛选条件"
+                  disabled={view.locked}
+                  onClick={() => removeFilter(rule.id)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="base-toolbar-panel__add-condition"
+            disabled={view.locked || !firstFieldId}
+            onClick={addFilter}
+          >
+            <span aria-hidden>+</span>
+            添加条件
+          </button>
+        </div>
       )}
 
       {panel === 'sort' && (
@@ -2731,7 +2779,7 @@ function ToolbarQuickPanel({
       {panel === 'share' && (
         <div className="base-toolbar-panel__actions">
           <button type="button" onClick={() => window.open(window.location.href, '_blank', 'noopener,noreferrer')}>在新窗口打开</button>
-          <button type="button" onClick={() => navigator.clipboard?.writeText(window.location.href)}>澶嶅埗閾炬帴</button>
+          <button type="button" onClick={() => navigator.clipboard?.writeText(window.location.href)}>复制链接</button>
         </div>
       )}
     </div>
@@ -2819,7 +2867,7 @@ function GallerySettings({
       }}>
         <option value="">不筛选</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
       </select></label>
-      {view.filters?.length ? <input disabled={view.locked} placeholder="鍖呭惈鍐呭" value={view.filters[0].value || ''} onChange={event => {
+      {view.filters?.length ? <input disabled={view.locked} placeholder="包含内容" value={view.filters[0].value || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, filters: [{ ...item.filters![0], value: event.target.value }] })));
       }} /> : null}
@@ -3092,7 +3140,7 @@ function GridSettings({
       }}>
         <option value="">不筛选</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
       </select></label>
-      {view.filters?.length ? <input disabled={view.locked} placeholder="鍖呭惈鍐呭" value={view.filters[0].value || ''} onChange={event => {
+      {view.filters?.length ? <input disabled={view.locked} placeholder="包含内容" value={view.filters[0].value || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, filters: [{ ...item.filters![0], value: event.target.value }] })));
       }} /> : null}
