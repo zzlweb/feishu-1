@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
-import { valueText, buildRecordTreeMeta, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, resolveRecordInsertIndex, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from './bitableModel';
+import { valueText, buildRecordTreeMeta, buildGridDisplayRows, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, resolveRecordInsertIndex, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridDisplayRow, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from './bitableModel';
 import { createPortal } from 'react-dom';
 import type { Ref } from 'react';
 import { BITABLE_BLOCK_EXPAND_ALL } from './BitableContextMenu';
@@ -52,6 +52,7 @@ export interface BitableGridViewProps {
 
 const INDEX_WIDTH = 56;
 const ADD_FIELD_WIDTH = 44;
+const BITABLE_GRID_MIN_WIDTH = 860;
 const BITABLE_EDGE_MARGIN = 72;
 const DEFAULT_FIELD_WIDTH = 160;
 const MIN_FIELD_WIDTH = 80;
@@ -647,6 +648,36 @@ function rowIndexFromClientY(shell: HTMLDivElement | null, clientY: number, reco
   return index;
 }
 
+function recordAtGridRow(gridRows: GridDisplayRow[], rowIndex: number): BaseRecord | null {
+  const row = gridRows[rowIndex];
+  return row?.kind === 'record' ? row.record : null;
+}
+
+function recordRowsFromGrid(gridRows: GridDisplayRow[]): BaseRecord[] {
+  return gridRows
+    .filter((row): row is Extract<GridDisplayRow, { kind: 'record' }> => row.kind === 'record')
+    .map(row => row.record);
+}
+
+function drawGridGroupRow(
+  ctx: CanvasRenderingContext2D,
+  row: Extract<GridDisplayRow, { kind: 'group' }>,
+  rowIndex: number,
+  headerHeight: number,
+  rowHeight: number,
+  contentRight: number,
+  collapsed: boolean,
+) {
+  const top = headerHeight + rowIndex * rowHeight;
+  ctx.fillStyle = '#f5f6f7';
+  ctx.fillRect(0, top, contentRight, rowHeight);
+  ctx.fillStyle = '#646a73';
+  ctx.font = '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.textBaseline = 'middle';
+  const indent = 8 + row.level * 16;
+  ctx.fillText(`${collapsed ? '▸' : '▾'} ${row.fieldName}：${row.label}（${row.count}）`, indent, top + rowHeight / 2);
+}
+
 function isValidTreeDropTarget(
   records: BaseRecord[],
   displayRecords: BaseRecord[],
@@ -706,7 +737,7 @@ export function BitableGridView({
   const cellMenuRef = useRef<HTMLDivElement>(null);
   const selectEditorRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
-  const pendingCellFocusRef = useRef<{ recordId: string; fieldId: string } | null>(null);
+  const pendingCellFocusRef = useRef<{ recordId: string; fieldId: string; scrollAlign?: 'nearest' | 'end' } | null>(null);
   const suppressBlurCommitRef = useRef(false);
   const editingCellRef = useRef<EditingCell | null>(null);
   const selectedCellRef = useRef<SelectedCell | null>(null);
@@ -728,21 +759,42 @@ export function BitableGridView({
   const [selectEditor, setSelectEditor] = useState<SelectEditor | null>(null);
   const [rowDrag, setRowDrag] = useState<{ fromIndex: number; overIndex: number } | null>(null);
   const [collapsedRecordIds, setCollapsedRecordIds] = useState<Set<string>>(() => new Set());
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
   const visibleFields = table.fields.filter(field => !(activeView.hiddenFieldIds || []).includes(field.id));
-  const displayRecords = useMemo(
+  const gridConfig = activeView.config as GridViewConfig;
+  const treeRecords = useMemo(
     () => filterRecordsByCollapsedAncestors(records, collapsedRecordIds),
     [records, collapsedRecordIds],
   );
+  const groupFieldIds = gridConfig.groupByFieldIds ?? [];
+  const groupSortDirections = gridConfig.groupSortDirections ?? [];
+  const gridRows = useMemo(
+    () => buildGridDisplayRows(table, treeRecords, groupFieldIds, collapsedGroupKeys, groupSortDirections, activeView),
+    [table, treeRecords, groupFieldIds, groupSortDirections, collapsedGroupKeys, activeView],
+  );
+  const displayRecords = useMemo(() => recordRowsFromGrid(gridRows), [gridRows]);
   const isAllSelected = records.length > 0 && selectedIds.size === records.length;
   const isPartiallySelected = selectedIds.size > 0 && selectedIds.size < records.length;
-  const gridConfig = activeView.config as GridViewConfig;
   const ROW_HEIGHT = resolveGridRowHeight(gridConfig);
-  const addRowIndex = displayRecords.length;
+  const addRowIndex = gridRows.length;
   const rowCount = addRowIndex + 1;
   const gridBodyBottom = HEADER_HEIGHT + rowCount * ROW_HEIGHT;
   const fieldWidths = gridConfig.fieldWidths || {};
   const menuField = fieldMenu ? visibleFields.find(field => field.id === fieldMenu.fieldId) : null;
   const treeMeta = useMemo(() => buildRecordTreeMeta(displayRecords, records), [displayRecords, records]);
+
+  useEffect(() => {
+    setCollapsedGroupKeys(new Set());
+  }, [groupFieldIds.join('|')]);
+
+  const toggleGroupCollapse = (groupKey: string) => {
+    setCollapsedGroupKeys(current => {
+      const next = new Set(current);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  };
 
   const toggleRecordCollapse = (recordId: string) => {
     setCollapsedRecordIds(current => {
@@ -773,7 +825,7 @@ export function BitableGridView({
   }, [activeResize, fieldWidths, visibleFields]);
 
   const dataWidth = columns.length > 0 ? columns[columns.length - 1].left + columns[columns.length - 1].width : INDEX_WIDTH;
-  const gridContentRight = dataWidth + ADD_FIELD_WIDTH;
+  const rawGridContentRight = dataWidth + ADD_FIELD_WIDTH;
   const columnResizeGuide = useMemo(() => {
     const fieldId = activeResize?.fieldId ?? hoverResizeFieldId;
     if (!fieldId) return null;
@@ -796,7 +848,9 @@ export function BitableGridView({
   const [foldMode, setFoldMode] = useState(false);
   const [hThumbDragging, setHThumbDragging] = useState(false);
   const [hoverAddFieldHeader, setHoverAddFieldHeader] = useState(false);
-  const canvasWidth = Math.max(INDEX_WIDTH + ADD_FIELD_WIDTH, gridContentRight);
+  const canvasWidth = Math.max(BITABLE_GRID_MIN_WIDTH, INDEX_WIDTH + ADD_FIELD_WIDTH, rawGridContentRight);
+  const gridContentRight = canvasWidth;
+  const addFieldLeft = Math.max(dataWidth, gridContentRight - ADD_FIELD_WIDTH);
   const canvasHeight = gridBodyBottom;
   const frozenColumn = columns[0];
   const freezeWidth = INDEX_WIDTH + (frozenColumn?.width ?? DEFAULT_FIELD_WIDTH);
@@ -883,14 +937,20 @@ export function BitableGridView({
     const bleedLeftNow = bleedHost?.getBoundingClientRect().left ?? blockLeftNow;
 
     if (scrollLeftRef.current <= 0 && !foldMode) {
-      anchorWidthRef.current = block.getBoundingClientRect().width
-        || block.parentElement?.clientWidth
-        || shell.clientWidth;
+      anchorWidthRef.current = Math.max(
+        BITABLE_GRID_MIN_WIDTH,
+        block.getBoundingClientRect().width
+          || block.parentElement?.clientWidth
+          || shell.clientWidth,
+      );
       layoutOriginRef.current = { blockLeft: blockLeftNow, bleedLeft: bleedLeftNow };
     } else if (!anchorWidthRef.current) {
-      anchorWidthRef.current = block.getBoundingClientRect().width
-        || block.parentElement?.clientWidth
-        || shell.clientWidth;
+      anchorWidthRef.current = Math.max(
+        BITABLE_GRID_MIN_WIDTH,
+        block.getBoundingClientRect().width
+          || block.parentElement?.clientWidth
+          || shell.clientWidth,
+      );
       layoutOriginRef.current = { blockLeft: blockLeftNow, bleedLeft: bleedLeftNow };
     }
 
@@ -1082,7 +1142,7 @@ export function BitableGridView({
     if (activeView.locked) return;
     const recordId = addRecord();
     const focusColumn = column ?? columns.find(item => item.field.id === table.primaryFieldId) ?? columns[0];
-    if (focusColumn) pendingCellFocusRef.current = { recordId, fieldId: focusColumn.field.id };
+    if (focusColumn) pendingCellFocusRef.current = { recordId, fieldId: focusColumn.field.id, scrollAlign: 'end' };
   };
 
   useEffect(() => {
@@ -1185,9 +1245,11 @@ export function BitableGridView({
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
     displayRecords.forEach((record, rowIndex) => {
+      const visualIndex = gridRows.findIndex(row => row.kind === 'record' && row.record.id === record.id);
+      if (visualIndex < 0) return;
       if (selectedIds.has(record.id)) {
         ctx.fillStyle = '#e8f3ff';
-        ctx.fillRect(0, HEADER_HEIGHT + rowIndex * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
+        ctx.fillRect(0, HEADER_HEIGHT + visualIndex * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
       }
     });
 
@@ -1195,24 +1257,24 @@ export function BitableGridView({
     if (
       activeCellRowIndex != null
       && activeCellRowIndex >= 0
-      && activeCellRowIndex < displayRecords.length
-      && !selectedIds.has(displayRecords[activeCellRowIndex].id)
+      &&       activeCellRowIndex < gridRows.length
+      && gridRows[activeCellRowIndex]?.kind === 'record'
+      && !selectedIds.has((gridRows[activeCellRowIndex] as Extract<GridDisplayRow, { kind: 'record' }>).record.id)
     ) {
       ctx.fillStyle = '#e8f3ff';
       ctx.fillRect(0, HEADER_HEIGHT + activeCellRowIndex * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
     }
 
     if (rowDrag) {
-      const fromRecord = displayRecords[rowDrag.fromIndex];
+      const fromRecord = recordAtGridRow(gridRows, rowDrag.fromIndex);
       if (fromRecord) {
         const fromRecordsIndex = records.findIndex(record => record.id === fromRecord.id);
         if (fromRecordsIndex >= 0) {
           const subtreeIds = getRecordSubtreeIds(records, fromRecordsIndex);
-          displayRecords.forEach((record, rowIndex) => {
-            if (subtreeIds.has(record.id)) {
-              ctx.fillStyle = 'rgba(51, 112, 255, 0.1)';
-              ctx.fillRect(0, HEADER_HEIGHT + rowIndex * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
-            }
+          gridRows.forEach((row, rowIndex) => {
+            if (row.kind !== 'record' || !subtreeIds.has(row.record.id)) return;
+            ctx.fillStyle = 'rgba(51, 112, 255, 0.1)';
+            ctx.fillRect(0, HEADER_HEIGHT + rowIndex * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
           });
         }
       }
@@ -1221,9 +1283,10 @@ export function BitableGridView({
     if (
       hoverRow != null
       && hoverRow >= 0
-      && hoverRow < displayRecords.length
+      &&       hoverRow < gridRows.length
+      && gridRows[hoverRow]?.kind === 'record'
       && hoverRow !== activeCellRowIndex
-      && !selectedIds.has(displayRecords[hoverRow].id)
+      && !selectedIds.has((gridRows[hoverRow] as Extract<GridDisplayRow, { kind: 'record' }>).record.id)
     ) {
       ctx.fillStyle = '#f2f3f5';
       ctx.fillRect(0, HEADER_HEIGHT + hoverRow * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
@@ -1241,7 +1304,7 @@ export function BitableGridView({
     ctx.lineWidth = 1;
     ctx.beginPath();
     const addRowTop = HEADER_HEIGHT + addRowIndex * ROW_HEIGHT;
-    const verticals = [0, ...columns.map(column => column.left + column.width)];
+    const verticals = [0, ...columns.map(column => column.left + column.width), addFieldLeft, gridContentRight];
     verticals.forEach(x => {
       const crisp = Math.round(x) + 0.5;
       const isLeftEdge = Math.round(x) <= 0;
@@ -1259,15 +1322,21 @@ export function BitableGridView({
 
     if (hoverAddFieldHeader) {
       ctx.fillStyle = '#f5f8ff';
-      ctx.fillRect(dataWidth, 0, ADD_FIELD_WIDTH, HEADER_HEIGHT);
+      ctx.fillRect(addFieldLeft, 0, ADD_FIELD_WIDTH, HEADER_HEIGHT);
     }
 
     ctx.font = '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     ctx.textBaseline = 'middle';
-    displayRecords.forEach((record, rowIndex) => {
+    gridRows.forEach((row, rowIndex) => {
+      if (row.kind === 'group') {
+        drawGridGroupRow(ctx, row, rowIndex, HEADER_HEIGHT, ROW_HEIGHT, gridContentRight, collapsedGroupKeys.has(row.key));
+        return;
+      }
+      const record = row.record;
       const y = HEADER_HEIGHT + rowIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
       const rowTop = HEADER_HEIGHT + rowIndex * ROW_HEIGHT;
-      const meta = treeMeta[rowIndex];
+      const recordIndex = displayRecords.findIndex(item => item.id === record.id);
+      const meta = recordIndex >= 0 ? treeMeta[recordIndex] : undefined;
       ctx.font = '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
       columns.forEach(column => {
         const text = column.field.type === 'attachment'
@@ -1297,10 +1366,12 @@ export function BitableGridView({
       });
     });
 
-    if (selectedCell && !editingCell) {
+    if (selectedCell && !editingCell && gridRows[selectedCell.rowIndex]?.kind === 'record') {
       const column = columns.find(item => item.field.id === selectedCell.fieldId);
       if (column) {
-        const meta = treeMeta[selectedCell.rowIndex];
+        const record = recordAtGridRow(gridRows, selectedCell.rowIndex);
+        const recordIndex = record ? displayRecords.findIndex(item => item.id === record.id) : -1;
+        const meta = recordIndex >= 0 ? treeMeta[recordIndex] : undefined;
         const isPrimaryField = column.field.id === table.primaryFieldId;
         const layout = getCellEditorLayout(column, meta, isPrimaryField);
         const x = Math.round(layout.left);
@@ -1342,7 +1413,7 @@ export function BitableGridView({
       }
     }
 
-  }, [activeResize, addRowIndex, canvasHeight, canvasWidth, collapsedRecordIds, columns, dataWidth, displayRecords, editingCell, gridBodyBottom, gridContentRight, hoverAddFieldHeader, hoverAddRow, hoverCell, hoverHeaderFieldId, hoverRow, records, rowCount, rowDrag, scrollLeft, selectEditor, selectedCell, selectedIds, shouldFreezeColumns, table.primaryFieldId, treeMeta]);
+  }, [activeResize, addFieldLeft, addRowIndex, canvasHeight, canvasWidth, collapsedGroupKeys, collapsedRecordIds, columns, dataWidth, displayRecords, editingCell, gridBodyBottom, gridContentRight, gridRows, hoverAddFieldHeader, hoverAddRow, hoverCell, hoverHeaderFieldId, hoverRow, records, rowCount, rowDrag, scrollLeft, selectEditor, selectedCell, selectedIds, shouldFreezeColumns, table.primaryFieldId, treeMeta]);
 
   const commitEditingCell = () => {
     const current = editingCellRef.current;
@@ -1461,7 +1532,7 @@ export function BitableGridView({
       }
 
       if (!currentEdit && currentSelect && (isPrintable || event.key === 'Enter' || event.key === 'F2')) {
-        const record = displayRecords[currentSelect.rowIndex];
+        const record = recordAtGridRow(gridRows, currentSelect.rowIndex);
         const column = columns.find(item => item.field.id === currentSelect.fieldId);
         if (!record || !column || column.field.type === 'attachment' || isSelectField(column.field)) return;
         event.preventDefault();
@@ -1508,17 +1579,35 @@ export function BitableGridView({
     };
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [activeView.locked, selectEditor, displayRecords, columns, treeMeta, table.primaryFieldId]);
+  }, [activeView.locked, selectEditor, gridRows, columns, treeMeta, table.primaryFieldId]);
 
   useEffect(() => {
     const pending = pendingCellFocusRef.current;
     if (!pending) return;
-    const rowIndex = displayRecords.findIndex(record => record.id === pending.recordId);
+    const rowIndex = gridRows.findIndex(row => row.kind === 'record' && row.record.id === pending.recordId);
     if (rowIndex < 0) return;
     const column = columns.find(item => item.field.id === pending.fieldId);
-    const record = displayRecords[rowIndex];
+    const record = recordAtGridRow(gridRows, rowIndex);
     if (!column || !record) return;
     pendingCellFocusRef.current = null;
+    const scrollRoot = canvasScrollRef.current;
+    if (scrollRoot) {
+      const rowTop = HEADER_HEIGHT + rowIndex * ROW_HEIGHT;
+      const workspace = scrollRoot.closest<HTMLElement>('.doc-page-workspace');
+      if (workspace) {
+        const canvasRect = scrollRoot.getBoundingClientRect();
+        const workspaceRect = workspace.getBoundingClientRect();
+        const rowScreenTop = canvasRect.top + rowTop;
+        const rowScreenBottom = rowScreenTop + ROW_HEIGHT;
+        if (pending.scrollAlign === 'end') {
+          workspace.scrollTop += canvasRect.bottom - workspaceRect.bottom;
+        } else if (rowScreenTop < workspaceRect.top) {
+          workspace.scrollTop += rowScreenTop - workspaceRect.top;
+        } else if (rowScreenBottom > workspaceRect.bottom) {
+          workspace.scrollTop += rowScreenBottom - workspaceRect.bottom;
+        }
+      }
+    }
     setSelectedCell({ recordId: record.id, fieldId: column.field.id, rowIndex });
     if (column.field.type === 'attachment') {
       pickFiles(record.id, column.field.id);
@@ -1529,7 +1618,7 @@ export function BitableGridView({
       return;
     }
     startEditing(record, column, rowIndex);
-  }, [displayRecords, columns]);
+  }, [gridRows, columns, ROW_HEIGHT]);
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const point = pointFromCanvas(event, canvasScrollOffsetX);
@@ -1543,7 +1632,7 @@ export function BitableGridView({
     if (point.y < HEADER_HEIGHT && point.x < dataWidth) {
       setHoverHeaderFieldId(findColumn(columns, point.x)?.field.id ?? null);
       setHoverAddFieldHeader(false);
-    } else if (point.y < HEADER_HEIGHT && point.x >= dataWidth && point.x < gridContentRight) {
+    } else if (point.y < HEADER_HEIGHT && point.x >= addFieldLeft && point.x < gridContentRight) {
       setHoverHeaderFieldId(null);
       setHoverAddFieldHeader(true);
       event.currentTarget.style.cursor = 'pointer';
@@ -1561,9 +1650,9 @@ export function BitableGridView({
       return;
     }
     setHoverAddRow(false);
-    const nextHoverRow = point.y >= HEADER_HEIGHT && rowIndex >= 0 && rowIndex < displayRecords.length ? rowIndex : null;
+    const nextHoverRow = point.y >= HEADER_HEIGHT && rowIndex >= 0 && rowIndex < gridRows.length ? rowIndex : null;
     setHoverRow(nextHoverRow);
-    if (nextHoverRow != null && point.x >= INDEX_WIDTH && point.x < dataWidth) {
+    if (nextHoverRow != null && gridRows[nextHoverRow]?.kind === 'record' && point.x >= INDEX_WIDTH && point.x < dataWidth) {
       const column = findColumn(columns, point.x);
       setHoverCell(column ? { rowIndex: nextHoverRow, fieldId: column.field.id } : null);
     } else {
@@ -1605,7 +1694,7 @@ export function BitableGridView({
     if (point.y < HEADER_HEIGHT) {
       setSelectedCell(null);
       setSelectEditor(null);
-      if (point.x >= dataWidth && point.x < gridContentRight && !activeView.locked) {
+      if (point.x >= addFieldLeft && point.x < gridContentRight && !activeView.locked) {
         openAddFieldPanelAt({
           left: event.clientX - 320,
           top: event.clientY + 4,
@@ -1619,8 +1708,13 @@ export function BitableGridView({
       if (point.x < gridContentRight) addFromAddRow(null);
       return;
     }
-    if (rowIndex >= displayRecords.length) return;
-    const record = displayRecords[rowIndex];
+    if (rowIndex >= gridRows.length) return;
+    const row = gridRows[rowIndex];
+    if (row.kind === 'group') {
+      toggleGroupCollapse(row.key);
+      return;
+    }
+    const record = row.record;
     if (point.x < INDEX_WIDTH) {
       setSelectedCell(null);
       return;
@@ -1633,7 +1727,8 @@ export function BitableGridView({
     }
     const column = findColumn(columns, point.x);
     if (!column) return;
-    const meta = treeMeta[rowIndex];
+    const recordIndex = displayRecords.findIndex(item => item.id === record.id);
+    const meta = recordIndex >= 0 ? treeMeta[recordIndex] : undefined;
     if (isTreeToggleHit(point, column, rowIndex, ROW_HEIGHT, table.primaryFieldId, meta)) {
       toggleRecordCollapse(record.id);
       return;
@@ -1694,7 +1789,7 @@ export function BitableGridView({
     if (!point) return;
 
     if (point.y < HEADER_HEIGHT) {
-      if (point.x >= dataWidth && point.x < gridContentRight) return;
+      if (point.x >= addFieldLeft && point.x < gridContentRight) return;
       const column = findColumn(columns, point.x);
       if (column) {
         openFieldMenuAt(column.field.id, event.clientX, event.clientY, column.left, false);
@@ -1703,9 +1798,11 @@ export function BitableGridView({
     }
 
     const rowIndex = Math.floor((point.y - HEADER_HEIGHT) / ROW_HEIGHT);
-    if (rowIndex < 0 || rowIndex >= displayRecords.length) return;
+    if (rowIndex < 0 || rowIndex >= gridRows.length) return;
+    const row = gridRows[rowIndex];
+    if (row.kind !== 'record') return;
 
-    const record = displayRecords[rowIndex];
+    const record = row.record;
     const column = findColumn(columns, point.x);
     openRowContextMenu(
       record.id,
@@ -1887,8 +1984,11 @@ export function BitableGridView({
             {(() => {
               const primaryColumn = columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
               if (!primaryColumn || !overlayInFrozenZone(primaryColumn.left)) return null;
-              return displayRecords.map((record, rowIndex) => {
-                const meta = treeMeta[rowIndex];
+              return gridRows.map((row, rowIndex) => {
+                if (row.kind !== 'record') return null;
+                const record = row.record;
+                const recordIndex = displayRecords.findIndex(item => item.id === record.id);
+                const meta = recordIndex >= 0 ? treeMeta[recordIndex] : undefined;
                 if (!meta?.hasChildren) return null;
                 const isCollapsed = collapsedRecordIds.has(record.id);
                 return (
@@ -1930,10 +2030,10 @@ export function BitableGridView({
                 />
               );
             })()}
-            {hoverRow != null && !editingCell && !selectEditor && selectedCell?.rowIndex !== hoverRow && displayRecords[hoverRow] && (() => {
+            {hoverRow != null && !editingCell && !selectEditor && selectedCell?.rowIndex !== hoverRow && gridRows[hoverRow]?.kind === 'record' && (() => {
               const primaryColumn = columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
               if (!primaryColumn || !overlayInFrozenZone(primaryColumn.left)) return null;
-              const hoverRecord = displayRecords[hoverRow];
+              const hoverRecord = (gridRows[hoverRow] as Extract<GridDisplayRow, { kind: 'record' }>).record;
               return (
                 <div
                   className="base-grid-row-hover-actions"
@@ -1980,7 +2080,10 @@ export function BitableGridView({
                 </div>
               );
             })()}
-            {displayRecords.map((record, rowIndex) => columns.map(column => {
+            {gridRows.map((row, rowIndex) => {
+              if (row.kind !== 'record') return null;
+              const record = row.record;
+              return columns.map(column => {
               if (!isSelectField(column.field) || !overlayInFrozenZone(column.left)) return null;
               const choices = column.field.type === 'multi_select'
                 ? getMultiSelectChoices(column.field, record.fields[column.field.id])
@@ -2024,7 +2127,8 @@ export function BitableGridView({
                   </div>
                 </div>
               );
-            }))}
+            });
+            })}
             {editingCell && overlayInFrozenZone(editingCell.left) && (
               <input
                 ref={inputRef}
@@ -2079,8 +2183,12 @@ export function BitableGridView({
               aria-label="全选"
             />
           </label>
-          {displayRecords.map((record, rowIndex) => {
-            const meta = treeMeta[rowIndex];
+          {gridRows.map((row, rowIndex) => {
+            if (row.kind !== 'record') return null;
+            const record = row.record;
+            const recordIndex = displayRecords.findIndex(item => item.id === record.id);
+            const meta = recordIndex >= 0 ? treeMeta[recordIndex] : undefined;
+            if (!meta) return null;
             const displayNumber = getRootDisplayNumber(record, displayRecords, records);
             const isCellActiveRow = selectedCell?.rowIndex === rowIndex;
             const showControls = hoverRow === rowIndex || selectedIds.has(record.id) || isCellActiveRow;
@@ -2110,11 +2218,16 @@ export function BitableGridView({
                       }}
                       onPointerMove={event => {
                         if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-                        const overIndex = rowIndexFromClientY(shellRef.current, event.clientY, displayRecords.length, ROW_HEIGHT);
+                        const overIndex = rowIndexFromClientY(shellRef.current, event.clientY, gridRows.length, ROW_HEIGHT);
                         if (overIndex == null) return;
                         setRowDrag(current => {
                           if (!current) return current;
-                          if (!isValidTreeDropTarget(records, displayRecords, current.fromIndex, overIndex)) {
+                          const fromRecord = recordAtGridRow(gridRows, current.fromIndex);
+                          const toRecord = recordAtGridRow(gridRows, overIndex);
+                          if (!fromRecord || !toRecord) return { ...current, overIndex: current.fromIndex };
+                          const fromDisplayIndex = displayRecords.findIndex(item => item.id === fromRecord.id);
+                          const toDisplayIndex = displayRecords.findIndex(item => item.id === toRecord.id);
+                          if (!isValidTreeDropTarget(records, displayRecords, fromDisplayIndex, toDisplayIndex)) {
                             return { ...current, overIndex: current.fromIndex };
                           }
                           return { ...current, overIndex };
@@ -2125,12 +2238,16 @@ export function BitableGridView({
                         event.currentTarget.releasePointerCapture(event.pointerId);
                         setRowDrag(current => {
                           if (current) {
-                            const fromRecord = displayRecords[current.fromIndex];
-                            const toRecord = displayRecords[current.overIndex];
-                            if (fromRecord && toRecord && isValidTreeDropTarget(records, displayRecords, current.fromIndex, current.overIndex)) {
-                              const fromIndex = records.findIndex(item => item.id === fromRecord.id);
-                              const toIndex = records.findIndex(item => item.id === toRecord.id);
-                              reorderRecords(fromIndex, toIndex);
+                            const fromRecord = recordAtGridRow(gridRows, current.fromIndex);
+                            const toRecord = recordAtGridRow(gridRows, current.overIndex);
+                            if (fromRecord && toRecord) {
+                              const fromDisplayIndex = displayRecords.findIndex(item => item.id === fromRecord.id);
+                              const toDisplayIndex = displayRecords.findIndex(item => item.id === toRecord.id);
+                              if (isValidTreeDropTarget(records, displayRecords, fromDisplayIndex, toDisplayIndex)) {
+                                const fromIndex = records.findIndex(item => item.id === fromRecord.id);
+                                const toIndex = records.findIndex(item => item.id === toRecord.id);
+                                reorderRecords(fromIndex, toIndex);
+                              }
                             }
                           }
                           return null;
@@ -2243,7 +2360,7 @@ export function BitableGridView({
             <div
               className={`base-grid-add-field-column${hoverAddFieldHeader ? ' is-hovered' : ''}`}
               style={{
-                left: dataWidth,
+                left: addFieldLeft,
                 top: 0,
                 width: ADD_FIELD_WIDTH,
                 height: canvasHeight,
@@ -2272,8 +2389,11 @@ export function BitableGridView({
             {(() => {
               const primaryColumn = columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
               if (!primaryColumn || overlayInFrozenZone(primaryColumn.left)) return null;
-              return displayRecords.map((record, rowIndex) => {
-                const meta = treeMeta[rowIndex];
+              return gridRows.map((row, rowIndex) => {
+                if (row.kind !== 'record') return null;
+                const record = row.record;
+                const recordIndex = displayRecords.findIndex(item => item.id === record.id);
+                const meta = recordIndex >= 0 ? treeMeta[recordIndex] : undefined;
                 if (!meta?.hasChildren) return null;
                 const isCollapsed = collapsedRecordIds.has(record.id);
                 return (
@@ -2365,7 +2485,10 @@ export function BitableGridView({
               </div>
               );
             })()}
-            {displayRecords.map((record, rowIndex) => columns.map(column => {
+            {gridRows.map((row, rowIndex) => {
+              if (row.kind !== 'record') return null;
+              const record = row.record;
+              return columns.map(column => {
               if (!isSelectField(column.field) || overlayInFrozenZone(column.left)) return null;
               const choices = column.field.type === 'multi_select'
                 ? getMultiSelectChoices(column.field, record.fields[column.field.id])
@@ -2409,7 +2532,8 @@ export function BitableGridView({
                   </div>
                 </div>
               );
-            }))}
+            });
+            })}
           </div>
           {editingCell && !overlayInFrozenZone(editingCell.left) && (
             <input

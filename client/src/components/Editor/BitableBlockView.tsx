@@ -19,11 +19,18 @@ import {
   deleteView,
   duplicateFieldName,
   findInsertIndexAfterSubtree,
+  isFilterRuleActive,
+  hasActiveGridGroups,
+  insertRecordsIntoTable,
+  normalizeRecordTreeOrder,
   reorderRecordsInTree,
+  resolveRecordInsertIndex,
   getActiveView,
   getAttachments,
   getGanttConfig,
   getGalleryConfig,
+  getGridGroupFieldIds,
+  resolveGridGroupRules,
   groupRecords,
   nextAutoFieldName,
   parseBaseTable,
@@ -32,6 +39,7 @@ import {
   serializeBaseTable,
   valueText,
   normalizeMultiSelectIds,
+  normalizeGridGroupConfig,
   visibleRecords,
   type AttachmentValue,
   type BaseField,
@@ -44,13 +52,15 @@ import {
   type GanttViewConfig,
   type GridRowHeightMode,
   type GridViewConfig,
+  type SortRule,
 } from './bitableModel';
 import { BitableGalleryView } from './BitableGalleryView';
 import { BitableGanttView } from './BitableGanttView';
 import { BitableKanbanView } from './BitableKanbanView';
 import { BitableGridView, type GridFieldMenuAction, type GridFieldMenuPosition } from './BitableGridView';
-import { BitableRecordCardModal } from './BitableRecordCardModal';
 import { BitableRecordCommentPanel } from './BitableRecordCommentPanel';
+import { BitableRecordCardModal } from './BitableRecordCardModal';
+import { useAnchoredFloatingPosition } from './floatingPanel';
 import { createSelectChoice } from './BitableSelectFieldEditor';
 import { useCommentSidebarTrack } from '../Layout/CommentSidebarContext';
 import {
@@ -573,6 +583,25 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const activeView = getActiveView(table);
   const records = visibleRecords(table, activeView);
   const galleryConfig = getGalleryConfig(table, activeView);
+  const hasActiveFilters = useMemo(
+    () => (activeView.filters || []).some(isFilterRuleActive),
+    [activeView.filters],
+  );
+  const hasActiveGroups = useMemo(
+    () => (activeView.type === 'gallery' && Boolean(galleryConfig.groupByFieldId))
+      || hasActiveGridGroups(activeView),
+    [activeView, galleryConfig.groupByFieldId],
+  );
+  const activeGroupCount = useMemo(() => {
+    if (activeView.type === 'grid') return resolveGridGroupRules(activeView).length;
+    if (activeView.type === 'gallery' && galleryConfig.groupByFieldId) return 1;
+    return 0;
+  }, [activeView, galleryConfig.groupByFieldId]);
+  const activeSortCount = useMemo(
+    () => (activeView.sorts || []).length,
+    [activeView.sorts],
+  );
+  const hasSortRules = activeSortCount > 0;
   const ganttConfig = getGanttConfig(table, activeView);
   const groups = groupRecords(table, activeView, records);
   const [showViewMenu, setShowViewMenu] = useState(false);
@@ -612,6 +641,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const selectionAnchorRef = useRef<string | null>(null);
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const toolbarPanelRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const viewContextMenuRef = useRef<HTMLDivElement>(null);
   const fieldPanelAnchorRef = useRef<HTMLSpanElement>(null);
@@ -685,7 +715,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     const parent = block?.parentElement;
     if (!block || !parent) return;
     const measureAnchorWidth = () => {
-      block.style.setProperty('--bitable-anchor-width', `${parent.clientWidth}px`);
+      block.style.setProperty('--bitable-anchor-width', `${Math.max(860, parent.clientWidth)}px`);
     };
     measureAnchorWidth();
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measureAnchorWidth) : null;
@@ -701,7 +731,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     if (!showViewMenu && !showSettings && !activeToolbarPanel && !viewContextMenuId) return;
     const outside = (event: globalThis.MouseEvent) => {
       if (!(event.target instanceof Node)) return;
-      if (viewMenuRef.current?.contains(event.target) || settingsRef.current?.contains(event.target)) return;
+      if (
+        viewMenuRef.current?.contains(event.target)
+        || settingsRef.current?.contains(event.target)
+        || toolbarPanelRef.current?.contains(event.target)
+      ) return;
       if (viewContextMenuRef.current?.contains(event.target)) return;
       if (event.target instanceof Element && event.target.closest('.base-viewbar__rename')) return;
       setShowViewMenu(false);
@@ -711,8 +745,9 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         setActiveToolbarPanel(null);
       }
     };
-    document.addEventListener('mousedown', outside);
-    return () => document.removeEventListener('mousedown', outside);
+    // Capture phase: base-view-content stops mousedown propagation on bubble, which would skip this handler.
+    document.addEventListener('mousedown', outside, true);
+    return () => document.removeEventListener('mousedown', outside, true);
   }, [showViewMenu, showSettings, activeToolbarPanel, viewContextMenuId]);
 
   useEffect(() => {
@@ -769,6 +804,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       setEditingFieldPanel(null);
       setSelectedIds(new Set());
       selectionAnchorRef.current = null;
+      setActiveToolbarPanel(null);
+      setShowSettings(false);
+      setShowViewMenu(false);
+      setViewContextMenuId(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -972,8 +1011,20 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     })));
   };
 
-  const addRecord = (initialTitle = '') => {
-    const record = createRecord(table.id, table.fields, table.primaryFieldId, initialTitle);
+  function cloneCellValue(value: CellValue): CellValue {
+    if (Array.isArray(value)) return JSON.parse(JSON.stringify(value)) as CellValue;
+    return value;
+  }
+
+  const buildNewRecord = (current: BaseTable, initialTitle = '', seedFromRecord?: BaseRecord | null) => {
+    const record = createRecord(current.id, current.fields, current.primaryFieldId, initialTitle);
+    if (seedFromRecord && activeView.type === 'grid') {
+      activeView.sorts?.forEach(sort => {
+        if (sort.fieldId !== current.primaryFieldId && sort.fieldId in record.fields) {
+          record.fields[sort.fieldId] = cloneCellValue(seedFromRecord.fields[sort.fieldId]);
+        }
+      });
+    }
     if (activeView.type === 'gallery' && galleryConfig.groupByFieldId) {
       record.fields[galleryConfig.groupByFieldId] = '';
     }
@@ -982,35 +1033,44 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       record.fields[ganttConfig.startDateFieldId] = dateValue(start);
       record.fields[ganttConfig.endDateFieldId] = dateValue(offsetDate(start, 3));
     }
-    mutate(current => ({ ...current, records: [...current.records, record] }));
-    return record.id;
+    return record;
   };
 
-  const insertRecordAt = (index: number, count = 1, initialTitle = '') => {
+  const addRecord = (initialTitle = '') => {
+    let insertedId = '';
+    mutate(current => {
+      const currentVisibleRecords = visibleRecords(current, activeView);
+      const seedFromRecord = currentVisibleRecords[currentVisibleRecords.length - 1] ?? null;
+      const record = buildNewRecord(current, initialTitle, seedFromRecord);
+      insertedId = record.id;
+      return {
+        ...current,
+        records: insertRecordsIntoTable(current, activeView, [record], { mode: 'append' }),
+      };
+    });
+    return insertedId;
+  };
+
+  const insertRecordAt = (visibleIndex: number, count = 1, initialTitle = '') => {
     const insertedIds: string[] = [];
     mutate(current => {
-      const newRecords = [...current.records];
-      for (let i = 0; i < count; i++) {
-        const record = createRecord(table.id, table.fields, table.primaryFieldId, initialTitle);
+      const recordsToInsert = Array.from({ length: count }, () => {
+        const record = buildNewRecord(current, initialTitle);
         insertedIds.push(record.id);
-        if (activeView.type === 'gallery' && galleryConfig.groupByFieldId) {
-          record.fields[galleryConfig.groupByFieldId] = '';
-        }
-        if (activeView.type === 'gantt' && ganttConfig.startDateFieldId && ganttConfig.endDateFieldId) {
-          const start = new Date();
-          record.fields[ganttConfig.startDateFieldId] = dateValue(start);
-          record.fields[ganttConfig.endDateFieldId] = dateValue(offsetDate(start, 3));
-        }
-        newRecords.splice(index + i, 0, record);
-      }
-      return { ...current, records: newRecords };
+        return record;
+      });
+      let nextRecords = current.records;
+      recordsToInsert.forEach((record, offset) => {
+        nextRecords = insertRecordsIntoTable(
+          { ...current, records: nextRecords },
+          activeView,
+          [record],
+          { visibleIndex: visibleIndex + offset },
+        );
+      });
+      return { ...current, records: nextRecords };
     });
     return insertedIds;
-  };
-
-  const cloneCellValue = (value: CellValue): CellValue => {
-    if (Array.isArray(value)) return JSON.parse(JSON.stringify(value)) as CellValue;
-    return value;
   };
 
   const duplicateRecord = (recordId: string) => {
@@ -1156,7 +1216,24 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 if (config.endDateFieldId === fieldId) delete config.endDateFieldId;
                 return config;
               })()
-            : view.config,
+            : view.type === 'grid'
+              ? (() => {
+                  const config = { ...(view.config as GridViewConfig) };
+                  if (config.groupByFieldIds?.includes(fieldId)) {
+                    const removeIndex = config.groupByFieldIds.indexOf(fieldId);
+                    config.groupByFieldIds = config.groupByFieldIds.filter(id => id !== fieldId);
+                    if (removeIndex >= 0 && config.groupSortDirections?.length) {
+                      config.groupSortDirections = config.groupSortDirections.filter((_, index) => index !== removeIndex);
+                    }
+                    if (!config.groupByFieldIds.length) {
+                      delete config.groupByFieldIds;
+                      delete config.groupSortDirections;
+                    }
+                  }
+                  if (config.parentFieldId === fieldId) delete config.parentFieldId;
+                  return config;
+                })()
+              : view.config,
       })),
     }));
   };
@@ -1317,8 +1394,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       if (activeView.locked) return;
       mutate(current => updateView(current, activeView.id, view => ({
         ...view,
+        autoSort: view.autoSort !== false,
         sorts: [{ fieldId, direction: action === 'sortAsc' ? 'asc' : 'desc' }],
       })));
+      setActiveToolbarPanel('sort');
       return;
     }
     if (action === 'filter') {
@@ -1336,6 +1415,23 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       return;
     }
     if (action === 'group') {
+      if (activeView.locked) return;
+      if (activeView.type === 'grid') {
+        mutate(current => updateView(current, activeView.id, view => {
+          const config = view.config as GridViewConfig;
+          const existing = config.groupByFieldIds || [];
+          const existingDirections = config.groupSortDirections || existing.map(() => 'asc' as const);
+          if (existing.includes(fieldId)) return view;
+          return {
+            ...view,
+            config: {
+              ...config,
+              groupByFieldIds: [...existing, fieldId],
+              groupSortDirections: [...existingDirections, 'asc'],
+            },
+          };
+        }));
+      }
       setActiveToolbarPanel('group');
       return;
     }
@@ -2166,13 +2262,19 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             )}
           </span>
           <BitableTooltip tip="筛选" placement="bottom">
-            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'filter' ? ' is-active' : ''}`} aria-label="筛选" onClick={() => openToolbarPanel('filter')}><ToolGlyphFilter /></button>
+            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'filter' || hasActiveFilters ? ' is-active' : ''}`} aria-label="筛选" onClick={() => openToolbarPanel('filter')}><ToolGlyphFilter /></button>
           </BitableTooltip>
           <BitableTooltip tip="分组" placement="bottom">
-            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' ? ' is-active' : ''}`} aria-label="分组" onClick={() => openToolbarPanel('group')}><ToolGlyphGroup /></button>
+            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' || hasActiveGroups ? ' is-active' : ''}`} aria-label="分组" onClick={() => openToolbarPanel('group')}>
+              <ToolGlyphGroup />
+              {activeGroupCount > 0 && <span className="base-viewbar__tool-badge">{activeGroupCount}</span>}
+            </button>
           </BitableTooltip>
           <BitableTooltip tip="排序" placement="bottom">
-            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' ? ' is-active' : ''}`} aria-label="排序" onClick={() => openToolbarPanel('sort')}><ToolGlyphSort /></button>
+            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' || hasSortRules ? ' is-active' : ''}`} aria-label="排序" onClick={() => openToolbarPanel('sort')}>
+              <ToolGlyphSort />
+              {activeSortCount > 0 && <span className="base-viewbar__tool-badge">{activeSortCount}</span>}
+            </button>
           </BitableTooltip>
           {activeView.type === 'grid' && (
             <BitableTooltip tip="行高" placement="bottom">
@@ -2200,7 +2302,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               table={table}
               view={activeView}
               records={records}
-              panelRef={settingsRef}
+              panelRef={toolbarPanelRef}
               onClose={() => setActiveToolbarPanel(null)}
               onTable={mutate}
             />
@@ -2594,6 +2696,700 @@ function FieldConfigPanel({
   );
 }
 
+const FILTER_OPERATOR_OPTIONS: { value: FilterRule['operator']; label: string }[] = [
+  { value: 'equals', label: '等于' },
+  { value: 'not_equals', label: '不等于' },
+  { value: 'contains', label: '包含' },
+  { value: 'not_contains', label: '不包含' },
+  { value: 'is_empty', label: '为空' },
+  { value: 'is_not_empty', label: '不为空' },
+];
+
+function FilterPanelSelect<T extends string>({
+  value,
+  options,
+  disabled,
+  className,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  disabled?: boolean;
+  className?: string;
+  onChange: (value: T) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const selected = options.find(option => option.value === value);
+  const position = useAnchoredFloatingPosition(triggerRef, menuRef, open, {
+    placement: 'bottom-start',
+    fallbackWidth: 160,
+    fallbackHeight: 240,
+    matchAnchorWidth: true,
+    gap: 6,
+    pad: 8,
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (rootRef.current?.contains(event.target)) return;
+      if (menuRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', close, true);
+    return () => document.removeEventListener('mousedown', close, true);
+  }, [open]);
+
+  return (
+    <div
+      ref={rootRef}
+      className={`base-filter-select${open ? ' is-open' : ''}${className ? ` ${className}` : ''}`}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        className="base-filter-select__trigger"
+        disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onMouseDown={event => event.stopPropagation()}
+        onClick={() => {
+          if (disabled) return;
+          setOpen(current => !current);
+        }}
+      >
+        <span className="base-filter-select__label">{selected?.label || ''}</span>
+        <span className="base-filter-select__arrow" aria-hidden>
+          <SelGlyphChevronDown size={12} fill="currentColor" />
+        </span>
+      </button>
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          className="base-filter-select__menu base-filter-select__menu--portal"
+          role="listbox"
+          style={{
+            top: position.top,
+            left: position.left,
+            width: position.width,
+            maxHeight: position.maxHeight,
+            visibility: position.visibility,
+          }}
+          data-floating-panel="true"
+          data-no-marquee-selection="true"
+          onMouseDown={event => event.stopPropagation()}
+        >
+          {options.map(option => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={`base-filter-select__option${option.value === value ? ' is-active' : ''}`}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span>{option.label}</span>
+              {option.value === value && <span className="base-filter-select__check" aria-hidden>✓</span>}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+function ConfigSortDirectionToggle({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: 'asc' | 'desc';
+  disabled?: boolean;
+  onChange: (direction: 'asc' | 'desc') => void;
+}) {
+  return (
+    <div className="bitable-sort-direction" aria-label="排序方向">
+      <button
+        type="button"
+        disabled={disabled}
+        className={value !== 'desc' ? 'is-active' : ''}
+        onClick={() => onChange('asc')}
+      >
+        A → Z
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        className={value === 'desc' ? 'is-active' : ''}
+        onClick={() => onChange('desc')}
+      >
+        Z → A
+      </button>
+    </div>
+  );
+}
+
+function GlyphSearch({ size = 14 }: GlyphProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <path d="M16.473 17.887A9.46 9.46 0 0 1 10.5 20a9.5 9.5 0 1 1 9.5-9.5 9.46 9.46 0 0 1-2.113 5.973l3.773 3.773a.996.996 0 0 1-.007 1.407.996.996 0 0 1-1.407.007l-3.773-3.773ZM18 10.5a7.5 7.5 0 1 0-15 0 7.5 7.5 0 0 0 15 0Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function FieldConditionPicker({
+  fields,
+  disabled,
+  onSelect,
+}: {
+  fields: BaseField[];
+  disabled?: boolean;
+  onSelect: (fieldId: string) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const filteredFields = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    if (!needle) return fields;
+    return fields.filter(field => field.name.toLocaleLowerCase().includes(needle));
+  }, [fields, query]);
+  const position = useAnchoredFloatingPosition(triggerRef, menuRef, open, {
+    placement: 'bottom-start',
+    fallbackWidth: 200,
+    fallbackHeight: 280,
+    gap: 6,
+    pad: 8,
+  });
+
+  useEffect(() => {
+    if (!open) {
+      setQuery('');
+      return;
+    }
+    searchRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (rootRef.current?.contains(event.target)) return;
+      if (menuRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', close, true);
+    return () => document.removeEventListener('mousedown', close, true);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className={`bitable-dropdown-select__wrapper bitable-group-field-picker${open ? ' is-open' : ''}`}>
+      <div className="bitable-select-trigger__wrapper bitable-select-trigger__wrapper--fit-content">
+        <button
+          ref={triggerRef}
+          type="button"
+          className="bitable-select-trigger__trigger"
+          disabled={disabled || !fields.length}
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          onMouseDown={event => event.stopPropagation()}
+          onClick={() => {
+            if (disabled || !fields.length) return;
+            setOpen(current => !current);
+          }}
+        >
+          <span className="bitable-select-trigger__content">
+            <span className="bitable-select-trigger__placeholder">选择条件</span>
+          </span>
+          <span className="bitable-select-trigger__arrow" aria-hidden>
+            <SelGlyphChevronDown size={12} fill="currentColor" />
+          </span>
+        </button>
+        {open && createPortal(
+          <div
+            ref={menuRef}
+            className="bitable-field-condition-picker__menu bitable-field-condition-picker__menu--portal"
+            role="listbox"
+            style={{
+              top: position.top,
+              left: position.left,
+              width: 200,
+              maxHeight: position.maxHeight,
+              visibility: position.visibility,
+            }}
+            data-floating-panel="true"
+            data-no-marquee-selection="true"
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <div className="bitable-field-condition-picker__search">
+              <span className="bitable-field-condition-picker__search-icon" aria-hidden><GlyphSearch /></span>
+              <input
+                ref={searchRef}
+                className="bitable-field-condition-picker__search-input"
+                type="text"
+                placeholder="搜索字段"
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                onMouseDown={event => event.stopPropagation()}
+              />
+            </div>
+            <div className="bitable-field-condition-picker__list">
+              {filteredFields.length ? filteredFields.map(field => (
+                <button
+                  key={field.id}
+                  type="button"
+                  role="option"
+                  className="bitable-dropdown-select__item"
+                  onClick={() => {
+                    onSelect(field.id);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="bitable-dropdown-select__item-content">
+                    <span className="bitable-dropdown-select__option-icon">{fieldTypeGlyph(field.type, 14)}</span>
+                    <span className="bitable-dropdown-select__option-text">{field.name}</span>
+                  </span>
+                </button>
+              )) : (
+                <div className="bitable-field-condition-picker__empty">无匹配字段</div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConfigPanelHelpIcon() {
+  return (
+    <span className="bitable-guide-video-container">
+      <i className="bitable-guide-video-icon active">
+        <span className="universe-icon" aria-hidden>
+          <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 2C5.925 23 1 18.075 1 12S5.925 1 12 1s11 4.925 11 11-4.925 11-11 11Zm-1-6a1 1 0 1 1 2 0 1 1 0 0 1-2 0ZM8.05 9.282a5.17 5.17 0 0 1 .039-.28c.195-1.085.689-1.883 1.481-2.394.62-.405 1.383-.608 2.288-.608 1.189 0 2.176.288 2.962.864.787.575 1.18 1.428 1.18 2.558 0 .693-.17 1.277-.513 1.752-.2.287-.584.655-1.152 1.103l-.56.44c-.305.24-.507.52-.607.84a2.742 2.742 0 0 0-.072.486.5.5 0 0 1-.498.457h-1.12a.5.5 0 0 1-.498-.546c.065-.696.134-1.136.207-1.321.137-.344.49-.74 1.058-1.188l.575-.455c.19-.144 1.166-.831 1.166-1.44 0-.608-.106-.832-.412-1.166-.305-.333-.993-.44-1.613-.44-.61 0-1.132.161-1.387.572-.118.19-.215.393-.284.6a2.097 2.097 0 0 0-.073.307.5.5 0 0 1-.493.415H8.547a.5.5 0 0 1-.497-.556Z" fill="currentColor" />
+          </svg>
+        </span>
+      </i>
+    </span>
+  );
+}
+
+function GridGroupPanelContent({
+  table,
+  view,
+  onTable,
+}: {
+  table: BaseTable;
+  view: BaseView;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+}) {
+  const gridConfig = view.config as GridViewConfig;
+  const groupRules = useMemo(
+    () => resolveGridGroupRules(view),
+    [view, gridConfig.groupByFieldIds, gridConfig.groupSortDirections],
+  );
+  const usedFieldIds = new Set(groupRules.map(rule => rule.fieldId));
+  const availableFields = table.fields.filter(field => !usedFieldIds.has(field.id));
+  const [draggingGroupIndex, setDraggingGroupIndex] = useState<number | null>(null);
+  const [dragOverGroupIndex, setDragOverGroupIndex] = useState<number | null>(null);
+  const groupDragFromRef = useRef<number | null>(null);
+  const groupListRef = useRef<HTMLUListElement>(null);
+
+  const updateCurrentView = (update: (current: BaseView) => BaseView) => {
+    if (view.locked) return;
+    onTable(current => updateView(current, view.id, update));
+  };
+
+  const writeGroupRules = (nextRules: { fieldId: string; direction: 'asc' | 'desc' }[]) => {
+    updateCurrentView(item => {
+      const nextConfig = normalizeGridGroupConfig(
+        {
+          ...(item.config as GridViewConfig),
+          groupByFieldIds: nextRules.map(rule => rule.fieldId),
+          groupSortDirections: nextRules.map(rule => rule.direction),
+        },
+        table.fields,
+      );
+      return { ...item, config: nextConfig };
+    });
+  };
+
+  const addGroupField = (fieldId: string) => {
+    if (!fieldId || usedFieldIds.has(fieldId)) return;
+    writeGroupRules([...groupRules, { fieldId, direction: 'asc' }]);
+  };
+
+  const removeGroupField = (index: number) => {
+    writeGroupRules(groupRules.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const updateGroupField = (index: number, nextFieldId: string) => {
+    if (!nextFieldId || nextFieldId === groupRules[index]?.fieldId) return;
+    writeGroupRules(groupRules.map((rule, itemIndex) => (
+      itemIndex === index ? { ...rule, fieldId: nextFieldId } : rule
+    )));
+  };
+
+  const updateGroupDirection = (index: number, direction: 'asc' | 'desc') => {
+    writeGroupRules(groupRules.map((rule, itemIndex) => (
+      itemIndex === index ? { ...rule, direction } : rule
+    )));
+  };
+
+  const reorderGroupFields = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= groupRules.length || toIndex >= groupRules.length) return;
+    const next = [...groupRules];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    writeGroupRules(next);
+  };
+
+  const resolveGroupDropIndex = (clientY: number) => {
+    const list = groupListRef.current;
+    if (!list) return null;
+    const items = Array.from(list.querySelectorAll<HTMLElement>('.bitable-config--condition'));
+    for (let index = 0; index < items.length; index += 1) {
+      const rect = items[index].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return index;
+    }
+    return items.length ? items.length - 1 : null;
+  };
+
+  const handleGroupDragStart = (event: DragEvent, index: number) => {
+    if (view.locked) return;
+    groupDragFromRef.current = index;
+    setDraggingGroupIndex(index);
+    setDragOverGroupIndex(null);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleGroupListDragOver = (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (view.locked || groupDragFromRef.current == null) return;
+    event.dataTransfer.dropEffect = 'move';
+    const index = resolveGroupDropIndex(event.clientY);
+    if (index == null || groupDragFromRef.current === index) {
+      setDragOverGroupIndex(null);
+      return;
+    }
+    setDragOverGroupIndex(index);
+  };
+
+  const handleGroupListDrop = (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const fromIndex = groupDragFromRef.current ?? draggingGroupIndex ?? Number(event.dataTransfer.getData('text/plain'));
+    const toIndex = resolveGroupDropIndex(event.clientY);
+    groupDragFromRef.current = null;
+    setDraggingGroupIndex(null);
+    setDragOverGroupIndex(null);
+    if (toIndex == null || Number.isNaN(fromIndex) || fromIndex === toIndex) return;
+    reorderGroupFields(fromIndex, toIndex);
+  };
+
+  const handleGroupDragEnd = () => {
+    groupDragFromRef.current = null;
+    setDraggingGroupIndex(null);
+    setDragOverGroupIndex(null);
+  };
+
+  const fieldOptionsForGroup = (currentFieldId: string) => table.fields.filter(
+    field => field.id === currentFieldId || !usedFieldIds.has(field.id),
+  );
+
+  return (
+    <>
+      <div className="bitable-float-toolbar-btn-arrow" aria-hidden />
+      <div className="bitable-config-panel__header">
+        <div className="bitable-noselect bitable-group--tip">
+          设置分组条件
+          <ConfigPanelHelpIcon />
+        </div>
+      </div>
+      <ul
+        ref={groupListRef}
+        className={`bitable-group--condition-list${draggingGroupIndex != null ? ' is-sorting' : ''}`}
+        onDragOver={handleGroupListDragOver}
+        onDrop={handleGroupListDrop}
+      >
+        {groupRules.map((rule, index) => {
+          const field = table.fields.find(item => item.id === rule.fieldId);
+          const fieldLabel = field?.name || '已删除字段';
+          const fieldOptions = field
+            ? fieldOptionsForGroup(rule.fieldId).map(item => ({ value: item.id, label: item.name }))
+            : [{ value: rule.fieldId, label: fieldLabel }];
+          return (
+            <li
+              className={[
+                'bitable-group--condition',
+                'bitable-config--condition',
+                draggingGroupIndex === index ? 'is-dragging' : '',
+                dragOverGroupIndex === index && draggingGroupIndex !== index ? 'is-drag-over' : '',
+              ].filter(Boolean).join(' ')}
+              key={`${rule.fieldId}-${index}`}
+            >
+              <span
+                className="bitable-config--drag"
+                draggable={!view.locked}
+                aria-hidden
+                onDragStart={event => handleGroupDragStart(event, index)}
+                onDragEnd={handleGroupDragEnd}
+              >
+                <GlyphDrag />
+              </span>
+              <div className="bitable-group--condition-field bitable-config--condition-field">
+                <FilterPanelSelect
+                  className="bitable-group--condition-select"
+                  disabled={view.locked}
+                  value={rule.fieldId}
+                  options={fieldOptions}
+                  onChange={nextFieldId => updateGroupField(index, nextFieldId)}
+                />
+                <ConfigSortDirectionToggle
+                  value={rule.direction}
+                  disabled={view.locked}
+                  onChange={direction => updateGroupDirection(index, direction)}
+                />
+                <button
+                  type="button"
+                  className="bitable-group--condition-remove"
+                  aria-label="删除分组条件"
+                  disabled={view.locked}
+                  onClick={() => removeGroupField(index)}
+                >
+                  ×
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {availableFields.length > 0 && (
+        <div className="bitable-group--add bitable-config--condition">
+          <span className="bitable-config--drag bitable-config--drag--placeholder" aria-hidden />
+          <FieldConditionPicker
+            disabled={view.locked}
+            fields={availableFields}
+            onSelect={addGroupField}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+function SortPanelContent({
+  table,
+  view,
+  onTable,
+}: {
+  table: BaseTable;
+  view: BaseView;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+}) {
+  const sorts = view.sorts || [];
+  const autoSort = view.autoSort !== false;
+  const usedFieldIds = new Set(sorts.map(sort => sort.fieldId));
+  const availableFields = table.fields.filter(field => !usedFieldIds.has(field.id));
+  const [draggingSortIndex, setDraggingSortIndex] = useState<number | null>(null);
+  const [dragOverSortIndex, setDragOverSortIndex] = useState<number | null>(null);
+  const sortDragFromRef = useRef<number | null>(null);
+  const sortListRef = useRef<HTMLUListElement>(null);
+
+  const updateCurrentView = (update: (current: BaseView) => BaseView) => {
+    if (view.locked) return;
+    onTable(current => updateView(current, view.id, update));
+  };
+
+  const updateSorts = (nextSorts: SortRule[]) => {
+    updateCurrentView(item => ({
+      ...item,
+      sorts: nextSorts,
+      autoSort: item.autoSort !== false,
+    }));
+  };
+
+  const addSortField = (fieldId: string) => {
+    if (!fieldId || usedFieldIds.has(fieldId)) return;
+    updateSorts([...sorts, { fieldId, direction: 'asc' }]);
+  };
+
+  const removeSort = (index: number) => {
+    updateSorts(sorts.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const updateSort = (index: number, patch: Partial<SortRule>) => {
+    updateSorts(sorts.map((sort, itemIndex) => (itemIndex === index ? { ...sort, ...patch } : sort)));
+  };
+
+  const reorderSorts = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= sorts.length || toIndex >= sorts.length) return;
+    const next = [...sorts];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    updateSorts(next);
+  };
+
+  const resolveSortDropIndex = (clientY: number) => {
+    const list = sortListRef.current;
+    if (!list) return null;
+    const items = Array.from(list.querySelectorAll<HTMLElement>('.bitable-config--condition'));
+    for (let index = 0; index < items.length; index += 1) {
+      const rect = items[index].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return index;
+    }
+    return items.length ? items.length - 1 : null;
+  };
+
+  const handleSortDragStart = (event: DragEvent, index: number) => {
+    if (view.locked) return;
+    sortDragFromRef.current = index;
+    setDraggingSortIndex(index);
+    setDragOverSortIndex(null);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleSortListDragOver = (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (view.locked || sortDragFromRef.current == null) return;
+    event.dataTransfer.dropEffect = 'move';
+    const index = resolveSortDropIndex(event.clientY);
+    if (index == null || sortDragFromRef.current === index) {
+      setDragOverSortIndex(null);
+      return;
+    }
+    setDragOverSortIndex(index);
+  };
+
+  const handleSortListDrop = (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const fromIndex = sortDragFromRef.current ?? draggingSortIndex ?? Number(event.dataTransfer.getData('text/plain'));
+    const toIndex = resolveSortDropIndex(event.clientY);
+    sortDragFromRef.current = null;
+    setDraggingSortIndex(null);
+    setDragOverSortIndex(null);
+    if (toIndex == null || Number.isNaN(fromIndex) || fromIndex === toIndex) return;
+    reorderSorts(fromIndex, toIndex);
+  };
+
+  const handleSortDragEnd = () => {
+    sortDragFromRef.current = null;
+    setDraggingSortIndex(null);
+    setDragOverSortIndex(null);
+  };
+
+  const fieldOptionsForSort = (currentFieldId: string) => table.fields.filter(field => field.id === currentFieldId || !usedFieldIds.has(field.id));
+
+  return (
+    <>
+      <div className="bitable-float-toolbar-btn-arrow" aria-hidden />
+      <div className="bitable-config-panel__header">
+        <div className="bitable-noselect bitable-group--tip">
+          设置排序条件
+          <ConfigPanelHelpIcon />
+        </div>
+        <label className="bitable-sort-panel__auto">
+          <span>自动排序</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoSort}
+            className={`bitable-sort-panel__switch${autoSort ? ' is-on' : ''}`}
+            disabled={view.locked}
+            onClick={() => updateCurrentView(item => ({ ...item, autoSort: item.autoSort === false }))}
+          />
+        </label>
+      </div>
+      <ul
+        ref={sortListRef}
+        className={`bitable-group--condition-list${draggingSortIndex != null ? ' is-sorting' : ''}`}
+        onDragOver={handleSortListDragOver}
+        onDrop={handleSortListDrop}
+      >
+        {sorts.map((sort, index) => {
+          const field = table.fields.find(item => item.id === sort.fieldId);
+          if (!field) return null;
+          return (
+            <li
+              className={[
+                'bitable-group--condition',
+                'bitable-config--condition',
+                draggingSortIndex === index ? 'is-dragging' : '',
+                dragOverSortIndex === index && draggingSortIndex !== index ? 'is-drag-over' : '',
+              ].filter(Boolean).join(' ')}
+              key={`${sort.fieldId}-${index}`}
+            >
+              <span
+                className="bitable-config--drag"
+                draggable={!view.locked}
+                aria-hidden
+                onDragStart={event => handleSortDragStart(event, index)}
+                onDragEnd={handleSortDragEnd}
+              >
+                <GlyphDrag />
+              </span>
+              <div className="bitable-group--condition-field bitable-config--condition-field">
+                <FilterPanelSelect
+                  className="bitable-group--condition-select"
+                  disabled={view.locked}
+                  value={sort.fieldId}
+                  options={fieldOptionsForSort(sort.fieldId).map(item => ({ value: item.id, label: item.name }))}
+                  onChange={fieldId => {
+                    if (!fieldId || fieldId === sort.fieldId) return;
+                    updateSort(index, { fieldId });
+                  }}
+                />
+                <ConfigSortDirectionToggle
+                  value={sort.direction}
+                  disabled={view.locked}
+                  onChange={direction => updateSort(index, { direction })}
+                />
+                <button
+                  type="button"
+                  className="bitable-group--condition-remove"
+                  aria-label="删除排序条件"
+                  disabled={view.locked}
+                  onClick={() => removeSort(index)}
+                >
+                  ×
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {availableFields.length > 0 && (
+        <div className="bitable-group--add bitable-config--condition">
+          <span className="bitable-config--drag bitable-config--drag--placeholder" aria-hidden />
+          <FieldConditionPicker
+            disabled={view.locked}
+            fields={availableFields}
+            onSelect={addSortField}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 function ToolbarQuickPanel({
   panel,
   table,
@@ -2612,7 +3408,6 @@ function ToolbarQuickPanel({
   onTable: (update: (table: BaseTable) => BaseTable) => void;
 }) {
   const filters = view.filters || [];
-  const sort = view.sorts?.[0];
   const canGroup = view.type === 'gallery';
   const groupBy = canGroup ? (view.config as GalleryViewConfig).groupByFieldId || '' : '';
 
@@ -2644,12 +3439,32 @@ function ToolbarQuickPanel({
     }));
   };
 
+  const dismissPanel = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onClose();
+  };
+
+  const panelClassName = [
+    'base-toolbar-panel',
+    `base-toolbar-panel--${panel}`,
+    panel === 'group' && view.type === 'grid' ? 'bitable-group bitable-group-panel' : '',
+    panel === 'sort' ? 'bitable-group bitable-sort-panel' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div ref={panelRef} className={`base-toolbar-panel base-toolbar-panel--${panel}`} data-no-marquee-selection="true" data-floating-panel="true">
-      {panel !== 'filter' && (
+    <div
+      ref={panelRef}
+      className={panelClassName}
+      data-e2e={panel === 'group' && view.type === 'grid' ? 'bitable-group-config-panel' : panel === 'sort' ? 'bitable-sort-config-panel' : undefined}
+      data-no-marquee-selection="true"
+      data-floating-panel="true"
+      onMouseDown={event => event.stopPropagation()}
+    >
+      {panel !== 'filter' && !(panel === 'group' && view.type === 'grid') && panel !== 'sort' && (
         <header>
           <strong>{toolbarPanelTitle(panel)}</strong>
-          <button type="button" onClick={onClose} aria-label="关闭">×</button>
+          <button type="button" onMouseDown={dismissPanel} aria-label="关闭">×</button>
         </header>
       )}
 
@@ -2660,39 +3475,57 @@ function ToolbarQuickPanel({
               <span>设置筛选条件</span>
               <span className="base-toolbar-panel__hint" aria-hidden>?</span>
             </span>
-            <button type="button" className="base-toolbar-panel__filter-close" onClick={onClose} aria-label="关闭">×</button>
+            <button type="button" className="base-toolbar-panel__filter-close" onMouseDown={dismissPanel} aria-label="关闭">×</button>
           </div>
           <div className="base-toolbar-panel__filter-conditions">
-            {(filters.length ? filters : []).map(rule => (
-              <div className="base-toolbar-panel__filter-row" key={rule.id}>
-                <select
-                  className="base-toolbar-panel__filter-field"
+            {(filters.length ? filters : []).map(rule => {
+              const needsValue = !['is_empty', 'is_not_empty'].includes(rule.operator);
+              const fieldOptions = table.fields.map(field => ({ value: field.id, label: field.name }));
+              return (
+              <div
+                className={`base-toolbar-panel__filter-row${needsValue ? '' : ' base-toolbar-panel__filter-row--no-value'}`}
+                key={rule.id}
+              >
+                <FilterPanelSelect
+                  className="base-toolbar-panel__filter-field-select"
                   disabled={view.locked}
                   value={rule.fieldId}
-                  onChange={event => updateFilter(rule.id, { fieldId: event.target.value })}
-                  title={table.fields.find(field => field.id === rule.fieldId)?.name}
-                >
-                  {table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-                </select>
-                <select
-                  className="base-toolbar-panel__filter-operator"
+                  options={fieldOptions}
+                  onChange={fieldId => updateFilter(rule.id, { fieldId })}
+                />
+                <FilterPanelSelect
+                  className="base-toolbar-panel__filter-operator-select"
                   disabled={view.locked}
                   value={rule.operator}
-                  onChange={event => updateFilter(rule.id, { operator: event.target.value as FilterRule['operator'] })}
-                >
-                  <option value="equals">等于</option>
-                  <option value="contains">包含</option>
-                  <option value="is_empty">为空</option>
-                  <option value="is_not_empty">不为空</option>
-                </select>
-                {!['is_empty', 'is_not_empty'].includes(rule.operator) && (
-                  <input
-                    className="base-toolbar-panel__filter-value"
-                    disabled={view.locked}
-                    value={rule.value || ''}
-                    placeholder="请输入"
-                    onChange={event => updateFilter(rule.id, { value: event.target.value })}
-                  />
+                  options={FILTER_OPERATOR_OPTIONS}
+                  onChange={operator => updateFilter(rule.id, { operator })}
+                />
+                {needsValue && (
+                  <div className="base-toolbar-panel__filter-value-wrap">
+                    <input
+                      className="base-toolbar-panel__filter-value"
+                      disabled={view.locked}
+                      value={rule.value || ''}
+                      placeholder="请输入"
+                      onChange={event => updateFilter(rule.id, { value: event.target.value })}
+                      onMouseDown={event => event.stopPropagation()}
+                    />
+                    {Boolean(rule.value?.trim()) && (
+                      <button
+                        type="button"
+                        className="base-toolbar-panel__filter-value-clear"
+                        aria-label="清除"
+                        disabled={view.locked}
+                        onMouseDown={event => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          updateFilter(rule.id, { value: '' });
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                 )}
                 <button
                   type="button"
@@ -2704,7 +3537,8 @@ function ToolbarQuickPanel({
                   ×
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
           <button
             type="button"
@@ -2719,22 +3553,11 @@ function ToolbarQuickPanel({
       )}
 
       {panel === 'sort' && (
-        <>
-          <label>字段
-            <select
-              disabled={view.locked}
-              value={sort?.fieldId || ''}
-              onChange={event => updateCurrentView(item => ({ ...item, sorts: event.target.value ? [{ fieldId: event.target.value, direction: item.sorts?.[0]?.direction || 'asc' }] : [] }))}
-            >
-              <option value="">不排序</option>
-              {table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-            </select>
-          </label>
-          <div className="base-toolbar-panel__segmented" aria-label="排序方向">
-            <button type="button" disabled={view.locked || !sort} className={sort?.direction !== 'desc' ? 'is-active' : ''} onClick={() => updateCurrentView(item => ({ ...item, sorts: item.sorts?.length ? [{ ...item.sorts[0], direction: 'asc' }] : [] }))}>升序</button>
-            <button type="button" disabled={view.locked || !sort} className={sort?.direction === 'desc' ? 'is-active' : ''} onClick={() => updateCurrentView(item => ({ ...item, sorts: item.sorts?.length ? [{ ...item.sorts[0], direction: 'desc' }] : [] }))}>降序</button>
-          </div>
-        </>
+        <SortPanelContent
+          table={table}
+          view={view}
+          onTable={onTable}
+        />
       )}
 
       {panel === 'rowHeight' && view.type === 'grid' && (
@@ -2760,11 +3583,19 @@ function ToolbarQuickPanel({
         </div>
       )}
 
-      {panel === 'group' && (
+      {panel === 'group' && view.type === 'grid' && (
+        <GridGroupPanelContent
+          table={table}
+          view={view}
+          onTable={onTable}
+        />
+      )}
+
+      {panel === 'group' && view.type === 'gallery' && (
         <>
           <label>字段
             <select
-              disabled={view.locked || !canGroup}
+              disabled={view.locked}
               value={groupBy}
               onChange={event => updateCurrentView(item => ({ ...item, config: { ...item.config, groupByFieldId: event.target.value || undefined } }))}
             >
@@ -2772,8 +3603,11 @@ function ToolbarQuickPanel({
               {table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
             </select>
           </label>
-          {!canGroup && <p className="base-toolbar-panel__empty">当前视图未开启分组呈现。</p>}
         </>
+      )}
+
+      {panel === 'group' && view.type !== 'grid' && view.type !== 'gallery' && (
+        <p className="base-toolbar-panel__empty">当前视图未开启分组呈现。</p>
       )}
 
       {panel === 'share' && (

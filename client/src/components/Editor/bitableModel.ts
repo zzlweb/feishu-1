@@ -87,11 +87,18 @@ export interface RecordComment {
   createdAt: string;
 }
 
+export type FilterOperator = 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'is_empty' | 'is_not_empty';
+
 export interface FilterRule {
   id: string;
   fieldId: FieldId;
-  operator: 'contains' | 'equals' | 'is_empty' | 'is_not_empty';
+  operator: FilterOperator;
   value?: string;
+}
+
+export function isFilterRuleActive(rule: FilterRule): boolean {
+  if (rule.operator === 'is_empty' || rule.operator === 'is_not_empty') return true;
+  return String(rule.value || '').trim().length > 0;
 }
 
 export interface SortRule {
@@ -134,6 +141,134 @@ export interface GridViewConfig {
   fieldWidths?: Record<FieldId, number>;
   rowHeight?: GridRowHeightMode;
   parentFieldId?: FieldId;
+  groupByFieldIds?: FieldId[];
+  groupSortDirections?: ('asc' | 'desc')[];
+}
+
+export type GridDisplayRow =
+  | {
+      kind: 'group';
+      key: string;
+      level: number;
+      fieldId: FieldId;
+      fieldName: string;
+      label: string;
+      count: number;
+    }
+  | { kind: 'record'; record: BaseRecord };
+
+export function getGridGroupFieldIds(view: BaseView): FieldId[] {
+  if (view.type !== 'grid') return [];
+  return resolveGridGroupRules(view).map(rule => rule.fieldId);
+}
+
+export function resolveGridGroupRules(view: BaseView): { fieldId: FieldId; direction: 'asc' | 'desc' }[] {
+  if (view.type !== 'grid') return [];
+  const config = view.config as GridViewConfig & { groupByFieldId?: FieldId };
+  let fieldIds = Array.isArray(config.groupByFieldIds) ? config.groupByFieldIds : [];
+  if (!fieldIds.length && config.groupByFieldId) {
+    fieldIds = [config.groupByFieldId];
+  }
+  const directions = Array.isArray(config.groupSortDirections) ? config.groupSortDirections : [];
+  return fieldIds.map((fieldId, index) => ({
+    fieldId,
+    direction: directions[index] === 'desc' ? 'desc' : 'asc',
+  }));
+}
+
+export function normalizeGridGroupConfig(config: GridViewConfig, fields: BaseField[]): GridViewConfig {
+  const nextConfig = { ...config } as GridViewConfig & { groupByFieldId?: FieldId };
+  let fieldIds = Array.isArray(config.groupByFieldIds) ? [...config.groupByFieldIds] : [];
+  if (!fieldIds.length && nextConfig.groupByFieldId) {
+    fieldIds = [nextConfig.groupByFieldId];
+  }
+  delete nextConfig.groupByFieldId;
+  fieldIds = fieldIds.filter(fieldId => fields.some(field => field.id === fieldId));
+  const directions = Array.isArray(config.groupSortDirections) ? config.groupSortDirections : [];
+  if (!fieldIds.length) {
+    delete nextConfig.groupByFieldIds;
+    delete nextConfig.groupSortDirections;
+    return nextConfig;
+  }
+  nextConfig.groupByFieldIds = fieldIds;
+  nextConfig.groupSortDirections = fieldIds.map((_, index) => (
+    directions[index] === 'desc' ? 'desc' : 'asc'
+  ));
+  return nextConfig;
+}
+
+export function hasActiveGridGroups(view: BaseView): boolean {
+  return getGridGroupFieldIds(view).length > 0;
+}
+
+export function hasActiveSorts(view: BaseView): boolean {
+  return (view.sorts || []).length > 0;
+}
+
+export function getEffectiveSorts(view: BaseView): SortRule[] {
+  if (view.autoSort === false) return [];
+  return view.sorts || [];
+}
+
+export function buildGridDisplayRows(
+  table: BaseTable,
+  records: BaseRecord[],
+  groupFieldIds: FieldId[],
+  collapsedKeys: ReadonlySet<string>,
+  groupSortDirections: ('asc' | 'desc')[] = [],
+  view?: BaseView,
+): GridDisplayRow[] {
+  const resolvedRules = view?.type === 'grid'
+    ? resolveGridGroupRules(view)
+    : groupFieldIds.map((fieldId, index) => ({
+      fieldId,
+      direction: groupSortDirections[index] === 'desc' ? 'desc' as const : 'asc' as const,
+    }));
+  const normalizedFieldIds = resolvedRules.map(rule => rule.fieldId);
+  const normalizedDirections = resolvedRules.map(rule => rule.direction);
+  if (!normalizedFieldIds.length) {
+    return records.map(record => ({ kind: 'record', record }));
+  }
+
+  const rows: GridDisplayRow[] = [];
+
+  const appendGrouped = (groupRecords: BaseRecord[], level: number) => {
+    if (level >= normalizedFieldIds.length) {
+      groupRecords.forEach(record => rows.push({ kind: 'record', record }));
+      return;
+    }
+    const fieldId = normalizedFieldIds[level];
+    const field = table.fields.find(item => item.id === fieldId);
+    const groups = new Map<string, BaseRecord[]>();
+    groupRecords.forEach(record => {
+      const label = valueText(record.fields[fieldId]) || '未分组';
+      const bucket = groups.get(label) || [];
+      bucket.push(record);
+      groups.set(label, bucket);
+    });
+    [...groups.entries()]
+      .sort(([left], [right]) => {
+        const direction = normalizedDirections[level] ?? 'asc';
+        const result = left.localeCompare(right, 'zh-CN', { numeric: true });
+        return direction === 'asc' ? result : -result;
+      })
+      .forEach(([label, bucket]) => {
+        const key = `${level}:${fieldId}:${label}`;
+        rows.push({
+          kind: 'group',
+          key,
+          level,
+          fieldId,
+          fieldName: field?.name || '字段',
+          label,
+          count: bucket.length,
+        });
+        if (!collapsedKeys.has(key)) appendGrouped(bucket, level + 1);
+      });
+  };
+
+  appendGrouped(records, 0);
+  return rows;
 }
 
 export interface GanttViewConfig {
@@ -152,6 +287,7 @@ export interface BaseView {
   config: GalleryViewConfig | GridViewConfig | GanttViewConfig;
   filters?: FilterRule[];
   sorts?: SortRule[];
+  autoSort?: boolean;
   hiddenFieldIds?: FieldId[];
   fieldOrder?: FieldId[];
   locked?: boolean;
@@ -528,7 +664,11 @@ function normalizeTable(raw: BaseTable): BaseTable {
           .filter(([fieldId, width]) => fields.some(field => field.id === fieldId) && Number.isFinite(width))
           .map(([fieldId, width]) => [fieldId, Math.max(80, Math.min(420, Math.round(Number(width))))])
       );
-      return { ...view, tableId, config: { ...(config || {}), fieldWidths }, filters: view.filters || [], sorts: view.sorts || [] };
+      const normalizedConfig = normalizeGridGroupConfig(
+        { ...(config || {}), fieldWidths },
+        fields,
+      );
+      return { ...view, tableId, config: normalizedConfig, filters: view.filters || [], sorts: view.sorts || [] };
     }
     if (view.type !== 'gallery') return { ...view, tableId, config: view.config || {}, filters: view.filters || [], sorts: view.sorts || [] };
     const config = view.config as Partial<GalleryViewConfig>;
@@ -866,6 +1006,7 @@ function compareRecordsBySorts(a: BaseRecord, b: BaseRecord, sorts: SortRule[]):
 
 export function filterRecordsForView(table: BaseTable, view: BaseView): BaseRecord[] {
   const search = String((view.config as { search?: string }).search || '').trim().toLocaleLowerCase();
+  const activeFilters = (view.filters || []).filter(isFilterRuleActive);
   return table.records.filter(record => {
     if (search && !table.fields.some(field => {
       const text = field.type === 'multi_select'
@@ -873,12 +1014,14 @@ export function filterRecordsForView(table: BaseTable, view: BaseView): BaseReco
         : valueText(record.fields[field.id]);
       return text.toLocaleLowerCase().includes(search);
     })) return false;
-    return (view.filters || []).every(rule => {
+    return activeFilters.every(rule => {
       const text = valueText(record.fields[rule.fieldId]).toLocaleLowerCase();
-      const needle = String(rule.value || '').toLocaleLowerCase();
+      const needle = String(rule.value || '').trim().toLocaleLowerCase();
       if (rule.operator === 'is_empty') return !text;
       if (rule.operator === 'is_not_empty') return Boolean(text);
       if (rule.operator === 'equals') return text === needle;
+      if (rule.operator === 'not_equals') return text !== needle;
+      if (rule.operator === 'not_contains') return !text.includes(needle);
       return text.includes(needle);
     });
   });
@@ -912,7 +1055,7 @@ export function orderRecordsForTreeView(records: BaseRecord[], sorts: SortRule[]
 }
 
 export function gridVisibleRecords(table: BaseTable, view: BaseView): BaseRecord[] {
-  return orderRecordsForTreeView(filterRecordsForView(table, view), view.sorts || []);
+  return orderRecordsForTreeView(filterRecordsForView(table, view), getEffectiveSorts(view));
 }
 
 export function resolveRecordInsertIndex(
@@ -926,19 +1069,69 @@ export function resolveRecordInsertIndex(
   return findInsertIndexAfterSubtree(records, recordIndex);
 }
 
+/** 将当前视图中的插入位置映射到归一化存储数组下标 */
+export function resolveStorageInsertIndex(
+  table: BaseTable,
+  view: BaseView,
+  position: {
+    visibleIndex?: number;
+    recordId?: string;
+    mode?: 'before' | 'after-subtree' | 'append';
+  },
+): number {
+  const normalized = normalizeRecordTreeOrder(table.records);
+  const visible = visibleRecords({ ...table, records: normalized }, view);
+
+  if (position.mode === 'append') {
+    return normalized.length;
+  }
+
+  if (position.visibleIndex != null && position.visibleIndex >= visible.length) {
+    if (!visible.length) return normalized.length;
+    const lastStorageIndex = normalized.findIndex(record => record.id === visible[visible.length - 1].id);
+    return findInsertIndexAfterSubtree(normalized, lastStorageIndex);
+  }
+
+  if (position.recordId) {
+    const storageIndex = normalized.findIndex(record => record.id === position.recordId);
+    if (storageIndex < 0) return normalized.length;
+    if (position.mode === 'after-subtree') return findInsertIndexAfterSubtree(normalized, storageIndex);
+    return storageIndex;
+  }
+
+  const visibleIndex = position.visibleIndex ?? 0;
+  const targetId = visible[visibleIndex]?.id;
+  if (!targetId) return normalized.length;
+  return normalized.findIndex(record => record.id === targetId);
+}
+
+export function insertRecordsIntoTable(
+  table: BaseTable,
+  view: BaseView,
+  recordsToInsert: BaseRecord[],
+  position: {
+    visibleIndex?: number;
+    recordId?: string;
+    mode?: 'before' | 'after-subtree' | 'append';
+  },
+): BaseRecord[] {
+  const normalized = normalizeRecordTreeOrder(table.records);
+  const insertIndex = resolveStorageInsertIndex({ ...table, records: normalized }, view, position);
+  const next = [...normalized];
+  next.splice(insertIndex, 0, ...recordsToInsert);
+  return next;
+}
+
 export function visibleRecords(table: BaseTable, view: BaseView): BaseRecord[] {
   const filtered = filterRecordsForView(table, view);
   if (view.type === 'grid') {
-    return orderRecordsForTreeView(filtered, view.sorts || []);
+    return orderRecordsForTreeView(filtered, getEffectiveSorts(view));
   }
-  const sorts = view.sorts || [];
+  const sorts = getEffectiveSorts(view);
   if (!sorts.length) return filtered;
   return filtered.map((record, index) => ({ record, index })).sort((a, b) => {
-    for (const sort of sorts) {
-      const result = compareRecordsBySorts(a.record, b.record, sorts);
-      if (result) return result;
-    }
-    return a.index - b.index;
+    const result = compareRecordsBySorts(a.record, b.record, sorts);
+    return result || a.index - b.index;
   }).map(item => item.record);
 }
 

@@ -1962,15 +1962,9 @@ function getBlockToolsAnchorTop(
   blockEl: HTMLElement,
   areaRectTop: number,
 ): number {
-  const tag = blockEl.tagName.toLowerCase();
-  if (/^h[1-6]$/.test(tag)) {
-    try {
-      const pos = editorInstance.view.posAtDOM(blockEl, 0);
-      const c = editorInstance.view.coordsAtPos(pos);
-      return (c.top + c.bottom) / 2 - areaRectTop;
-    } catch {
-      /* 降级为块中心 */
-    }
+  const textSpan = measureTextBlockVerticalSpan(editorInstance, blockEl);
+  if (textSpan) {
+    return (textSpan.top + textSpan.bottom) / 2 - areaRectTop;
   }
   const rr = blockEl.getBoundingClientRect();
   if (blockEl.classList.contains('feishu-code-block')) {
@@ -2019,6 +2013,73 @@ function getBlockToolsAnchorLeft(blockEl: HTMLElement, areaRectLeft: number, col
     return blockRect.left - areaRectLeft - readBitableHeaderFollowX(blockEl);
   }
   return 0;
+}
+
+const TEXT_BLOCK_HIGHLIGHT_TAGS = /^(p|h[1-6]|li|blockquote)$/;
+
+function measureTextBlockVerticalSpan(
+  editorInstance: {
+    view: {
+      posAtDOM: (node: Node, offset: number) => number;
+      coordsAtPos: (pos: number) => { top: number; bottom: number };
+    };
+  },
+  blockEl: HTMLElement,
+): { top: number; bottom: number } | null {
+  if (!TEXT_BLOCK_HIGHLIGHT_TAGS.test(blockEl.tagName.toLowerCase())) return null;
+  try {
+    const { view } = editorInstance;
+    const startPos = view.posAtDOM(blockEl, 0);
+    const endPos = view.posAtDOM(blockEl, blockEl.childNodes.length);
+    const startCoords = view.coordsAtPos(startPos);
+    if (endPos <= startPos) {
+      return { top: startCoords.top, bottom: startCoords.bottom };
+    }
+    const endCoords = view.coordsAtPos(endPos - 1);
+    return {
+      top: Math.min(startCoords.top, endCoords.top),
+      bottom: Math.max(startCoords.bottom, endCoords.bottom),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveBlockRowHighlightRect(
+  editorInstance: {
+    view: {
+      posAtDOM: (node: Node, offset: number) => number;
+      coordsAtPos: (pos: number) => { top: number; bottom: number };
+    };
+  } | null | undefined,
+  blockEl: HTMLElement,
+  areaRect: DOMRect,
+  columnContent: HTMLElement | null,
+): { top: number; left: number; width: number; height: number } {
+  const width = columnContent?.isConnected
+    ? columnContent.getBoundingClientRect().width
+    : areaRect.width;
+  const left = columnContent?.isConnected
+    ? columnContent.getBoundingClientRect().left - areaRect.left
+    : 0;
+  const textSpan = editorInstance ? measureTextBlockVerticalSpan(editorInstance, blockEl) : null;
+  if (textSpan) {
+    return {
+      top: textSpan.top - areaRect.top,
+      left,
+      width,
+      height: Math.max(1, textSpan.bottom - textSpan.top),
+    };
+  }
+  const highlightRect = columnContent?.isConnected
+    ? columnContent.getBoundingClientRect()
+    : blockEl.getBoundingClientRect();
+  return {
+    top: highlightRect.top - areaRect.top,
+    left,
+    width,
+    height: highlightRect.height,
+  };
 }
 
 function computePlusMenuPosition(
@@ -2727,14 +2788,14 @@ export default function Editor({
       setRowHighlightBand(null);
       return;
     }
-    const rowRect = row.getBoundingClientRect();
     const areaRect = area.getBoundingClientRect();
     const columnContent = getColumnContentFromBlock(row);
-    const highlightRect = columnContent ? columnContent.getBoundingClientRect() : rowRect;
-    const top = highlightRect.top - areaRect.top;
-    const left = columnContent?.isConnected ? highlightRect.left - areaRect.left : 0;
-    const width = columnContent?.isConnected ? highlightRect.width : areaRect.width;
-    const height = highlightRect.height;
+    const { top, left, width, height } = resolveBlockRowHighlightRect(
+      editorRefForCatalogue.current,
+      row,
+      areaRect,
+      columnContent,
+    );
     setRowHighlightBand(prev =>
       prev && prev.top === top && prev.left === left && prev.width === width && prev.height === height
         ? prev

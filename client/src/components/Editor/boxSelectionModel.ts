@@ -43,6 +43,7 @@ function isUiChrome(target: EventTarget | null): boolean {
   const element = target instanceof Element
     ? target
     : target instanceof Text ? target.parentElement : null;
+  if (element && isBitableBlockSelectionSurface(element)) return false;
   return Boolean(element?.closest(UI_CHROME));
 }
 
@@ -63,7 +64,10 @@ const WIDGET_BLOCK_SELECTOR =
   '[data-local-block], [contenteditable="false"], img, video, audio, iframe, .feishu-image-block, .feishu-local-card, .feishu-button-block, .feishu-formula-editor, .feishu-bitable-block, .feishu-sync-block, .feishu-media-preview, .feishu-file-actions, .feishu-divider, .feishu-code-block__toolbar, .feishu-highlight-block-wrap';
 
 const BITABLE_VIEW_INTERACTION_SELECTOR =
-  '.base-grid-wrap, .base-grid-shell, .base-grid-canvas-scroll, .base-grid-canvas, .base-kanban-board, .base-gallery-surface, .base-gantt-shell, .base-toolbar-panel, .base-settings, .base-field-edit-popover-portal, .base-delete-view-overlay';
+  '.base-grid-wrap, .base-grid-shell, .base-grid-canvas-scroll, .base-grid-canvas, .base-gantt-shell, .base-toolbar-panel, .base-settings, .base-field-edit-popover-portal, .base-delete-view-overlay';
+
+const BITABLE_BLOCK_SELECTABLE_SURFACE_SELECTOR =
+  '.base-gallery-surface, .base-kanban, .base-kanban__scroll, .base-kanban__board';
 
 /** 判断 li 是否为任务列表项 */
 export function isTaskListItem(li: Element | null): boolean {
@@ -205,8 +209,23 @@ function isBlankEditorPoint(clientX: number, clientY: number, tiptap: HTMLElemen
 
 function isBitableViewInteractionPoint(element: Element): boolean {
   if (!element.closest('.feishu-bitable-block')) return false;
+  if (isBitableBlockSelectionSurface(element)) return false;
   if (element.closest('.base-viewbar')) return true;
   return Boolean(element.closest(BITABLE_VIEW_INTERACTION_SELECTOR));
+}
+
+function isBitableBlockSelectionSurface(element: Element): boolean {
+  const block = element.closest(
+    '.feishu-bitable-block[data-base-view-type="gallery"], .feishu-bitable-block[data-base-view-type="kanban"]',
+  );
+  if (!block) return false;
+  if (element.closest('.base-viewbar, .base-toolbar-panel, .base-settings, .base-field-edit-popover-portal, .base-delete-view-overlay')) {
+    return false;
+  }
+  if (element.closest('.base-kanban-hscroll, .base-kanban-hscroll__thumb, .base-gallery-canvas-delete-hit, .base-gallery-canvas-add-hit')) {
+    return false;
+  }
+  return Boolean(element.closest(BITABLE_BLOCK_SELECTABLE_SURFACE_SELECTOR));
 }
 
 function isBoxSelectStartBlocked(element: Element, clientX: number, clientY: number): boolean {
@@ -402,6 +421,35 @@ export function clientRectsIntersect(a: ClientRect, b: DOMRect): boolean {
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
+function unionRects(rects: DOMRect[]): DOMRect | null {
+  const visible = rects.filter(rect => rect.width > 0 && rect.height > 0);
+  if (!visible.length) return null;
+  const left = Math.min(...visible.map(rect => rect.left));
+  const top = Math.min(...visible.map(rect => rect.top));
+  const right = Math.max(...visible.map(rect => rect.right));
+  const bottom = Math.max(...visible.map(rect => rect.bottom));
+  return new DOMRect(left, top, right - left, bottom - top);
+}
+
+function resolveBitableSelectionRect(dom: HTMLElement): DOMRect | null {
+  const block = dom.classList.contains('feishu-bitable-block')
+    ? dom
+    : dom.closest('.feishu-bitable-block');
+  if (!(block instanceof HTMLElement)) return null;
+
+  const parts = Array.from(block.querySelectorAll(
+    ':scope .base-viewbar, :scope .base-grid-wrap, :scope .base-grid-hscroll, :scope .base-gallery-surface, :scope .base-kanban, :scope .base-kanban-hscroll, :scope .base-gantt-shell',
+  )).filter((item): item is HTMLElement => item instanceof HTMLElement);
+  return unionRects(parts.map(part => part.getBoundingClientRect()));
+}
+
+export function measureSelectableUnitRect(unit: SelectableUnit): DOMRect {
+  if (unit.dom.classList.contains('feishu-bitable-block') || unit.dom.closest('.feishu-bitable-block')) {
+    return resolveBitableSelectionRect(unit.dom) ?? unit.dom.getBoundingClientRect();
+  }
+  return unit.dom.getBoundingClientRect();
+}
+
 export function findUnitsInClientRect(editor: Editor, rect: ClientRect): SelectableUnit[] {
   const width = rect.right - rect.left;
   const height = rect.bottom - rect.top;
@@ -409,7 +457,7 @@ export function findUnitsInClientRect(editor: Editor, rect: ClientRect): Selecta
 
   const matched = collectSelectableUnits(editor).filter(unit => {
     if (!unit.dom.isConnected) return false;
-    const bounds = unit.dom.getBoundingClientRect();
+    const bounds = measureSelectableUnitRect(unit);
     return bounds.width > 0 && bounds.height > 0 && clientRectsIntersect(rect, bounds);
   });
   return normalizeSelectedUnits(matched);
@@ -418,7 +466,7 @@ export function findUnitsInClientRect(editor: Editor, rect: ClientRect): Selecta
 export function findSelectableUnitAtPoint(editor: Editor, clientX: number, clientY: number): SelectableUnit | null {
   const hits = collectSelectableUnits(editor).filter(unit => {
     if (!unit.dom.isConnected) return false;
-    const rect = unit.dom.getBoundingClientRect();
+    const rect = measureSelectableUnitRect(unit);
     return (
       clientX >= rect.left
       && clientX <= rect.right
@@ -428,8 +476,8 @@ export function findSelectableUnitAtPoint(editor: Editor, clientX: number, clien
   });
   if (hits.length === 0) return null;
   return hits.sort((a, b) => {
-    const ar = a.dom.getBoundingClientRect();
-    const br = b.dom.getBoundingClientRect();
+    const ar = measureSelectableUnitRect(a);
+    const br = measureSelectableUnitRect(b);
     return (ar.width * ar.height) - (br.width * br.height);
   })[0];
 }
@@ -596,6 +644,7 @@ export function canStartBoxSelect(
   if (isTableInteractionTarget(element)) return false;
   if (clientX == null || clientY == null) return false;
   if (isBoxSelectStartBlocked(element, clientX, clientY)) return false;
+  if (isBitableBlockSelectionSurface(element)) return true;
 
   const tiptap = getTiptapRoot(editorArea);
   if (!tiptap) return false;
@@ -631,7 +680,7 @@ export function measureUnitBand(
   unit: SelectableUnit,
   areaRect: DOMRect,
 ): { top: number; left: number; width: number; height: number } {
-  const r = unit.dom.getBoundingClientRect();
+  const r = measureSelectableUnitRect(unit);
   return {
     top: r.top - areaRect.top,
     left: r.left - areaRect.left,

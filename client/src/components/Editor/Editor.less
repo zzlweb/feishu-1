@@ -59,7 +59,7 @@
     min-width: @editor-page-width;
     max-width: @editor-page-width;
     flex-shrink: 0;
-    margin-left: max(calc((100% - @editor-page-width) / 2), @editor-content-rail-gap);
+    margin-left: max(calc((100% - @editor-page-width) / 2 - 128px) , @editor-content-rail-gap);
     margin-right: auto;
     padding: 0 @editor-container-padding-right 0 @editor-container-padding-left;
 
@@ -299,7 +299,21 @@
         h5 { font-size: 14px; font-weight: 600; line-height: 1.55; }
         h6 { font-size: 13px; font-weight: 600; line-height: 1.55; color: @text-secondary; }
 
-        p { font-size: 15px; line-height: 26px; color: @text-primary; }
+        p {
+          margin: 0;
+          padding: 0;
+          font-size: 15px;
+          line-height: 26px;
+          color: @text-primary;
+        }
+
+        p.is-empty {
+          min-height: 26px;
+        }
+
+        br.ProseMirror-trailingBreak {
+          display: none;
+        }
 
         // 正文/标题块缩进（选区工具栏「增加缩进」，与列表嵌套独立）
         .loop-block-indent(@i) when (@i > 0) {

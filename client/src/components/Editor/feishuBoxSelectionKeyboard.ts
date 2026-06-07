@@ -25,6 +25,22 @@ function deleteSelectedBlocks(editor: Editor): boolean {
   return deleteBoxSelection(editor) || deleteSelectedControlBlock(editor);
 }
 
+function isTextEditingTarget(active: Element | null, editor: Editor): boolean {
+  if (!active) return false;
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement) {
+    return true;
+  }
+  if (!(active instanceof HTMLElement) || !active.isContentEditable) return false;
+  return active !== editor.view.dom && !active.classList.contains('ProseMirror');
+}
+
+function canHandleSelectAll(editor: Editor): boolean {
+  const active = document.activeElement;
+  if (!(active instanceof Element)) return true;
+  if (isTextEditingTarget(active, editor)) return false;
+  return active === document.body || active === editor.view.dom || editor.view.dom.contains(active);
+}
+
 /** 框选多块后 Enter / Delete / Backspace 批量删除 */
 export const FeishuBoxSelectionKeyboard = Extension.create({
   name: 'feishuBoxSelectionKeyboard',
@@ -47,9 +63,7 @@ export const FeishuBoxSelectionKeyboard = Extension.create({
         return true;
       },
       'Mod-a': ({ editor }) => {
-        if (!boxSelectionStore || editor.state.selection.from !== editor.state.selection.to) return false;
-        const active = document.activeElement;
-        if (active && active !== editor.view.dom) return false;
+        if (!boxSelectionStore || !canHandleSelectAll(editor)) return false;
         const units = collectSelectableUnits(editor);
         if (units.length === 0) return false;
         boxSelectionStore.selectUnits?.(units);
