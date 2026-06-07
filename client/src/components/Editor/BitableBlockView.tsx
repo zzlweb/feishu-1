@@ -1,4 +1,4 @@
-﻿import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react';
+import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
@@ -62,6 +62,13 @@ import { BitableRecordCommentPanel } from './BitableRecordCommentPanel';
 import { BitableRecordCardModal } from './BitableRecordCardModal';
 import { useAnchoredFloatingPosition } from './floatingPanel';
 import { createSelectChoice } from './BitableSelectFieldEditor';
+
+function isToolbarPortaledDropdownTarget(target: Node): boolean {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest(
+    '.bitable-field-condition-picker__menu--portal, .bitable-group-field-picker__menu--portal, .base-filter-select__menu--portal',
+  ));
+}
 import { useCommentSidebarTrack } from '../Layout/CommentSidebarContext';
 import {
   BITABLE_COMMENT_OPEN,
@@ -113,7 +120,7 @@ function ViewIcon({ type, size = 16, fill = '#646a73' }: { type: BaseView['type'
 function viewSettingsLabel(type: BaseView['type']) {
   if (type === 'gallery') return '画册设置';
   if (type === 'gantt') return '甘特图设置';
-  if (type === 'kanban') return '看板设置';
+  if (type === 'kanban') return '卡片配置';
   return '视图设置';
 }
 
@@ -164,6 +171,9 @@ const ToolGlyphComment = ({ size = 18 }: GlyphProps) => (
 const ToolGlyphShare = ({ size = 18 }: GlyphProps) => (
   <svg {...svgProps(size)}><path d="M22 3a1 1 0 0 0-1-1h-7a1 1 0 0 0 0 2h4.586l-6.293 6.293a1 1 0 0 0 1.414 1.414L20 5.414V10a1 1 0 1 0 2 0V3Z" fill="currentColor"/><path d="M4 5h6v2H4v13h16v-5.5h2V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" fill="currentColor"/></svg>
 );
+const ToolGlyphKanbanGroup = ({ size = 18 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="DownRoundOutlined"><path d="M7.755 11.658a1 1 0 0 1 1.416-1.415L12 13.07l2.828-2.829a1 1 0 0 1 1.416 1.416c-1.181 1.189-2.356 2.386-3.553 3.56a.987.987 0 0 1-1.383 0c-1.196-1.175-2.371-2.371-3.553-3.56Z" fill="currentColor"/><path d="M12 23C5.925 23 1 18.075 1 12S5.925 1 12 1s11 4.925 11 11-4.925 11-11 11Zm0-2a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" fill="currentColor"/></svg>
+);
 const ToolGlyphRename = ({ size = 16 }: GlyphProps) => (
   <svg {...svgProps(size)} data-icon="RenameOutlined">
     <path d="M19.253 2.646a1.5 1.5 0 1 1 2.121 2.122l-1.06 1.06-2.122-2.121 1.061-1.06ZM17.14 4.76l2.12 2.122-7.817 7.818a1.417 1.417 0 0 1-.77.395l-1.89.315a.17.17 0 0 1-.196-.197l.336-1.882c.05-.281.185-.54.387-.741l7.83-7.83Z" fill="currentColor" />
@@ -204,6 +214,26 @@ const GlyphExpandDown = ({ size = 12 }: GlyphProps) => (
 const GlyphVisible = ({ size = 14 }: GlyphProps) => (
   <svg {...svgProps(size)} data-icon="VisibleOutlined">
     <path d="M11.985 18.5c3.238 0 6.236-2.06 9.015-6.513C18.292 7.55 15.3 5.5 11.985 5.5 8.67 5.5 5.689 7.549 3 11.987c2.76 4.454 5.748 6.513 8.985 6.513ZM1.502 12.89a1.782 1.782 0 0 1 .023-1.838C4.428 6.017 7.915 3.5 11.984 3.5c4.086 0 7.594 2.538 10.523 7.614l.028.048c.296.519.294 1.16-.01 1.675-3.006 5.108-6.52 7.663-10.541 7.663-4.007 0-7.501-2.537-10.482-7.61ZM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" fill="currentColor" />
+  </svg>
+);
+const GlyphInvisible = ({ size = 16 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="InvisibleOutlined">
+    <path d="M2.032 8.172a1 1 0 0 1 1.388.267C5.263 11.159 8.637 13 12 13c3.364 0 6.737-1.841 8.58-4.561a1 1 0 0 1 1.656 1.122 11.928 11.928 0 0 1-2.002 2.259l2.009 2.008a1 1 0 1 1-1.415 1.415l-2.12-2.122a1.003 1.003 0 0 1-.085-.096c-.745.472-1.54.87-2.368 1.181l.712 2.658a1 1 0 1 1-1.932.517l-.702-2.62A11.64 11.64 0 0 1 12 15c-.71 0-1.42-.068-2.118-.197l-.691 2.578a1 1 0 1 1-1.932-.517l.692-2.582a13.01 13.01 0 0 1-2.607-1.278c-.03.04-.064.08-.101.117L3.12 15.243a1 1 0 1 1-1.414-1.415l2.032-2.032a11.919 11.919 0 0 1-1.974-2.235 1 1 0 0 1 .267-1.389Z" fill="currentColor" />
+  </svg>
+);
+const GlyphDownBold = ({ size = 12 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="DownBoldOutlined">
+    <path d="m3.414 7.086-.707.707a1 1 0 0 0 0 1.414l7.778 7.778a2 2 0 0 0 2.829 0l7.778-7.778a1 1 0 0 0 0-1.414l-.707-.707a1 1 0 0 0-1.415 0l-7.07 7.07-7.072-7.07a1 1 0 0 0-1.414 0Z" fill="currentColor" />
+  </svg>
+);
+const GlyphBan = ({ size = 16 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="BanOutlined">
+    <path d="M1 12c0 6.075 4.925 11 11 11s11-4.925 11-11S18.075 1 12 1 1 5.925 1 12Zm16.617 7.032a9 9 0 0 1-12.65-12.65l12.65 12.65Zm1.415-1.414L6.382 4.968a9 9 0 0 1 12.65 12.65Z" fill="currentColor" />
+  </svg>
+);
+const GlyphAttachment = ({ size = 16 }: GlyphProps) => (
+  <svg {...svgProps(size)} data-icon="AttachmentOutlined">
+    <path d="M12.304 7.315a1 1 0 0 1 1.414 1.414L8.13 14.317a1.485 1.485 0 0 0 0 2.1l.01.011a1.5 1.5 0 0 0 2.117-.005l7.43-7.43a3.5 3.5 0 0 0 0-4.95l-.036-.037a3.5 3.5 0 0 0-4.95 0l-7.778 7.777a5.521 5.521 0 0 0 7.808 7.809l7.07-7.07a1 1 0 0 1 1.415 1.414l-7.07 7.07A7.521 7.521 0 0 1 3.509 10.37l7.778-7.778a5.5 5.5 0 0 1 7.778 0l.037.037a5.5 5.5 0 0 1 0 7.778l-7.43 7.43a3.5 3.5 0 0 1-4.939.012l-.006-.006-.012-.012a3.485 3.485 0 0 1 0-4.928l5.589-5.588Z" fill="currentColor" />
   </svg>
 );
 const GlyphHelp = ({ size = 14 }: GlyphProps) => (
@@ -494,7 +524,7 @@ function FloatingItemRowMenu({
   const updatePosition = useCallback(() => {
     const btnRect = anchor.getBoundingClientRect();
     const row = anchor.closest<HTMLElement>('.base-view-sidebar__item');
-    const panel = anchor.closest<HTMLElement>('.base-field-panel');
+    const panel = anchor.closest<HTMLElement>('.base-field-panel, .bitable-field');
     const rowRect = row?.getBoundingClientRect() ?? btnRect;
     const panelRect = panel?.getBoundingClientRect();
     const left = (panelRect?.right ?? btnRect.right) + 4;
@@ -588,13 +618,13 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     [activeView.filters],
   );
   const hasActiveGroups = useMemo(
-    () => (activeView.type === 'gallery' && Boolean(galleryConfig.groupByFieldId))
+    () => (activeView.type === 'kanban' && Boolean(galleryConfig.groupByFieldId))
       || hasActiveGridGroups(activeView),
     [activeView, galleryConfig.groupByFieldId],
   );
   const activeGroupCount = useMemo(() => {
     if (activeView.type === 'grid') return resolveGridGroupRules(activeView).length;
-    if (activeView.type === 'gallery' && galleryConfig.groupByFieldId) return 1;
+    if (activeView.type === 'kanban' && galleryConfig.groupByFieldId) return 1;
     return 0;
   }, [activeView, galleryConfig.groupByFieldId]);
   const activeSortCount = useMemo(
@@ -738,10 +768,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       ) return;
       if (viewContextMenuRef.current?.contains(event.target)) return;
       if (event.target instanceof Element && event.target.closest('.base-viewbar__rename')) return;
+      if (isToolbarPortaledDropdownTarget(event.target)) return;
       setShowViewMenu(false);
       setShowSettings(false);
       setViewContextMenuId(null);
-      if (!(event.target instanceof Element) || !event.target.closest('.base-field-panel, .base-viewbar__tool-anchor, .base-toolbar-panel, .base-viewbar__tool')) {
+      if (!(event.target instanceof Element) || !event.target.closest('.base-field-panel, .bitable-field, .base-viewbar__tool-anchor, .base-toolbar-panel, .bitable-group-panel, .bitable-sort-panel, .bitable-toolbar__group-menu, .base-viewbar__tool')) {
         setActiveToolbarPanel(null);
       }
     };
@@ -997,6 +1028,14 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
 
   const setGalleryConfig = (patch: Partial<GalleryViewConfig>) => {
     if (activeView.type !== 'gallery' || activeView.locked) return;
+    mutate(current => updateView(current, activeView.id, view => ({
+      ...view,
+      config: { ...getGalleryConfig(current, view), ...patch },
+    })));
+  };
+
+  const setKanbanConfig = (patch: Partial<GalleryViewConfig>) => {
+    if (activeView.type !== 'kanban' || activeView.locked) return;
     mutate(current => updateView(current, activeView.id, view => ({
       ...view,
       config: { ...getGalleryConfig(current, view), ...patch },
@@ -1890,11 +1929,18 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   );
 
   const renderKanban = () => {
-    const statusField = table.fields.find(field => field.type === 'single_select');
+    const statusField = galleryConfig.groupByFieldId
+      ? table.fields.find(field => field.id === galleryConfig.groupByFieldId && field.type === 'single_select') ?? table.fields.find(field => field.type === 'single_select')
+      : table.fields.find(field => field.type === 'single_select');
     const addRecordToColumn = (statusValue: string) => {
       const recordId = addRecord();
       if (statusValue && statusField) {
         changeCell(recordId, statusField.id, statusValue);
+      }
+      if (recordId) {
+        setCardRecordId(recordId);
+        selectionAnchorRef.current = recordId;
+        setSelectedIds(new Set([recordId]));
       }
     };
     const changeRecordStatus = (recordId: string, statusValue: string) => {
@@ -1970,6 +2016,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         table={table}
         config={galleryConfig}
         records={records}
+        selectedRecordId={cardRecordId}
         locked={activeView.locked}
         addRecordToColumn={addRecordToColumn}
         changeRecordStatus={changeRecordStatus}
@@ -1978,6 +2025,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           selectionAnchorRef.current = recordId;
           setSelectedIds(new Set([recordId]));
         }}
+        removeRecords={removeRecords}
         addGroup={addGroup}
         renameGroup={renameGroup}
         deleteGroup={deleteGroup}
@@ -1997,6 +2045,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const hierarchySettingsLabel = viewHierarchySettingsLabel(activeView.type);
   const useHierarchySettingsIcon = activeView.type === 'grid' || activeView.type === 'gantt';
   const gridRowHeight = (activeView.config as GridViewConfig).rowHeight || 'low';
+  const useDocFloatToolbar = activeView.type === 'gallery' || activeView.type === 'kanban';
+  const showDocFloatToolbar = isViewToolsVisible || showSettings || Boolean(activeToolbarPanel);
 
   useEffect(() => {
     if (cardRecordId && !table.records.some(record => record.id === cardRecordId)) setCardRecordId(null);
@@ -2106,7 +2156,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
 
   return (
     <NodeViewWrapper
-      className={`feishu-bitable-block feishu-base-block${selected ? ' is-selected' : ''}${isViewToolsVisible ? ' is-view-tools-visible' : ''}${showSettings || showViewMenu || activeToolbarPanel || commentPanelOpen ? ' is-panel-open' : ''}${commentPanelOpen ? ' is-comment-open' : ''}`}
+      className={`feishu-bitable-block feishu-base-block${selected ? ' is-selected' : ''}${isViewToolsVisible ? ' is-view-tools-visible' : ''}${showSettings || showViewMenu || activeToolbarPanel || commentPanelOpen || cardRecordId ? ' is-panel-open' : ''}${commentPanelOpen ? ' is-comment-open' : ''}${cardRecordId ? ' is-card-open' : ''}`}
       {...blockAttrs(node.attrs)}
       data-base-view-type={activeView.type}
       ref={blockRef}
@@ -2213,6 +2263,154 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         </div>
         </div>
 
+        {useDocFloatToolbar ? (
+        <div className={`bitable-float-toolbar-wrapper${showDocFloatToolbar ? ' show' : ''}`}>
+          <div className="bitable-float-toolbar-list">
+            <div className="bitable-float-toolbar-btn-field">
+              <div className="bitable-float-toolbar-btn-wrapper">
+                <BitableTooltip tip={settingsLabel} placement="bottom">
+                  <button
+                    type="button"
+                    className={`bitable-float-toolbar-btn editable${showSettings ? ' selected' : ''}`}
+                    aria-label={settingsLabel}
+                    onClick={() => {
+                      setActiveToolbarPanel(null);
+                      setShowSettings(open => !open);
+                    }}
+                  >
+                    <div className="bitable-float-toolbar-btn-background" />
+                    <span className="universe-icon bitable-float-toolbar-btn-icon bitable-float-toolbar-btn-icon-field">
+                      <ToolGlyphSettings />
+                    </span>
+                  </button>
+                </BitableTooltip>
+                {showSettings && (activeView.type === 'gallery' || activeView.type === 'kanban') && (
+                  <GalleryFieldCustomizePanel
+                    variant={activeView.type === 'kanban' ? 'kanban' : 'gallery'}
+                    panelRef={settingsRef}
+                    table={table}
+                    view={activeView}
+                    config={galleryConfig}
+                    onConfig={activeView.type === 'kanban' ? setKanbanConfig : setGalleryConfig}
+                    onEditField={editField}
+                    onDeleteField={removeField}
+                    onReorderFields={reorderFields}
+                    onAddField={openAddFieldPanel}
+                  />
+                )}
+              </div>
+            </div>
+            {activeView.type === 'kanban' && (
+            <div className="bitable-float-toolbar-kanban-group-btn">
+              <div className="bitable-float-toolbar-btn-wrapper">
+                <BitableTooltip tip="分组" placement="bottom">
+                  <button
+                    type="button"
+                    className="bitable-float-toolbar-btn editable"
+                    aria-label="分组"
+                    onClick={() => openToolbarPanel('group')}
+                  >
+                    <div className="bitable-float-toolbar-btn-background" />
+                    <span className="universe-icon bitable-float-toolbar-btn-icon bitable-float-toolbar-btn-icon-kanban-group">
+                      <ToolGlyphKanbanGroup />
+                    </span>
+                  </button>
+                </BitableTooltip>
+                {activeToolbarPanel === 'group' && (
+                  <KanbanGroupMenuPanel
+                    panelRef={toolbarPanelRef}
+                    table={table}
+                    view={activeView}
+                    config={galleryConfig}
+                    onTable={mutate}
+                  />
+                )}
+              </div>
+            </div>
+            )}
+            <div className="bitable-float-toolbar-btn-filter">
+              <div className="bitable-float-toolbar-btn-wrapper">
+                <BitableTooltip tip="筛选" placement="bottom">
+                  <button
+                    type="button"
+                    className={`bitable-float-toolbar-btn editable${activeToolbarPanel === 'filter' || hasActiveFilters ? ' selected' : ''}`}
+                    aria-label="筛选"
+                    onClick={() => openToolbarPanel('filter')}
+                  >
+                    <div className="bitable-float-toolbar-btn-background" />
+                    <span className={`universe-icon bitable-float-toolbar-btn-icon${activeToolbarPanel === 'filter' || hasActiveFilters ? ' bitable-float-toolbar-btn-active' : ''}`}>
+                      <ToolGlyphFilter />
+                    </span>
+                  </button>
+                </BitableTooltip>
+                {activeToolbarPanel === 'filter' && (
+                  <ToolbarQuickPanel
+                    panel="filter"
+                    table={table}
+                    view={activeView}
+                    records={records}
+                    panelRef={toolbarPanelRef}
+                    onClose={() => setActiveToolbarPanel(null)}
+                    onTable={mutate}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="bitable-float-toolbar-btn-sort">
+              <div className="bitable-float-toolbar-btn-wrapper">
+                <BitableTooltip tip="排序" placement="bottom">
+                  <button
+                    type="button"
+                    className={`bitable-float-toolbar-btn editable${activeToolbarPanel === 'sort' || hasSortRules ? ' selected' : ''}`}
+                    aria-label="排序"
+                    onClick={() => openToolbarPanel('sort')}
+                  >
+                    <div className="bitable-float-toolbar-btn-background" />
+                    <span className={`universe-icon bitable-float-toolbar-btn-icon${activeToolbarPanel === 'sort' || hasSortRules ? ' bitable-float-toolbar-btn-active' : ''}`}>
+                      <ToolGlyphSort />
+                    </span>
+                  </button>
+                </BitableTooltip>
+                {activeToolbarPanel === 'sort' && (
+                  <SortConfigPanel
+                    panelRef={toolbarPanelRef}
+                    table={table}
+                    view={activeView}
+                    onTable={mutate}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="bitable-doc-float-toolbar-separator" aria-hidden />
+            <div className="bitable-float-toolbar-btn-wrapper">
+              <BitableTooltip tip="在新窗口打开" placement="bottom">
+                <button
+                  type="button"
+                  className={`bitable-float-toolbar-btn editable${activeToolbarPanel === 'share' ? ' selected' : ''}`}
+                  aria-label="在新窗口打开"
+                  onClick={() => openToolbarPanel('share')}
+                >
+                  <div className="bitable-float-toolbar-btn-background" />
+                  <span className="universe-icon bitable-float-toolbar-btn-icon">
+                    <ToolGlyphShare />
+                  </span>
+                </button>
+              </BitableTooltip>
+              {activeToolbarPanel === 'share' && (
+                <ToolbarQuickPanel
+                  panel="share"
+                  table={table}
+                  view={activeView}
+                  records={records}
+                  panelRef={toolbarPanelRef}
+                  onClose={() => setActiveToolbarPanel(null)}
+                  onTable={mutate}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+        ) : (
         <div className="base-viewbar__tools">
           <span className="base-viewbar__tool-anchor" ref={fieldPanelAnchorRef}>
             <BitableTooltip tip="字段配置" placement="bottom">
@@ -2261,70 +2459,119 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               />
             )}
           </span>
-          <BitableTooltip tip="筛选" placement="bottom">
-            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'filter' || hasActiveFilters ? ' is-active' : ''}`} aria-label="筛选" onClick={() => openToolbarPanel('filter')}><ToolGlyphFilter /></button>
-          </BitableTooltip>
-          <BitableTooltip tip="分组" placement="bottom">
-            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' || hasActiveGroups ? ' is-active' : ''}`} aria-label="分组" onClick={() => openToolbarPanel('group')}>
-              <ToolGlyphGroup />
-              {activeGroupCount > 0 && <span className="base-viewbar__tool-badge">{activeGroupCount}</span>}
-            </button>
-          </BitableTooltip>
-          <BitableTooltip tip="排序" placement="bottom">
-            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' || hasSortRules ? ' is-active' : ''}`} aria-label="排序" onClick={() => openToolbarPanel('sort')}>
-              <ToolGlyphSort />
-              {activeSortCount > 0 && <span className="base-viewbar__tool-badge">{activeSortCount}</span>}
-            </button>
-          </BitableTooltip>
-          {activeView.type === 'grid' && (
-            <BitableTooltip tip="行高" placement="bottom">
-              <button
-                type="button"
-                className={`base-viewbar__tool${activeToolbarPanel === 'rowHeight' || gridRowHeight !== 'low' ? ' is-active' : ''}`}
-                aria-label="行高"
-                onClick={() => openToolbarPanel('rowHeight')}
-              >
-                <ToolGlyphRowHeight />
+          <span className="base-viewbar__tool-anchor">
+            <BitableTooltip tip="筛选" placement="bottom">
+              <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'filter' || hasActiveFilters ? ' is-active' : ''}`} aria-label="筛选" onClick={() => openToolbarPanel('filter')}><ToolGlyphFilter /></button>
+            </BitableTooltip>
+            {activeToolbarPanel === 'filter' && (
+              <ToolbarQuickPanel
+                panel="filter"
+                table={table}
+                view={activeView}
+                records={records}
+                panelRef={toolbarPanelRef}
+                onClose={() => setActiveToolbarPanel(null)}
+                onTable={mutate}
+              />
+            )}
+          </span>
+          <span className="base-viewbar__tool-anchor">
+            <BitableTooltip tip="分组" placement="bottom">
+              <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' || hasActiveGroups ? ' is-active' : ''}`} aria-label="分组" onClick={() => openToolbarPanel('group')}>
+                <ToolGlyphGroup />
+                {activeGroupCount > 0 && <span className="base-viewbar__tool-badge">{activeGroupCount}</span>}
               </button>
             </BitableTooltip>
+            {activeToolbarPanel === 'group' && activeView.type === 'grid' && (
+              <GridGroupConfigPanel
+                panelRef={toolbarPanelRef}
+                table={table}
+                view={activeView}
+                onTable={mutate}
+              />
+            )}
+            {activeToolbarPanel === 'group' && activeView.type !== 'grid' && (
+              <ToolbarQuickPanel
+                panel="group"
+                table={table}
+                view={activeView}
+                records={records}
+                panelRef={toolbarPanelRef}
+                onClose={() => setActiveToolbarPanel(null)}
+                onTable={mutate}
+              />
+            )}
+          </span>
+          <span className="base-viewbar__tool-anchor">
+            <BitableTooltip tip="排序" placement="bottom">
+              <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' || hasSortRules ? ' is-active' : ''}`} aria-label="排序" onClick={() => openToolbarPanel('sort')}>
+                <ToolGlyphSort />
+                {activeSortCount > 0 && <span className="base-viewbar__tool-badge">{activeSortCount}</span>}
+              </button>
+            </BitableTooltip>
+            {activeToolbarPanel === 'sort' && (
+              <SortConfigPanel
+                panelRef={toolbarPanelRef}
+                table={table}
+                view={activeView}
+                onTable={mutate}
+              />
+            )}
+          </span>
+          {activeView.type === 'grid' && (
+            <span className="base-viewbar__tool-anchor">
+              <BitableTooltip tip="行高" placement="bottom">
+                <button
+                  type="button"
+                  className={`base-viewbar__tool${activeToolbarPanel === 'rowHeight' || gridRowHeight !== 'low' ? ' is-active' : ''}`}
+                  aria-label="行高"
+                  onClick={() => openToolbarPanel('rowHeight')}
+                >
+                  <ToolGlyphRowHeight />
+                </button>
+              </BitableTooltip>
+              {activeToolbarPanel === 'rowHeight' && (
+                <ToolbarQuickPanel
+                  panel="rowHeight"
+                  table={table}
+                  view={activeView}
+                  records={records}
+                  panelRef={toolbarPanelRef}
+                  onClose={() => setActiveToolbarPanel(null)}
+                  onTable={mutate}
+                />
+              )}
+            </span>
           )}
           <span className="base-viewbar__tool-sep" aria-hidden />
           <BitableTooltip tip="评论" placement="bottom">
             <button type="button" className={`base-viewbar__tool${commentPanelOpen ? ' is-active' : ''}`} aria-label="评论" onClick={toggleCommentPanel}><ToolGlyphComment /></button>
           </BitableTooltip>
           <span className="base-viewbar__tool-sep" aria-hidden />
-          <BitableTooltip tip="在新窗口打开" placement="bottom">
-            <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'share' ? ' is-active' : ''}`} aria-label="分享" onClick={() => openToolbarPanel('share')}><ToolGlyphShare /></button>
-          </BitableTooltip>
-          {activeToolbarPanel && activeToolbarPanel !== 'fields' && activeToolbarPanel !== 'comment' && (
-            <ToolbarQuickPanel
-              panel={activeToolbarPanel}
-              table={table}
-              view={activeView}
-              records={records}
-              panelRef={toolbarPanelRef}
-              onClose={() => setActiveToolbarPanel(null)}
-              onTable={mutate}
-            />
-          )}
+          <span className="base-viewbar__tool-anchor">
+            <BitableTooltip tip="在新窗口打开" placement="bottom">
+              <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'share' ? ' is-active' : ''}`} aria-label="分享" onClick={() => openToolbarPanel('share')}><ToolGlyphShare /></button>
+            </BitableTooltip>
+            {activeToolbarPanel === 'share' && (
+              <ToolbarQuickPanel
+                panel="share"
+                table={table}
+                view={activeView}
+                records={records}
+                panelRef={toolbarPanelRef}
+                onClose={() => setActiveToolbarPanel(null)}
+                onTable={mutate}
+              />
+            )}
+          </span>
         </div>
+        )}
       </header>
       <div className="base-view-content" data-no-marquee-selection="true" onMouseDown={event => event.stopPropagation()}>
         {activeView.type === 'gallery' ? renderGallery() : activeView.type === 'gantt' ? renderGantt() : activeView.type === 'kanban' ? renderKanban() : renderGrid()}
       </div>
       </div>
       {bitableCommentPanel && commentTrackHost && createPortal(bitableCommentPanel, commentTrackHost)}
-      {showSettings && activeView.type === 'gallery' && (
-        <GallerySettings
-          table={table}
-          view={activeView}
-          config={galleryConfig}
-          panelRef={settingsRef}
-          onClose={() => setShowSettings(false)}
-          onConfig={setGalleryConfig}
-          onTable={mutate}
-        />
-      )}
       {showSettings && activeView.type === 'gantt' && (
         <GanttSettings
           table={table}
@@ -2333,15 +2580,6 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           panelRef={settingsRef}
           onClose={() => setShowSettings(false)}
           onConfig={setGanttConfig}
-          onTable={mutate}
-        />
-      )}
-      {showSettings && activeView.type === 'kanban' && (
-        <GridSettings
-          table={table}
-          view={activeView}
-          panelRef={settingsRef}
-          onClose={() => setShowSettings(false)}
           onTable={mutate}
         />
       )}
@@ -2696,6 +2934,446 @@ function FieldConfigPanel({
   );
 }
 
+function GalleryFieldCustomizePanel({
+  variant = 'gallery',
+  panelRef,
+  table,
+  view,
+  config,
+  onConfig,
+  onEditField,
+  onDeleteField,
+  onReorderFields,
+  onAddField,
+}: {
+  variant?: 'gallery' | 'kanban';
+  panelRef: RefObject<HTMLDivElement>;
+  table: BaseTable;
+  view: BaseView;
+  config: GalleryViewConfig;
+  onConfig: (patch: Partial<GalleryViewConfig>) => void;
+  onEditField: (fieldId: string) => void;
+  onDeleteField: (fieldId: string) => void;
+  onReorderFields: (fromIndex: number, toIndex: number) => void;
+  onAddField: (anchor?: { left: number; top: number }) => void;
+}) {
+  const isKanban = variant === 'kanban';
+  const settingPrefix = isKanban ? 'kanban-setting-item' : 'gallery-setting-item';
+  const [fieldMoreId, setFieldMoreId] = useState<string | null>(null);
+  const [fieldMoreAnchor, setFieldMoreAnchor] = useState<HTMLElement | null>(null);
+  const [coverOpen, setCoverOpen] = useState(false);
+  const [draggingFieldIndex, setDraggingFieldIndex] = useState<number | null>(null);
+  const [dragOverFieldIndex, setDragOverFieldIndex] = useState<number | null>(null);
+  const coverRef = useRef<HTMLDivElement>(null);
+  const fieldListRef = useRef<HTMLDivElement>(null);
+  const fieldDragFromRef = useRef<number | null>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const titleFieldId = config.titleFieldId || table.primaryFieldId;
+  const attachmentFields = table.fields.filter(field => field.type === 'attachment');
+  const cardLayoutMode = config.cardLayoutMode || 'regular';
+  const hasCover = Boolean(config.coverFieldId);
+  const coverField = table.fields.find(field => field.id === config.coverFieldId) ?? null;
+  const coverLabel = hasCover ? (coverField?.name || '附件') : '无封面';
+  const canDeleteField = table.fields.length > 1;
+  const listHeight = Math.min(240, Math.max(36, table.fields.length * 36));
+  const innerHeight = table.fields.length * 36;
+
+  const isFieldVisibleOnCard = (fieldId: string) => (
+    fieldId === titleFieldId || config.visibleFieldIds.includes(fieldId)
+  );
+
+  const toggleFieldVisible = (fieldId: string) => {
+    if (view.locked || fieldId === titleFieldId) return;
+    const visible = new Set(config.visibleFieldIds);
+    if (visible.has(fieldId)) visible.delete(fieldId);
+    else visible.add(fieldId);
+    onConfig({ visibleFieldIds: Array.from(visible) });
+  };
+
+  const openFieldMoreMenu = (btn: HTMLElement, fieldId: string) => {
+    if (fieldMoreId === fieldId) {
+      setFieldMoreId(null);
+      setFieldMoreAnchor(null);
+      return;
+    }
+    setFieldMoreId(fieldId);
+    setFieldMoreAnchor(btn);
+    btn.focus();
+  };
+
+  const closeFieldMoreMenu = () => {
+    setFieldMoreId(null);
+    setFieldMoreAnchor(null);
+  };
+
+  useEffect(() => {
+    if (!fieldMoreId) return;
+    const close = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (moreMenuRef.current?.contains(event.target)) return;
+      if (fieldMoreAnchor?.contains(event.target)) return;
+      closeFieldMoreMenu();
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [fieldMoreId, fieldMoreAnchor]);
+
+  useEffect(() => {
+    if (!coverOpen) return;
+    const close = (event: globalThis.PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (coverRef.current?.contains(event.target)) return;
+      setCoverOpen(false);
+    };
+    document.addEventListener('pointerdown', close, true);
+    return () => document.removeEventListener('pointerdown', close, true);
+  }, [coverOpen]);
+
+  const resolveFieldDropIndex = (clientY: number) => {
+    const list = fieldListRef.current;
+    if (!list) return null;
+    const rows = list.querySelectorAll<HTMLElement>('.bitable-field__fields__field-wrap');
+    for (let i = 0; i < rows.length; i++) {
+      const rect = rows[i].getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) return i;
+    }
+    return rows.length > 0 ? rows.length - 1 : null;
+  };
+
+  const handleFieldDragStart = (event: DragEvent, index: number) => {
+    if (view.locked || table.fields[index]?.id === titleFieldId) return;
+    fieldDragFromRef.current = index;
+    setDraggingFieldIndex(index);
+    setDragOverFieldIndex(null);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleFieldListDragOver = (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (view.locked || fieldDragFromRef.current == null) return;
+    event.dataTransfer.dropEffect = 'move';
+    const index = resolveFieldDropIndex(event.clientY);
+    if (index == null || table.fields[index]?.id === titleFieldId) {
+      setDragOverFieldIndex(null);
+      return;
+    }
+    if (fieldDragFromRef.current === index) {
+      setDragOverFieldIndex(null);
+      return;
+    }
+    setDragOverFieldIndex(index);
+  };
+
+  const handleFieldListDrop = (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const fromIndex = fieldDragFromRef.current ?? draggingFieldIndex ?? Number(event.dataTransfer.getData('text/plain'));
+    const toIndex = resolveFieldDropIndex(event.clientY);
+    fieldDragFromRef.current = null;
+    setDraggingFieldIndex(null);
+    setDragOverFieldIndex(null);
+    if (toIndex == null || Number.isNaN(fromIndex) || fromIndex === toIndex) return;
+    if (table.fields[toIndex]?.id === titleFieldId) return;
+    onReorderFields(fromIndex, toIndex);
+  };
+
+  const handleFieldDragEnd = () => {
+    fieldDragFromRef.current = null;
+    setDraggingFieldIndex(null);
+    setDragOverFieldIndex(null);
+  };
+
+  const fieldMoreTarget = fieldMoreId ? table.fields.find(field => field.id === fieldMoreId) : null;
+
+  return (
+    <>
+      <div
+        ref={panelRef}
+        className="bitable-field"
+        data-e2e="bitable-field-customize-panel"
+        data-no-marquee-selection="true"
+        data-floating-panel="true"
+        onMouseDown={event => event.stopPropagation()}
+      >
+        <div className="bitable-float-toolbar-btn-arrow" aria-hidden />
+        {isKanban && (
+          <div className="bitable-field__title-wrap">
+            <div className="bitable-noselect bitable-field__title bitable-field__item">
+              <span>
+                卡片配置
+                <span className="bitable-guide-video-container" title="配置看板卡片展示内容">
+                  <i className="bitable-guide-video-icon active">
+                    <span className="universe-icon"><GlyphHelp size={14} /></span>
+                  </i>
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
+        <div className="bitable-common-card-config">
+          <div className={`${isKanban ? 'bitable-kanban-card-config' : 'bitable-gallery-card-config'}${view.locked ? ' select-disabled' : ''}`}>
+            <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+              <div className={`${settingPrefix}_setting_item field-setting-item${isKanban ? ' has-divider' : ''}`}>
+                <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>封面内容</span>
+                <div className={`${settingPrefix}__field-setting-children`}>
+                  <div className={`bitable-dropdown-select__wrapper${coverOpen ? ' is-open' : ''}`} ref={coverRef}>
+                    <div className={`bitable-select-trigger__wrapper ${isKanban ? 'bitable-dropdown-kanban' : 'bitable-dropdown-gallery'}`}>
+                      <button
+                        type="button"
+                        className="bitable-select-trigger__trigger"
+                        disabled={view.locked || (!isKanban && !attachmentFields.length)}
+                        aria-expanded={coverOpen}
+                        onClick={() => setCoverOpen(open => !open)}
+                      >
+                        <span className="bitable-select-trigger__icon">
+                          <span className="universe-icon">{hasCover ? <GlyphAttachment /> : <GlyphBan />}</span>
+                        </span>
+                        <span className="bitable-select-trigger__content">{isKanban ? coverLabel : (coverField?.name || '附件')}</span>
+                        <span className="bitable-select-trigger__arrow">
+                          <span className="universe-icon"><GlyphDownBold /></span>
+                        </span>
+                      </button>
+                    </div>
+                    {coverOpen && (
+                      <div className="bitable-dropdown-select__menu">
+                        {isKanban && (
+                          <button
+                            type="button"
+                            className={`bitable-dropdown-select__item${!hasCover ? ' is-selected' : ''}`}
+                            onMouseDown={event => {
+                              event.preventDefault();
+                              onConfig({ coverFieldId: undefined });
+                              setCoverOpen(false);
+                            }}
+                          >
+                            <span className="bitable-select-trigger__icon">
+                              <span className="universe-icon"><GlyphBan /></span>
+                            </span>
+                            <span>无封面</span>
+                          </button>
+                        )}
+                        {attachmentFields.map(field => (
+                          <button
+                            key={field.id}
+                            type="button"
+                            className={`bitable-dropdown-select__item${config.coverFieldId === field.id || (!isKanban && !config.coverFieldId && field.id === attachmentFields[0]?.id) ? ' is-selected' : ''}`}
+                            onMouseDown={event => {
+                              event.preventDefault();
+                              onConfig({ coverFieldId: field.id });
+                              setCoverOpen(false);
+                            }}
+                          >
+                            <span className="bitable-select-trigger__icon">
+                              <span className="universe-icon"><GlyphAttachment /></span>
+                            </span>
+                            <span>{field.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {isKanban && <div className="field-setting-item_divider" />}
+            </div>
+            {!isKanban && (
+            <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+              <div className={`${settingPrefix}_setting_item field-setting-item`}>
+                <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>封面效果</span>
+                <div className={`${settingPrefix}__field-setting-children`}>
+                  <div className="b-radio gallery_card_cover_type b-radio-upgrade">
+                    <div className="radio-group" role="group" aria-label="封面效果">
+                      {([
+                        ['contain', '适应'],
+                        ['cover', '裁剪'],
+                      ] as const).map(([fit, label]) => (
+                        <button
+                          key={fit}
+                          type="button"
+                          className={`radio-item ellipsis${config.coverFit === fit ? ' selected' : ''}`}
+                          disabled={view.locked}
+                          onClick={() => onConfig({ coverFit: fit })}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            )}
+            {!isKanban && <div className="bitable-gallery-divider" />}
+            <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+              <div className={`${settingPrefix}_setting_item field-setting-item`}>
+                <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>展示模式</span>
+                <div className={`${settingPrefix}__field-setting-children`}>
+                  <div className="b-radio b-radio-upgrade">
+                    <div className="radio-group" role="group" aria-label="展示模式">
+                      {([
+                        ['regular', '常规'],
+                        ['compact', '紧凑'],
+                      ] as const).map(([mode, label]) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`radio-item ellipsis${cardLayoutMode === mode ? ' selected' : ''}`}
+                          disabled={view.locked}
+                          onClick={() => onConfig({ cardLayoutMode: mode })}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+              <div className={`${settingPrefix}_setting_item field-setting-item`}>
+                <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>展示字段名</span>
+                <div className={`${settingPrefix}__field-setting-children`}>
+                  <button
+                    type="button"
+                    className="bitable-common-hover-press-background icon-background bitable-layout-row bitable-layout-main-cross-center"
+                    aria-label={config.showFieldNames ? '隐藏字段名' : '显示字段名'}
+                    disabled={view.locked}
+                    onClick={() => onConfig({ showFieldNames: !config.showFieldNames })}
+                  >
+                    <span className="universe-icon setting_visible_icon">
+                      {config.showFieldNames ? <GlyphVisible size={16} /> : <GlyphInvisible size={16} />}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="bitable-field-divider" />
+        <div
+          className="bitable-field__fields-wrap b-ud-scrollbar bitable-field__fields-wrap-border"
+          data-select-id="field-items"
+          style={{ position: 'relative', height: listHeight, width: '100%', overflow: 'auto' }}
+          onDragOver={handleFieldListDragOver}
+          onDrop={handleFieldListDrop}
+        >
+          <div ref={fieldListRef} style={{ height: innerHeight, width: '100%', position: 'relative' }}>
+            {table.fields.map((field, index) => {
+              const isPrimary = field.id === titleFieldId;
+              const isVisible = isFieldVisibleOnCard(field.id);
+              return (
+                <div
+                  key={field.id}
+                  className={[
+                    'bitable-field__fields__field-wrap',
+                    draggingFieldIndex === index ? 'is-dragging' : '',
+                    dragOverFieldIndex === index && draggingFieldIndex !== index ? 'is-drag-over' : '',
+                  ].filter(Boolean).join(' ')}
+                  style={{ position: 'absolute', left: 0, top: index * 36, height: 36, width: '100%' }}
+                >
+                  <div className="bitable-field__item_wrapper">
+                    <div className={`bitable-field__item bitable-field__field${!isVisible && !isPrimary ? ' bitable-field__field_invisible' : ''}`}>
+                      {isPrimary ? (
+                        <span className="universe-icon bitable-field__field-lock" aria-hidden>
+                          <FieldLockGlyph size={16} />
+                        </span>
+                      ) : (
+                        <span
+                          className="universe-icon bitable-field__field-dragbar"
+                          draggable={!view.locked}
+                          aria-hidden
+                          onDragStart={event => handleFieldDragStart(event, index)}
+                          onDragEnd={handleFieldDragEnd}
+                        >
+                          <GlyphDrag />
+                        </span>
+                      )}
+                      <div className="bitable-field__field-type icon bitable-field-icon" style={{ lineHeight: '16px' }}>
+                        <span className="universe-icon">{fieldTypeGlyph(field.type, 16)}</span>
+                      </div>
+                      <div className="bitable-field__field-name-container">
+                        <span data-e2e="" className="bitable-field__field-name bitable-noselect bitable-field-name" style={{ marginLeft: 0 }}>
+                          {field.name}
+                        </span>
+                      </div>
+                      <span className="base-space-gap" />
+                      {!isPrimary && (
+                        <button
+                          type="button"
+                          className="bitable-common-hover-press-background icon-background bitable-layout-row bitable-layout-cross-center"
+                          style={{ marginLeft: 4, cursor: 'pointer' }}
+                          aria-label={isVisible ? '隐藏字段' : '显示字段'}
+                          disabled={view.locked}
+                          onMouseDown={event => event.stopPropagation()}
+                          onClick={() => toggleFieldVisible(field.id)}
+                        >
+                          <span className="universe-icon bitable-field__field-visible" data-e2e="bitable-field-customize-item-visible">
+                            {isVisible ? <GlyphVisible size={16} /> : <GlyphInvisible size={16} />}
+                          </span>
+                        </button>
+                      )}
+                      {!view.locked && (
+                        <button
+                          type="button"
+                          className="bitable-common-hover-press-background icon-background bitable-layout-row bitable-layout-cross-center"
+                          style={{ marginLeft: 4, cursor: 'pointer' }}
+                          aria-label="更多操作"
+                          onMouseDown={event => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                            openFieldMoreMenu(event.currentTarget, field.id);
+                          }}
+                        >
+                          <span className="universe-icon bitable-field__field-more" data-e2e="bitable-field-more-btn">
+                            <GlyphMore />
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <button
+          type="button"
+          className="bitable-field__add bitable-field__item"
+          data-e2e="bitable-add-new-filed-btn"
+          disabled={view.locked}
+          onClick={event => {
+            if (view.locked) return;
+            const rect = event.currentTarget.getBoundingClientRect();
+            onAddField({ left: rect.left, top: rect.bottom + 4 });
+          }}
+        >
+          <span className="universe-icon bitable-field__add-icon"><GlyphAdd size={14} /></span>
+          <span className="bitable-field__add-text bitable-noselect">新增字段</span>
+        </button>
+      </div>
+      {fieldMoreId && fieldMoreAnchor && fieldMoreTarget && (
+        <FloatingItemRowMenu
+          anchor={fieldMoreAnchor}
+          menuRef={moreMenuRef}
+          canDelete={canDeleteField && fieldMoreTarget.id !== titleFieldId}
+          onEdit={() => {
+            closeFieldMoreMenu();
+            onEditField(fieldMoreTarget.id);
+          }}
+          onDelete={() => {
+            if (!canDeleteField || fieldMoreTarget.id === titleFieldId) return;
+            if (!window.confirm(`确认删除字段「${fieldMoreTarget.name}」？`)) return;
+            closeFieldMoreMenu();
+            onDeleteField(fieldMoreTarget.id);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 const FILTER_OPERATOR_OPTIONS: { value: FilterRule['operator']; label: string }[] = [
   { value: 'equals', label: '等于' },
   { value: 'not_equals', label: '不等于' },
@@ -2773,11 +3451,13 @@ function FilterPanelSelect<T extends string>({
           className="base-filter-select__menu base-filter-select__menu--portal"
           role="listbox"
           style={{
+            position: 'fixed',
             top: position.top,
             left: position.left,
             width: position.width,
             maxHeight: position.maxHeight,
             visibility: position.visibility,
+            zIndex: 10060,
           }}
           data-floating-panel="true"
           data-no-marquee-selection="true"
@@ -2806,33 +3486,224 @@ function FilterPanelSelect<T extends string>({
   );
 }
 
-function ConfigSortDirectionToggle({
+const GlyphInsertRight = ({ size = 14 }: GlyphProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" data-icon="InsertRightOutlined" aria-hidden>
+    <path d="M23.147 12.64a.8.8 0 0 0 0-1.28l-5.867-4.4A.8.8 0 0 0 16 7.6V11H2a1 1 0 0 0 0 2h14v3.4a.8.8 0 0 0 1.28.64l5.867-4.4Z" fill="currentColor" />
+  </svg>
+);
+
+const GlyphCloseSmall = ({ size = 14 }: GlyphProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" data-icon="CloseSmallOutlined" aria-hidden>
+    <path d="M5.636 5.636a1 1 0 0 0 0 1.414l4.95 4.95-4.95 4.95a1 1 0 1 0 1.414 1.414l4.95-4.95 4.95 4.95a1 1 0 0 0 1.414-1.414L13.414 12l4.95-4.95a1 1 0 0 0-1.415-1.414L12 10.586l-4.95-4.95a1 1 0 0 0-1.413 0Z" fill="currentColor" />
+  </svg>
+);
+
+function GroupPanelFieldSelect<T extends string>({
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  disabled?: boolean;
+  onChange: (value: T) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const selected = options.find(option => option.value === value);
+  const position = useAnchoredFloatingPosition(triggerRef, menuRef, open, {
+    placement: 'bottom-start',
+    fallbackWidth: 160,
+    fallbackHeight: 240,
+    matchAnchorWidth: true,
+    gap: 6,
+    pad: 8,
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (rootRef.current?.contains(event.target)) return;
+      if (menuRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', close, true);
+    return () => document.removeEventListener('mousedown', close, true);
+  }, [open]);
+
+  return (
+    <div
+      ref={rootRef}
+      className={`bitable-dropdown-select__wrapper${open ? ' is-open' : ''}`}
+      style={{ marginLeft: 8, width: 'fit-content', maxWidth: '100%' }}
+    >
+      <div className="bitable-select-trigger__wrapper bitable-select-trigger__wrapper--fit-content">
+        <div
+          ref={triggerRef}
+          className="bitable-select-trigger__trigger"
+          onMouseDown={event => event.stopPropagation()}
+          onClick={() => {
+            if (disabled) return;
+            setOpen(current => !current);
+          }}
+        >
+          <span className="bitable-select-trigger__content">{selected?.label || ''}</span>
+          <span className="bitable-select-trigger__arrow">
+            <span className="universe-icon"><GlyphDownBold size={14} /></span>
+          </span>
+        </div>
+        {open && createPortal(
+          <div
+            ref={menuRef}
+            className="bitable-group-field-picker__menu bitable-group-field-picker__menu--portal"
+            role="listbox"
+            style={{
+              position: 'fixed',
+              top: position.top,
+              left: position.left,
+              width: position.width,
+              maxHeight: position.maxHeight,
+              visibility: position.visibility,
+              zIndex: 10060,
+            }}
+            data-floating-panel="true"
+            data-no-marquee-selection="true"
+            onMouseDown={event => event.stopPropagation()}
+          >
+            {options.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                className={`bitable-group-field-picker__option${option.value === value ? ' is-active' : ''}`}
+                onMouseDown={event => {
+                  event.preventDefault();
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+      </div>
+    </div>
+  );
+}
+
+function isChoiceOrderField(field: BaseField | undefined) {
+  return field?.type === 'single_select' || field?.type === 'multi_select';
+}
+
+function ConfigConditionDelete({
+  disabled,
+  onClick,
+}: {
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      className="bitable-group--del-option bitable-common-hover-press-background icon-background"
+      style={{ height: 24 }}
+      onClick={() => !disabled && onClick()}
+    >
+      <span className="universe-icon"><GlyphCloseSmall /></span>
+    </div>
+  );
+}
+
+function SortAutoSwitch({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="bitable-noselect">
+      <div className="b-switch-trigger bitable-group--switch disable-animation">
+        <span className="b-trigger-text bitable-layout-row">自动排序</span>
+        <div className="b-switch-trigger-switch-container">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            disabled={disabled}
+            className={[
+              'ud__switch',
+              'ud__switch-md',
+              'b-switch-trigger-udswitch',
+              checked ? 'ud__switch-checked b-switch-trigger-udswitch-checked' : '',
+            ].filter(Boolean).join(' ')}
+            onClick={() => !disabled && onChange(!checked)}
+          >
+            <div className="ud__switch__handler" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GroupOrderToggle({
   value,
   disabled,
+  field,
   onChange,
 }: {
   value: 'asc' | 'desc';
   disabled?: boolean;
+  field?: BaseField;
   onChange: (direction: 'asc' | 'desc') => void;
 }) {
+  const isChoiceOrder = isChoiceOrderField(field);
   return (
-    <div className="bitable-sort-direction" aria-label="排序方向">
-      <button
-        type="button"
-        disabled={disabled}
-        className={value !== 'desc' ? 'is-active' : ''}
-        onClick={() => onChange('asc')}
-      >
-        A → Z
-      </button>
-      <button
-        type="button"
-        disabled={disabled}
-        className={value === 'desc' ? 'is-active' : ''}
-        onClick={() => onChange('desc')}
-      >
-        Z → A
-      </button>
+    <div className={`bitable-group--condition-order${isChoiceOrder ? ' is-choice-order' : ''}`}>
+      <div className={`bitable-group--condition-order${value === 'desc' ? ' is-desc' : ''}`}>
+        <div className="slider" aria-hidden />
+        <div
+          className={`item${value !== 'desc' ? ' selected' : ''}`}
+          onClick={() => !disabled && onChange('asc')}
+        >
+          <div className="order">
+            {isChoiceOrder ? (
+              <span>选项顺序</span>
+            ) : (
+              <>
+                <span className="from">A</span>
+                <span className="universe-icon arrow"><GlyphInsertRight size={12} /></span>
+                <span className="to">Z</span>
+              </>
+            )}
+          </div>
+        </div>
+        <div
+          className={`item${value === 'desc' ? ' selected' : ''}`}
+          onClick={() => !disabled && onChange('desc')}
+        >
+          <div className="order">
+            {isChoiceOrder ? (
+              <span>选项倒序</span>
+            ) : (
+              <>
+                <span className="from">Z</span>
+                <span className="universe-icon arrow"><GlyphInsertRight size={12} /></span>
+                <span className="to">A</span>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2855,7 +3726,7 @@ function FieldConditionPicker({
   onSelect: (fieldId: string) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -2894,15 +3765,15 @@ function FieldConditionPicker({
   }, [open]);
 
   return (
-    <div ref={rootRef} className={`bitable-dropdown-select__wrapper bitable-group-field-picker${open ? ' is-open' : ''}`}>
+    <div
+      ref={rootRef}
+      className={`bitable-dropdown-select__wrapper bitable-group-field-picker${open ? ' is-open' : ''}`}
+      style={{ marginLeft: 8, width: 'fit-content', maxWidth: '100%' }}
+    >
       <div className="bitable-select-trigger__wrapper bitable-select-trigger__wrapper--fit-content">
-        <button
+        <div
           ref={triggerRef}
-          type="button"
           className="bitable-select-trigger__trigger"
-          disabled={disabled || !fields.length}
-          aria-expanded={open}
-          aria-haspopup="listbox"
           onMouseDown={event => event.stopPropagation()}
           onClick={() => {
             if (disabled || !fields.length) return;
@@ -2912,21 +3783,23 @@ function FieldConditionPicker({
           <span className="bitable-select-trigger__content">
             <span className="bitable-select-trigger__placeholder">选择条件</span>
           </span>
-          <span className="bitable-select-trigger__arrow" aria-hidden>
-            <SelGlyphChevronDown size={12} fill="currentColor" />
+          <span className="bitable-select-trigger__arrow">
+            <span className="universe-icon"><GlyphDownBold size={14} /></span>
           </span>
-        </button>
+        </div>
         {open && createPortal(
           <div
             ref={menuRef}
             className="bitable-field-condition-picker__menu bitable-field-condition-picker__menu--portal"
             role="listbox"
             style={{
+              position: 'fixed',
               top: position.top,
               left: position.left,
               width: 200,
               maxHeight: position.maxHeight,
               visibility: position.visibility,
+              zIndex: 10060,
             }}
             data-floating-panel="true"
             data-no-marquee-selection="true"
@@ -2951,7 +3824,8 @@ function FieldConditionPicker({
                   type="button"
                   role="option"
                   className="bitable-dropdown-select__item"
-                  onClick={() => {
+                  onMouseDown={event => {
+                    event.preventDefault();
                     onSelect(field.id);
                     setOpen(false);
                   }}
@@ -3060,7 +3934,7 @@ function GridGroupPanelContent({
   const resolveGroupDropIndex = (clientY: number) => {
     const list = groupListRef.current;
     if (!list) return null;
-    const items = Array.from(list.querySelectorAll<HTMLElement>('.bitable-config--condition'));
+    const items = Array.from(list.querySelectorAll<HTMLElement>('.bitable-group--condition-item'));
     for (let index = 0; index < items.length; index += 1) {
       const rect = items[index].getBoundingClientRect();
       if (clientY < rect.top + rect.height / 2) return index;
@@ -3115,7 +3989,7 @@ function GridGroupPanelContent({
   return (
     <>
       <div className="bitable-float-toolbar-btn-arrow" aria-hidden />
-      <div className="bitable-config-panel__header">
+      <div className="bitable-group--tip-wrap">
         <div className="bitable-noselect bitable-group--tip">
           设置分组条件
           <ConfigPanelHelpIcon />
@@ -3136,60 +4010,173 @@ function GridGroupPanelContent({
           return (
             <li
               className={[
-                'bitable-group--condition',
-                'bitable-config--condition',
+                'bitable-group--condition-item',
                 draggingGroupIndex === index ? 'is-dragging' : '',
                 dragOverGroupIndex === index && draggingGroupIndex !== index ? 'is-drag-over' : '',
               ].filter(Boolean).join(' ')}
               key={`${rule.fieldId}-${index}`}
             >
               <span
-                className="bitable-config--drag"
+                className="drag-point"
                 draggable={!view.locked}
                 aria-hidden
                 onDragStart={event => handleGroupDragStart(event, index)}
                 onDragEnd={handleGroupDragEnd}
               >
-                <GlyphDrag />
+                <span className="universe-icon icon"><GlyphDrag /></span>
               </span>
-              <div className="bitable-group--condition-field bitable-config--condition-field">
-                <FilterPanelSelect
-                  className="bitable-group--condition-select"
-                  disabled={view.locked}
-                  value={rule.fieldId}
-                  options={fieldOptions}
-                  onChange={nextFieldId => updateGroupField(index, nextFieldId)}
-                />
-                <ConfigSortDirectionToggle
+              <div className="bitable-group--condition">
+                <div className="bitable-group--condition-field">
+                  <GroupPanelFieldSelect
+                    disabled={view.locked}
+                    value={rule.fieldId}
+                    options={fieldOptions}
+                    onChange={nextFieldId => updateGroupField(index, nextFieldId)}
+                  />
+                </div>
+                <GroupOrderToggle
                   value={rule.direction}
                   disabled={view.locked}
+                  field={field}
                   onChange={direction => updateGroupDirection(index, direction)}
                 />
-                <button
-                  type="button"
-                  className="bitable-group--condition-remove"
-                  aria-label="删除分组条件"
+                <ConfigConditionDelete
                   disabled={view.locked}
                   onClick={() => removeGroupField(index)}
-                >
-                  ×
-                </button>
+                />
               </div>
             </li>
           );
         })}
       </ul>
       {availableFields.length > 0 && (
-        <div className="bitable-group--add bitable-config--condition">
-          <span className="bitable-config--drag bitable-config--drag--placeholder" aria-hidden />
-          <FieldConditionPicker
-            disabled={view.locked}
-            fields={availableFields}
-            onSelect={addGroupField}
-          />
+        <div className="bitable-group--add bitable-group--condition">
+          <div className="bitable-group--condition-field">
+            <FieldConditionPicker
+              disabled={view.locked}
+              fields={availableFields}
+              onSelect={addGroupField}
+            />
+          </div>
         </div>
       )}
     </>
+  );
+}
+
+function GridGroupConfigPanel({
+  panelRef,
+  table,
+  view,
+  onTable,
+}: {
+  panelRef: RefObject<HTMLDivElement>;
+  table: BaseTable;
+  view: BaseView;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+}) {
+  return (
+    <div
+      ref={panelRef}
+      className="bitable-group b-ud-scrollbar bitable-group-panel"
+      data-e2e="bitable-group-config-panel"
+      data-no-marquee-selection="true"
+      data-floating-panel="true"
+      onMouseDown={event => event.stopPropagation()}
+    >
+      <GridGroupPanelContent table={table} view={view} onTable={onTable} />
+    </div>
+  );
+}
+
+function KanbanGroupMenuPanel({
+  panelRef,
+  table,
+  view,
+  config,
+  onTable,
+}: {
+  panelRef: RefObject<HTMLDivElement>;
+  table: BaseTable;
+  view: BaseView;
+  config: GalleryViewConfig;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+}) {
+  const groupFields = table.fields.filter(field => field.type === 'single_select');
+  const defaultFieldId = groupFields[0]?.id || '';
+  const activeFieldId = config.groupByFieldId || defaultFieldId;
+
+  const selectField = (fieldId: string) => {
+    if (view.locked || !fieldId) return;
+    onTable(current => updateView(current, view.id, item => ({
+      ...item,
+      config: { ...item.config, groupByFieldId: fieldId },
+    })));
+  };
+
+  return (
+    <div
+      ref={panelRef}
+      className="bitable-toolbar__group-menu bitable-noselect"
+      data-no-marquee-selection="true"
+      data-floating-panel="true"
+      onMouseDown={event => event.stopPropagation()}
+    >
+      <div className="bitable-float-toolbar-btn-arrow" aria-hidden />
+      <div className="bitable-toolbar__group-menu-prepend">选择分组依据</div>
+      <ul className="bitable-toolbar__group-menu-list b-ud-scrollbar">
+        {groupFields.map(field => (
+          <li
+            key={field.id}
+            className={[
+              'bitable-toolbar__group-menu-item',
+              'bitable-toolbar__group-menu-list-item',
+              activeFieldId === field.id ? 'selected' : '',
+              'bitable-field-item',
+            ].filter(Boolean).join(' ')}
+            role="button"
+            tabIndex={view.locked ? -1 : 0}
+            onClick={() => selectField(field.id)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                selectField(field.id);
+              }
+            }}
+          >
+            <div className="icon bitable-field-icon" style={{ lineHeight: '16px' }}>
+              <span className="universe-icon">{fieldTypeGlyph(field.type, 16)}</span>
+            </div>
+            <span className="bitable-toolbar__group-menu-item-text bitable-field-name">{field.name}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SortConfigPanel({
+  panelRef,
+  table,
+  view,
+  onTable,
+}: {
+  panelRef: RefObject<HTMLDivElement>;
+  table: BaseTable;
+  view: BaseView;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+}) {
+  return (
+    <div
+      ref={panelRef}
+      className="bitable-group b-ud-scrollbar bitable-sort-panel"
+      data-e2e="bitable-sort-config-panel"
+      data-no-marquee-selection="true"
+      data-floating-panel="true"
+      onMouseDown={event => event.stopPropagation()}
+    >
+      <SortPanelContent table={table} view={view} onTable={onTable} />
+    </div>
   );
 }
 
@@ -3248,7 +4235,7 @@ function SortPanelContent({
   const resolveSortDropIndex = (clientY: number) => {
     const list = sortListRef.current;
     if (!list) return null;
-    const items = Array.from(list.querySelectorAll<HTMLElement>('.bitable-config--condition'));
+    const items = Array.from(list.querySelectorAll<HTMLElement>('.bitable-group--condition-item'));
     for (let index = 0; index < items.length; index += 1) {
       const rect = items[index].getBoundingClientRect();
       if (clientY < rect.top + rect.height / 2) return index;
@@ -3301,22 +4288,16 @@ function SortPanelContent({
   return (
     <>
       <div className="bitable-float-toolbar-btn-arrow" aria-hidden />
-      <div className="bitable-config-panel__header">
+      <div className="bitable-group--tip-wrap">
         <div className="bitable-noselect bitable-group--tip">
           设置排序条件
           <ConfigPanelHelpIcon />
         </div>
-        <label className="bitable-sort-panel__auto">
-          <span>自动排序</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={autoSort}
-            className={`bitable-sort-panel__switch${autoSort ? ' is-on' : ''}`}
-            disabled={view.locked}
-            onClick={() => updateCurrentView(item => ({ ...item, autoSort: item.autoSort === false }))}
-          />
-        </label>
+        <SortAutoSwitch
+          checked={autoSort}
+          disabled={view.locked}
+          onChange={checked => updateCurrentView(item => ({ ...item, autoSort: checked }))}
+        />
       </div>
       <ul
         ref={sortListRef}
@@ -3326,64 +4307,64 @@ function SortPanelContent({
       >
         {sorts.map((sort, index) => {
           const field = table.fields.find(item => item.id === sort.fieldId);
-          if (!field) return null;
+          const fieldLabel = field?.name || '已删除字段';
+          const fieldOptions = field
+            ? fieldOptionsForSort(sort.fieldId).map(item => ({ value: item.id, label: item.name }))
+            : [{ value: sort.fieldId, label: fieldLabel }];
           return (
             <li
               className={[
-                'bitable-group--condition',
-                'bitable-config--condition',
+                'bitable-group--condition-item',
                 draggingSortIndex === index ? 'is-dragging' : '',
                 dragOverSortIndex === index && draggingSortIndex !== index ? 'is-drag-over' : '',
               ].filter(Boolean).join(' ')}
               key={`${sort.fieldId}-${index}`}
             >
               <span
-                className="bitable-config--drag"
+                className="drag-point"
                 draggable={!view.locked}
                 aria-hidden
                 onDragStart={event => handleSortDragStart(event, index)}
                 onDragEnd={handleSortDragEnd}
               >
-                <GlyphDrag />
+                <span className="universe-icon icon"><GlyphDrag /></span>
               </span>
-              <div className="bitable-group--condition-field bitable-config--condition-field">
-                <FilterPanelSelect
-                  className="bitable-group--condition-select"
-                  disabled={view.locked}
-                  value={sort.fieldId}
-                  options={fieldOptionsForSort(sort.fieldId).map(item => ({ value: item.id, label: item.name }))}
-                  onChange={fieldId => {
-                    if (!fieldId || fieldId === sort.fieldId) return;
-                    updateSort(index, { fieldId });
-                  }}
-                />
-                <ConfigSortDirectionToggle
+              <div className="bitable-group--condition">
+                <div className="bitable-group--condition-field">
+                  <GroupPanelFieldSelect
+                    disabled={view.locked}
+                    value={sort.fieldId}
+                    options={fieldOptions}
+                    onChange={fieldId => {
+                      if (!fieldId || fieldId === sort.fieldId) return;
+                      updateSort(index, { fieldId });
+                    }}
+                  />
+                </div>
+                <GroupOrderToggle
                   value={sort.direction}
                   disabled={view.locked}
+                  field={field}
                   onChange={direction => updateSort(index, { direction })}
                 />
-                <button
-                  type="button"
-                  className="bitable-group--condition-remove"
-                  aria-label="删除排序条件"
+                <ConfigConditionDelete
                   disabled={view.locked}
                   onClick={() => removeSort(index)}
-                >
-                  ×
-                </button>
+                />
               </div>
             </li>
           );
         })}
       </ul>
       {availableFields.length > 0 && (
-        <div className="bitable-group--add bitable-config--condition">
-          <span className="bitable-config--drag bitable-config--drag--placeholder" aria-hidden />
-          <FieldConditionPicker
-            disabled={view.locked}
-            fields={availableFields}
-            onSelect={addSortField}
-          />
+        <div className="bitable-group--add bitable-group--condition">
+          <div className="bitable-group--condition-field">
+            <FieldConditionPicker
+              disabled={view.locked}
+              fields={availableFields}
+              onSelect={addSortField}
+            />
+          </div>
         </div>
       )}
     </>
@@ -3408,8 +4389,6 @@ function ToolbarQuickPanel({
   onTable: (update: (table: BaseTable) => BaseTable) => void;
 }) {
   const filters = view.filters || [];
-  const canGroup = view.type === 'gallery';
-  const groupBy = canGroup ? (view.config as GalleryViewConfig).groupByFieldId || '' : '';
 
   const updateCurrentView = (update: (current: BaseView) => BaseView) => {
     if (view.locked) return;
@@ -3448,15 +4427,12 @@ function ToolbarQuickPanel({
   const panelClassName = [
     'base-toolbar-panel',
     `base-toolbar-panel--${panel}`,
-    panel === 'group' && view.type === 'grid' ? 'bitable-group bitable-group-panel' : '',
-    panel === 'sort' ? 'bitable-group bitable-sort-panel' : '',
   ].filter(Boolean).join(' ');
 
   return (
     <div
       ref={panelRef}
       className={panelClassName}
-      data-e2e={panel === 'group' && view.type === 'grid' ? 'bitable-group-config-panel' : panel === 'sort' ? 'bitable-sort-config-panel' : undefined}
       data-no-marquee-selection="true"
       data-floating-panel="true"
       onMouseDown={event => event.stopPropagation()}
@@ -3552,14 +4528,6 @@ function ToolbarQuickPanel({
         </div>
       )}
 
-      {panel === 'sort' && (
-        <SortPanelContent
-          table={table}
-          view={view}
-          onTable={onTable}
-        />
-      )}
-
       {panel === 'rowHeight' && view.type === 'grid' && (
         <div className="base-toolbar-panel__segmented" aria-label="行高">
           {([
@@ -3583,30 +4551,7 @@ function ToolbarQuickPanel({
         </div>
       )}
 
-      {panel === 'group' && view.type === 'grid' && (
-        <GridGroupPanelContent
-          table={table}
-          view={view}
-          onTable={onTable}
-        />
-      )}
-
-      {panel === 'group' && view.type === 'gallery' && (
-        <>
-          <label>字段
-            <select
-              disabled={view.locked}
-              value={groupBy}
-              onChange={event => updateCurrentView(item => ({ ...item, config: { ...item.config, groupByFieldId: event.target.value || undefined } }))}
-            >
-              <option value="">不分组</option>
-              {table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-            </select>
-          </label>
-        </>
-      )}
-
-      {panel === 'group' && view.type !== 'grid' && view.type !== 'gallery' && (
+      {panel === 'group' && view.type !== 'grid' && view.type !== 'gallery' && view.type !== 'kanban' && (
         <p className="base-toolbar-panel__empty">当前视图未开启分组呈现。</p>
       )}
 
@@ -3683,7 +4628,6 @@ function GallerySettings({
         <label className="base-check"><input type="checkbox" disabled={view.locked} checked={config.showFieldNames} onChange={event => onConfig({ showFieldNames: event.target.checked })} />显示字段名</label>
         <label className="base-check"><input type="checkbox" disabled={view.locked} checked={config.showEmptyFields} onChange={event => onConfig({ showEmptyFields: event.target.checked })} />显示空字段</label>
       </div>
-      <label>字段<select disabled={view.locked} value={config.groupByFieldId || ''} onChange={event => onConfig({ groupByFieldId: event.target.value || undefined })}><option value="">不分组</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}</select></label>
       <label>字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
         if (view.locked) return;
         onTable(current => updateView(current, view.id, item => ({ ...item, sorts: event.target.value ? [{ fieldId: event.target.value, direction: item.sorts?.[0]?.direction || 'asc' }] : [] })));

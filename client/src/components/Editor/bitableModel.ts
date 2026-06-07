@@ -113,6 +113,7 @@ export interface GalleryViewConfig {
   coverFit: 'cover' | 'contain';
   coverPosition?: 'center' | 'top' | 'bottom';
   cardSize: 'small' | 'medium' | 'large';
+  cardLayoutMode?: 'regular' | 'compact';
   cardAspectRatio: '1:1' | '4:3' | '16:9' | 'auto';
   showFieldNames: boolean;
   showEmptyFields: boolean;
@@ -210,6 +211,27 @@ export function getEffectiveSorts(view: BaseView): SortRule[] {
   return view.sorts || [];
 }
 
+function compareGroupLabels(
+  left: string,
+  right: string,
+  field: BaseField | undefined,
+  direction: 'asc' | 'desc',
+): number {
+  if (field && (field.type === 'single_select' || field.type === 'multi_select')) {
+    const choices = field.options?.choices ?? [];
+    const resolveOrder = (label: string) => {
+      const index = choices.findIndex(choice => choice.name === label || choice.id === label);
+      return index >= 0 ? index : Number.MAX_SAFE_INTEGER;
+    };
+    const orderDiff = resolveOrder(left) - resolveOrder(right);
+    if (orderDiff !== 0) {
+      return direction === 'asc' ? orderDiff : -orderDiff;
+    }
+  }
+  const result = left.localeCompare(right, 'zh-CN', { numeric: true });
+  return direction === 'asc' ? result : -result;
+}
+
 export function buildGridDisplayRows(
   table: BaseTable,
   records: BaseRecord[],
@@ -247,11 +269,7 @@ export function buildGridDisplayRows(
       groups.set(label, bucket);
     });
     [...groups.entries()]
-      .sort(([left], [right]) => {
-        const direction = normalizedDirections[level] ?? 'asc';
-        const result = left.localeCompare(right, 'zh-CN', { numeric: true });
-        return direction === 'asc' ? result : -result;
-      })
+      .sort(([left], [right]) => compareGroupLabels(left, right, field, normalizedDirections[level] ?? 'asc'))
       .forEach(([label, bucket]) => {
         const key = `${level}:${fieldId}:${label}`;
         rows.push({
@@ -464,6 +482,7 @@ export function createGalleryConfig(fields: BaseField[], primaryFieldId: string)
     coverFit: 'cover',
     coverPosition: 'center',
     cardSize: 'medium',
+    cardLayoutMode: 'regular',
     cardAspectRatio: '4:3',
     showFieldNames: false,
     showEmptyFields: false,

@@ -47,6 +47,7 @@ import { resolveInlineBlockElementFromEditor, syncEditorSelectionToAnchoredBlock
 import { moveDraggableBlock, resolveDraggableBlockPos } from './feishuBlockDrag';
 import { FeishuBlockBackspace } from './feishuBlockBackspace';
 import { FeishuBoxSelectionKeyboard } from './feishuBoxSelectionKeyboard';
+import { FeishuTrailingParagraph } from './feishuTrailingParagraph';
 import BoxBlockSelectionLayer from './FeishuBoxBlockSelection';
 import { FeishuHeading, readHeadingId } from './feishuHeading';
 import { FeishuBlockId, makeFeishuBlockId } from './feishuBlockId';
@@ -568,6 +569,27 @@ function isPointerInBlockToolsBridge(
     clientY >= bridgeTop &&
     clientY <= bridgeBottom
   );
+}
+
+function findEmptyParagraphNearPoint(root: HTMLElement, clientX: number, clientY: number): HTMLParagraphElement | null {
+  const rootRect = root.getBoundingClientRect();
+  if (clientX < rootRect.left || clientX > rootRect.right) return null;
+
+  let best: { paragraph: HTMLParagraphElement; distance: number } | null = null;
+  const paragraphs = Array.from(root.querySelectorAll(':scope > p'));
+  for (const paragraph of paragraphs) {
+    if (!(paragraph instanceof HTMLParagraphElement)) continue;
+    const text = (paragraph.textContent ?? '').replace(/\u200b/g, '').trim();
+    if (text) continue;
+    const rect = paragraph.getBoundingClientRect();
+    const expandedTop = rect.top - 18;
+    const expandedBottom = rect.bottom + 18;
+    if (clientY < expandedTop || clientY > expandedBottom) continue;
+    const center = rect.top + rect.height / 2;
+    const distance = Math.abs(clientY - center);
+    if (!best || distance < best.distance) best = { paragraph, distance };
+  }
+  return best?.paragraph ?? null;
 }
 
 const BLOCK_CONTENT_SELECTOR = 'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre';
@@ -1859,6 +1881,7 @@ const editorExtensions = [
   }),
   HighlightBlock,
   FeishuBlockBackspace,
+  FeishuTrailingParagraph,
   FeishuBoxSelectionKeyboard,
 ];
 
@@ -1962,11 +1985,18 @@ function getBlockToolsAnchorTop(
   blockEl: HTMLElement,
   areaRectTop: number,
 ): number {
+  const rr = blockEl.getBoundingClientRect();
   const textSpan = measureTextBlockVerticalSpan(editorInstance, blockEl);
   if (textSpan) {
-    return (textSpan.top + textSpan.bottom) / 2 - areaRectTop;
+    const spanCenter = (textSpan.top + textSpan.bottom) / 2;
+    if (
+      Number.isFinite(spanCenter)
+      && spanCenter >= rr.top - 12
+      && spanCenter <= rr.bottom + 12
+    ) {
+      return spanCenter - areaRectTop;
+    }
   }
-  const rr = blockEl.getBoundingClientRect();
   if (blockEl.classList.contains('feishu-code-block')) {
     const toolbar = blockEl.querySelector('.feishu-code-block__toolbar') as HTMLElement | null;
     const tr = toolbar?.getBoundingClientRect();
@@ -2402,10 +2432,15 @@ export default function Editor({
 
   const updateBlockTools = useCallback((editorInstance: any) => {
     if (readOnly || !editorAreaRef.current) return;
-    const row = activeBlockElRef.current;
-    if (!row?.isConnected) return;
-
     const selectedRow = getBlockDomFromEditor(editorInstance);
+    let row = activeBlockElRef.current;
+    if (!row?.isConnected) {
+      row = selectedRow;
+      const isEmptyParagraph = row?.tagName.toLowerCase() === 'p'
+        && (row.textContent ?? '').replace(/\u200b/g, '').trim() === '';
+      if (!row?.isConnected || !isEmptyParagraph) return;
+      activeBlockElRef.current = row;
+    }
     if (selectedRow && selectedRow !== row) return;
 
     const { from, to } = editorInstance.state.selection;
@@ -2420,9 +2455,10 @@ export default function Editor({
       : getCurrentBlockType(editorInstance);
 
     setBlockTools(prev => {
-      if (!prev.visible) return prev;
+      if (!prev.visible && !(isEmpty && blockType === 'paragraph')) return prev;
       return {
         ...prev,
+        visible: true,
         top,
         left,
         type: blockType,
@@ -2496,7 +2532,11 @@ export default function Editor({
   );
 
   const resolveHoveredBlockInfo = useCallback(
-    (target: EventTarget | null): NonNullable<ReturnType<typeof getElementBlockInfo>> | 'keep' | null => {
+    (
+      target: EventTarget | null,
+      clientX?: number,
+      clientY?: number,
+    ): NonNullable<ReturnType<typeof getElementBlockInfo>> | 'keep' | null => {
       if (!(target instanceof Element)) return null;
       if (isBlockToolsOverlayElement(target)) return 'keep';
 
@@ -2509,6 +2549,30 @@ export default function Editor({
         const innerBlock = columnEl ? findBlockContentInColumn(columnEl) : null;
         if (innerBlock) return getElementBlockInfo(innerBlock);
         return 'keep';
+      }
+
+      if (clientX != null && clientY != null) {
+        const editorInstance = editorRefForCatalogue.current;
+        if (editorInstance?.view?.dom instanceof HTMLElement) {
+          const emptyParagraph = findEmptyParagraphNearPoint(editorInstance.view.dom, clientX, clientY);
+          const infoAtEmptyParagraph = emptyParagraph ? getElementBlockInfo(emptyParagraph) : null;
+          if (infoAtEmptyParagraph) return infoAtEmptyParagraph;
+        }
+        const posAtPoint = editorInstance?.view.posAtCoords({ left: clientX, top: clientY });
+        if (posAtPoint) {
+          try {
+            const domAt = editorInstance.view.domAtPos(posAtPoint.pos);
+            const node = domAt.node.nodeType === Node.TEXT_NODE
+              ? domAt.node.parentElement
+              : domAt.node;
+            if (node instanceof Element) {
+              const infoAtPoint = getElementBlockInfo(node);
+              if (infoAtPoint) return infoAtPoint;
+            }
+          } catch {
+            // Ignore invalid coordinates and keep the hover state unchanged.
+          }
+        }
       }
       return null;
     },
@@ -2592,7 +2656,7 @@ export default function Editor({
       if (slashMenuVisible && slashMenuFromPlus) return;
       if (contextMenu) return;
 
-      const resolved = resolveHoveredBlockInfo(e.target);
+      const resolved = resolveHoveredBlockInfo(e.target, e.clientX, e.clientY);
       if (resolved === 'keep') return;
       if (!resolved) {
         if (blockHoverFloatingGroup.containsTarget(e.target)) {
@@ -3038,9 +3102,26 @@ export default function Editor({
     if (readOnly || !editor) return;
     if (slashMenuVisible || contextMenu) return;
     if (e.defaultPrevented) return;
-    if (e.target !== e.currentTarget && !(e.target instanceof Element && e.target.classList.contains('tiptap'))) return;
+    const target = e.target;
+    const isEmptyParagraphTarget = target instanceof HTMLElement
+      && target.matches('p')
+      && (target.textContent ?? '').replace(/\u200b/g, '').trim() === '';
+    if (
+      target !== e.currentTarget
+      && !(target instanceof Element && target.classList.contains('tiptap'))
+      && !isEmptyParagraphTarget
+    ) return;
 
     const tiptap = editor.view.dom as HTMLElement;
+    const emptyParagraphAtPoint = findEmptyParagraphNearPoint(tiptap, e.clientX, e.clientY);
+    if (emptyParagraphAtPoint) {
+      const pos = editor.view.posAtDOM(emptyParagraphAtPoint, 0);
+      const textPos = Math.max(1, Math.min(pos + 1, editor.state.doc.content.size - 1));
+      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, textPos)));
+      editor.view.focus();
+      return;
+    }
+
     const lastBlock = tiptap.lastElementChild as HTMLElement | null;
     const lastBlockRect = lastBlock?.getBoundingClientRect();
     const clickedBelowLastBlock = Boolean(lastBlockRect && e.clientY > lastBlockRect.bottom + 8);

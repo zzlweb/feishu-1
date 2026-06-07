@@ -671,11 +671,22 @@ function drawGridGroupRow(
   const top = headerHeight + rowIndex * rowHeight;
   ctx.fillStyle = '#f5f6f7';
   ctx.fillRect(0, top, contentRight, rowHeight);
-  ctx.fillStyle = '#646a73';
+  const textX = INDEX_WIDTH + PRIMARY_CELL_PADDING + row.level * 16;
+  const chevron = collapsed ? '▸' : '▾';
+  const label = `${chevron} ${row.label}`;
+  const countText = `${row.count} 条记录`;
   ctx.font = '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   ctx.textBaseline = 'middle';
-  const indent = 8 + row.level * 16;
-  ctx.fillText(`${collapsed ? '▸' : '▾'} ${row.fieldName}：${row.label}（${row.count}）`, indent, top + rowHeight / 2);
+  const y = top + rowHeight / 2;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#1f2329';
+  const countWidth = ctx.measureText(countText).width;
+  const labelMaxWidth = Math.max(0, contentRight - 12 - countWidth - 8 - textX);
+  drawText(ctx, label, textX, y, labelMaxWidth);
+  ctx.fillStyle = '#8f959e';
+  ctx.textAlign = 'right';
+  ctx.fillText(countText, contentRight - 12, y);
+  ctx.textAlign = 'left';
 }
 
 function isValidTreeDropTarget(

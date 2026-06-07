@@ -14,6 +14,7 @@ import {
   type BaseTable,
   type BaseView,
   type CellValue,
+  type GalleryViewConfig,
   type RecordHistoryEntry,
   type SelectChoice,
 } from './bitableModel';
@@ -367,7 +368,16 @@ export function BitableRecordCardModal({
   const [hiddenExpanded, setHiddenExpanded] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const hiddenFieldIds = new Set(activeView.hiddenFieldIds || []);
+  const hiddenFieldIds = useMemo(() => {
+    const hidden = new Set(activeView.hiddenFieldIds || []);
+    if (activeView.type === 'kanban') {
+      const config = activeView.config as GalleryViewConfig;
+      const groupFieldId = config.groupByFieldId
+        ?? table.fields.find(field => field.type === 'single_select')?.id;
+      if (groupFieldId) hidden.add(groupFieldId);
+    }
+    return hidden;
+  }, [activeView.config, activeView.hiddenFieldIds, activeView.type, table.fields]);
   const { visibleFields, hiddenFields } = useMemo(() => {
     const visible: BaseField[] = [];
     const hidden: BaseField[] = [];

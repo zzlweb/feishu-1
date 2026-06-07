@@ -34,10 +34,16 @@ interface Props {
   anchorRef?: RefObject<HTMLElement | null>;
 }
 
+type SlashMenuRenderPosition = {
+  top: number;
+  left: number;
+  transform?: string;
+};
+
 export default function SlashMenu({ editor, position, query, onClose, onBeforeSelect, onMouseEnter, onMouseLeave, variant = 'fixed', anchorRef }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [activeIdx, setActiveIdx] = useState(0);
-  const [renderPos, setRenderPos] = useState(position);
+  const [renderPos, setRenderPos] = useState<SlashMenuRenderPosition>(position);
   const [tooltipItem, setTooltipItem] = useState<{ item: SlashMenuItem; rect: DOMRect } | null>(null);
   const [activeSubmenu, setActiveSubmenu] = useState<{
     kind: 'tableGrid' | 'columnsCount' | 'templateList' | 'buttonType';
@@ -77,18 +83,27 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     let { left, top } = position;
+    let transform: string | undefined;
 
     const anchorEl = anchorRef?.current;
     if (anchorEl?.isConnected) {
       const anchor = anchorEl.getBoundingClientRect();
-      left = anchor.left + gap;
+      const fitsLeft = anchor.left - menuRect.width >= pad;
+      transform = fitsLeft ? 'translateX(-100%)' : 'none';
+      left = fitsLeft
+        ? anchor.left + gap
+        : Math.max(pad, Math.min(anchor.right + 4, vw - menuRect.width - pad));
       top = anchor.top + anchor.height / 2 - menuRect.height / 2;
     } else {
       left = Math.max(pad, Math.min(left, vw - menuRect.width - pad));
     }
 
     top = Math.max(pad, Math.min(top, vh - menuRect.height - pad));
-    setRenderPos(prev => (prev.left === left && prev.top === top ? prev : { left, top }));
+    setRenderPos(prev => (
+      prev.left === left && prev.top === top && prev.transform === transform
+        ? prev
+        : { left, top, transform }
+    ));
   }, [position, variant, anchorRef, query]);
 
   useEffect(() => {
@@ -314,7 +329,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
       <div
         className={`slash-menu slash-menu-feishu${variant === 'anchored' ? ' slash-menu--anchored' : ''}${anchorRef ? ' slash-menu--plus-anchor' : ''}`}
         ref={menuRef}
-        style={variant === 'anchored' ? undefined : { top: renderPos.top, left: renderPos.left }}
+        style={variant === 'anchored' ? undefined : { top: renderPos.top, left: renderPos.left, transform: renderPos.transform }}
         onMouseEnter={onMouseEnter}
         onScroll={hideTooltip}
         onMouseLeave={e => {

@@ -18,6 +18,17 @@ function isFirstBlockInParent(editor: Editor): boolean {
   return $from.index($from.depth - 1) === 0;
 }
 
+function deleteCurrentEmptyParagraphBlock(editor: Editor): boolean {
+  const { $from } = editor.state.selection;
+  if ($from.parent.type.name !== 'paragraph') return false;
+  if (!isCurrentBlockEmpty(editor)) return false;
+
+  const depth = $from.depth;
+  if (depth !== 1) return false;
+  if (editor.state.doc.childCount <= 1) return false;
+  return deleteAncestorBlock(editor, depth);
+}
+
 function deleteAncestorBlock(editor: Editor, depth: number): boolean {
   const { $from } = editor.state.selection;
   const node = $from.node(depth);
@@ -62,6 +73,7 @@ function deleteCurrentEmptyNestedBlock(editor: Editor): boolean {
 
   const { $from } = editor.state.selection;
   if (deleteEmptyContainerBlock(editor)) return true;
+  if (deleteCurrentEmptyParagraphBlock(editor)) return true;
 
   for (let d = $from.depth; d > 0; d--) {
     const nodeType = $from.node(d).type.name;
@@ -111,7 +123,7 @@ function handleFeishuBackspace(editor: Editor): boolean {
 
   if (parentType === 'paragraph') {
     if (isFirstBlockInParent(editor)) {
-      return true;
+      return deleteCurrentEmptyParagraphBlock(editor) || true;
     }
     return editor.chain().focus().joinBackward().run();
   }
