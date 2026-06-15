@@ -1,6 +1,6 @@
 import React, { useCallback, forwardRef } from 'react';
 import { DOC_TITLE_CATALOGUE_ID, type HeadingItem } from '../../types';
-import { resolveBlockElement } from '../Editor/blockDom';
+import { resolveBlockElement } from '../Editor/blocks/blockDom';
 import './Layout.less';
 
 interface SidebarProps {

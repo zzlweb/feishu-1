@@ -25,7 +25,7 @@ const kanbanModel = {
     {
       id: 'rec_todo',
       tableId: 'tbl_kanban_e2e',
-      fields: { title: '', note: '', status: '未开始' },
+      fields: { title: '任务 1', note: '', status: '未开始' },
       createdAt: '2026-06-07T00:00:00.000Z',
       updatedAt: '2026-06-07T00:00:00.000Z',
       createdBy: 'E2E',
@@ -105,7 +105,7 @@ test('opens record modal when clicking a kanban card', async ({ page }) => {
 
   await page.locator('.base-kanban__card-body').first().click();
   await expect(page.locator('.bitable-record-card-mask')).toBeVisible();
-  await expect(page.locator('.bitable-card-modal-header-v2-title')).toContainText('未命名记录');
+  await expect(page.locator('.bitable-card-modal-header-v2-title')).toContainText('任务 1');
   await expect(page.locator('.base-kanban__card.is-selected')).toHaveCount(1);
   await expect(page.locator('.bitable-item-view-tab.is-active')).toContainText('详情');
   await expect(page.locator('.bitable-field-name', { hasText: '任务名' })).toBeVisible();

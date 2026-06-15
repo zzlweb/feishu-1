@@ -18,57 +18,57 @@ import { common, createLowlight } from 'lowlight';
 import 'katex/dist/katex.min.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { MessagePlugin } from 'tdesign-react';
-import ContextMenu from './ContextMenu';
-import BitableContextMenu from './BitableContextMenu';
-import ImageContextMenu from './ImageContextMenu';
-import TableContextMenu from './TableContextMenu';
-import { computeBlockPanelPosition, useHoverFloatingGroup } from './floatingPanel';
-import { computeTableBlockMenuPosition } from './tableMenu';
-import SlashMenu from './SlashMenu';
-import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH, type ButtonActionType } from './slashMenuConfig';
-import SelectionBubble from './SelectionBubble';
-import ImageBlockToolbar from './ImageBlockToolbar';
-import ImageCropOverlay from './ImageCropOverlay';
-import { useImageBlockInteractions } from './useImageBlockInteractions';
-import { getActiveImageCropSession } from './imageCropSession';
-import { normalizeImageAlign, type ImageAlign } from './imageBlockUtils';
-import { removeCommentHighlightsFromEditor } from './commentDocumentSync';
+import ContextMenu from './menus/ContextMenu';
+import BitableContextMenu from '../Bitable/BitableContextMenu';
+import ImageContextMenu from './media/ImageContextMenu';
+import TableContextMenu from './tables/TableContextMenu';
+import { computeBlockPanelPosition, useHoverFloatingGroup } from './shared/floatingPanel';
+import { computeTableBlockMenuPosition } from './tables/tableMenu';
+import SlashMenu from './menus/SlashMenu';
+import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH, type ButtonActionType } from './menus/slashMenuConfig';
+import SelectionBubble from './toolbars/SelectionBubble';
+import ImageBlockToolbar from './media/ImageBlockToolbar';
+import ImageCropOverlay from './media/ImageCropOverlay';
+import { useImageBlockInteractions } from './media/useImageBlockInteractions';
+import { getActiveImageCropSession } from './media/imageCropSession';
+import { normalizeImageAlign, type ImageAlign } from './media/imageBlockUtils';
+import { removeCommentHighlightsFromEditor } from './blocks/commentDocumentSync';
 import { DOC_TITLE_CATALOGUE_ID, type HeadingItem } from '../../types';
 import { HelpCircleIcon, BookOpenIcon } from 'tdesign-icons-react';
 import { wrapIcon } from '../../icons/wrap';
 import { parseJsonPayload, readApiPayload } from '../../api/http';
 import { IconAddOutlined, IconDragOutlined } from '../../icons/feishuDoc';
-import BlockGutterGlyph from './BlockGutterGlyph';
-import EmojiPicker from './EmojiPicker';
-import { HighlightBlock } from './HighlightBlock';
-import { BlockIndent } from './blockIndent';
-import { copyCurrentBlockLink, scrollToBlockFromHash } from './blockLink';
-import { resolveInlineBlockElementFromEditor, syncEditorSelectionToAnchoredBlock } from './blockAnchorSelection';
-import { moveDraggableBlock, resolveDraggableBlockPos } from './feishuBlockDrag';
-import { FeishuBlockBackspace } from './feishuBlockBackspace';
-import { FeishuBoxSelectionKeyboard } from './feishuBoxSelectionKeyboard';
-import { FeishuTrailingParagraph } from './feishuTrailingParagraph';
-import BoxBlockSelectionLayer from './FeishuBoxBlockSelection';
-import { FeishuHeading, readHeadingId } from './feishuHeading';
-import { FeishuBlockId, makeFeishuBlockId } from './feishuBlockId';
-import { feishuTableExtensions } from './feishuTable';
-import { localColumnsExtensions } from './columnsExtensions';
-import FeishuTableOverlay from './FeishuTableOverlay';
+import BlockGutterGlyph from './blocks/BlockGutterGlyph';
+import EmojiPicker from './panels/EmojiPicker';
+import { HighlightBlock } from './blocks/HighlightBlock';
+import { BlockIndent } from './blocks/blockIndent';
+import { copyCurrentBlockLink, scrollToBlockFromHash } from './blocks/blockLink';
+import { resolveInlineBlockElementFromEditor, syncEditorSelectionToAnchoredBlock } from './blocks/blockAnchorSelection';
+import { moveDraggableBlock, resolveDraggableBlockPos } from './blocks/feishuBlockDrag';
+import { FeishuBlockBackspace } from './blocks/feishuBlockBackspace';
+import { FeishuBoxSelectionKeyboard } from './blocks/feishuBoxSelectionKeyboard';
+import { FeishuTrailingParagraph } from './blocks/feishuTrailingParagraph';
+import BoxBlockSelectionLayer from './blocks/FeishuBoxBlockSelection';
+import { FeishuHeading, readHeadingId } from './blocks/feishuHeading';
+import { FeishuBlockId, makeFeishuBlockId } from './blocks/feishuBlockId';
+import { feishuTableExtensions } from './tables/feishuTable';
+import { localColumnsExtensions } from './blocks/columnsExtensions';
+import FeishuTableOverlay from './tables/FeishuTableOverlay';
 import { CellSelection } from '@tiptap/pm/tables';
 import {
   isCellSelectionInTableHost,
   resolveTableHostFromEditor,
   resolveTableHostFromElement,
-} from './tableDom';
-import { selectTableNodeFromHost } from './tableInsert';
+} from './tables/tableDom';
+import { selectTableNodeFromHost } from './tables/tableInsert';
 import {
   getHeadingIdFromBlockEl,
   headingBlockHasChildren,
   syncAllHeadingCollapseStates,
-} from './headingCollapse';
-import { insertTableFromClipboardData } from './tableInsert';
-import { registerMediaUploadFile } from './mediaUploadRegistry';
-import BitableBlockView from './BitableBlockView';
+} from './blocks/headingCollapse';
+import { insertTableFromClipboardData } from './tables/tableInsert';
+import { registerMediaUploadFile } from './media/mediaUploadRegistry';
+import BitableBlockView from '../Bitable/BitableBlockView';
 import './Editor.less';
 
 const Notebook = wrapIcon(BookOpenIcon);
@@ -1589,7 +1589,7 @@ const LocalButtonBlock = TiptapNode.create({
   },
 });
 
-import { FormulaBlockView } from './FormulaBlockView';
+import { FormulaBlockView } from './blocks/FormulaBlockView';
 
 const LocalFormulaBlock = TiptapNode.create({
   name: 'localFormulaBlock',

@@ -3,7 +3,7 @@ import { Dropdown, DialogPlugin, MessagePlugin } from 'tdesign-react';
 import type { DropdownOption } from 'tdesign-react';
 import type { RefObject } from 'react';
 import type { Comment } from '../../types';
-import { resolveBlockElement } from '../Editor/blockDom';
+import { resolveBlockElement } from '../Editor/blocks/blockDom';
 import {
   CommentPanelComposer,
   CommentPanelHeader,

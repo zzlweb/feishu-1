@@ -20,8 +20,8 @@ import {
   findOrphanedComments,
   getCommentThreadKey,
   hasOpenCommentSidebarContent,
-} from '../Editor/commentDocumentSync';
-import { resolveBlockElement } from '../Editor/blockDom';
+} from '../Editor/blocks/commentDocumentSync';
+import { resolveBlockElement } from '../Editor/blocks/blockDom';
 import './Layout.less';
 
 export default function DocumentPage() {
