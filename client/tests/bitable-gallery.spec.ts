@@ -364,15 +364,3 @@ test('shows the active gallery icon and creates a gantt view over shared records
   await expect(block.locator('.base-gallery-card')).toHaveCount(3);
 });
 
-test('inserts a standalone gantt block from the slash menu', async ({ page }) => {
-  await openGallery(page);
-  await page.locator('.ProseMirror p', { hasText: 'after' }).click();
-  await page.keyboard.press('End');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('/甘特图');
-  await page.locator('.slash-menu-feishu').getByText('甘特图', { exact: true }).click();
-
-  const gantt = page.locator('.feishu-base-block[data-base-view-type="gantt"]').last();
-  await expect(gantt).toBeVisible();
-  await expect(gantt.locator('.base-gantt__bar')).toHaveCount(3);
-});

@@ -107,8 +107,6 @@ export function insertSlashItemAt(editor: Editor, sectionTitle: string, item: Sl
   if (sectionTitle === '多维表格') {
     const view = item.label === '画册'
       ? 'gallery'
-      : item.label === '甘特图'
-      ? 'gantt'
       : item.label === '看板'
       ? 'kanban'
       : 'grid';

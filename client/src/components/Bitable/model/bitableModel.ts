@@ -20,6 +20,17 @@ export type BaseFieldType =
   | 'updated_by';
 
 export type BaseViewType = 'grid' | 'kanban' | 'calendar' | 'gallery' | 'gantt' | 'form';
+
+export const HIDDEN_VIEW_TYPES: ReadonlySet<BaseViewType> = new Set(['gantt']);
+
+export function isViewTypeVisible(type: BaseViewType): boolean {
+  return !HIDDEN_VIEW_TYPES.has(type);
+}
+
+export function getVisibleViews(table: BaseTable): BaseView[] {
+  return table.views.filter(view => isViewTypeVisible(view.type));
+}
+
 export type FieldId = string;
 export type UserId = string;
 
@@ -716,6 +727,12 @@ function normalizeTable(raw: BaseTable): BaseTable {
       return values;
     }, {}),
   }));
+  const visibleViews = normalizedViews.filter(view => isViewTypeVisible(view.type));
+  const activeCandidate = normalizedViews.find(view => view.id === raw.activeViewId);
+  const activeViewId = activeCandidate && isViewTypeVisible(activeCandidate.type)
+    ? activeCandidate.id
+    : (visibleViews[0]?.id ?? normalizedViews[0]?.id);
+
   return {
     ...raw,
     id: tableId,
@@ -724,7 +741,7 @@ function normalizeTable(raw: BaseTable): BaseTable {
     records: normalizeRecordTreeOrder(records),
     views: normalizedViews,
     primaryFieldId,
-    activeViewId: normalizedViews.some(view => view.id === raw.activeViewId) ? raw.activeViewId : normalizedViews[0].id,
+    activeViewId,
   };
 }
 
@@ -782,7 +799,9 @@ export function serializeBaseTable(table: BaseTable) {
 }
 
 export function getActiveView(table: BaseTable) {
-  return table.views.find(view => view.id === table.activeViewId) || table.views[0];
+  const active = table.views.find(view => view.id === table.activeViewId);
+  if (active && isViewTypeVisible(active.type)) return active;
+  return getVisibleViews(table)[0] || table.views[0];
 }
 
 export function getGalleryConfig(table: BaseTable, view: BaseView): GalleryViewConfig {
@@ -1240,6 +1259,7 @@ export function reorderViews(table: BaseTable, fromIndex: number, toIndex: numbe
 }
 
 export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt' | 'kanban') {
+  if (!isViewTypeVisible(type)) return table;
   if (type === 'gantt') {
     let fields = table.fields;
     const dateFields = fields.filter(field => field.type === 'date');

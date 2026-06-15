@@ -5,7 +5,7 @@ import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
 import { SlashGlyphBitableGrid, SlashGlyphGallery, SlashGlyphGantt } from '../../icons/slashMenuGlyphs';
 import { BitableAddFieldPopover, BitableEditFieldPopover, buildNewFieldPayload, emptyDefaultValue, type CreateFieldInput, type UpdateFieldInput } from './fields/BitableAddFieldPopover';
 import { FieldLockGlyph, fieldTypeGlyph } from './fields/bitableFieldTypeIcons';
-import { BitableTooltip } from './shared/BitableViewShared';
+import { BitableTooltip, useBitablePanelHoverHandlers } from './shared/BitableViewShared';
 import { parseJsonPayload } from '../../api/http';
 import {
   addView,
@@ -29,6 +29,8 @@ import {
   getAttachments,
   getGanttConfig,
   getGalleryConfig,
+  getVisibleViews,
+  isViewTypeVisible,
   getGridGroupFieldIds,
   resolveGridGroupRules,
   groupRecords,
@@ -262,10 +264,9 @@ function updateView(table: BaseTable, viewId: string, update: (view: BaseView) =
   return { ...table, views: table.views.map(view => view.id === viewId ? update(view) : view) };
 }
 
-const CREATE_VIEW_OPTIONS: Array<{ type: 'grid' | 'gantt' | 'gallery' | 'kanban'; label: string }> = [
+const CREATE_VIEW_OPTIONS: Array<{ type: 'grid' | 'gallery' | 'kanban'; label: string }> = [
   { type: 'grid', label: '表格视图' },
   { type: 'kanban', label: '看板视图' },
-  { type: 'gantt', label: '甘特视图' },
   { type: 'gallery', label: '画册视图' },
 ];
 
@@ -304,7 +305,7 @@ function ViewSidebarMenu({
   contextMenuRef: RefObject<HTMLDivElement>;
   canDeleteView: boolean;
   onSelectView: (viewId: string) => void;
-  onCreateView: (type: 'grid' | 'gallery' | 'gantt' | 'kanban') => void;
+  onCreateView: (type: 'grid' | 'gallery' | 'kanban') => void;
   onOpenContextMenu: (btn: HTMLElement, viewId: string) => void;
   onRenameView: (viewId: string) => void;
   onRemoveView: (viewId: string) => void;
@@ -316,10 +317,12 @@ function ViewSidebarMenu({
   onDrop: (event: DragEvent, index: number) => void;
   onDragEnd: () => void;
 }) {
+  const visibleViews = views.filter(view => isViewTypeVisible(view.type));
+
   return (
     <div className="base-view-sidebar">
       <ul className={`base-view-sidebar__list${draggingViewIndex != null ? ' is-sorting' : ''}`}>
-        {views.map((view, index) => (
+        {visibleViews.map((view, index) => (
           <li
             key={view.id}
             className={[
@@ -913,9 +916,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     setIsRenamingView(false);
   };
 
-  const handleViewDragStart = (event: DragEvent, index: number) => {
-    dragFromIndexRef.current = index;
-    setDraggingViewIndex(index);
+  const handleViewDragStart = (event: DragEvent, visibleIndex: number) => {
+    const viewId = getVisibleViews(table)[visibleIndex]?.id;
+    const fromIndex = viewId ? table.views.findIndex(view => view.id === viewId) : visibleIndex;
+    dragFromIndexRef.current = fromIndex >= 0 ? fromIndex : null;
+    setDraggingViewIndex(visibleIndex);
     setDragOverIndex(null);
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', String(index));
@@ -928,22 +933,24 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     event.dataTransfer.setDragImage(dragGhostRef.current, 0, 0);
   };
 
-  const handleViewDragOver = (event: DragEvent, index: number) => {
+  const handleViewDragOver = (event: DragEvent, visibleIndex: number) => {
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'move';
-    if (dragFromIndexRef.current === index) {
+    if (draggingViewIndex === visibleIndex) {
       setDragOverIndex(null);
       return;
     }
-    setDragOverIndex(index);
+    setDragOverIndex(visibleIndex);
   };
 
-  const handleViewDrop = (event: DragEvent, toIndex: number) => {
+  const handleViewDrop = (event: DragEvent, visibleIndex: number) => {
     event.preventDefault();
     event.stopPropagation();
     const fromIndex = dragFromIndexRef.current;
-    if (fromIndex != null && fromIndex !== toIndex) {
+    const toViewId = getVisibleViews(table)[visibleIndex]?.id;
+    const toIndex = toViewId ? table.views.findIndex(view => view.id === toViewId) : visibleIndex;
+    if (fromIndex != null && fromIndex !== toIndex && toIndex >= 0) {
       mutate(current => reorderViews(current, fromIndex, toIndex));
     }
     dragFromIndexRef.current = null;
@@ -957,7 +964,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     setDraggingViewIndex(null);
   };
 
-  const createView = (type: 'grid' | 'gallery' | 'gantt' | 'kanban') => {
+  const createView = (type: 'grid' | 'gallery' | 'kanban') => {
+    if (!isViewTypeVisible(type)) return;
     mutate(current => addView(current, type));
     setShowViewMenu(false);
     setActiveToolbarPanel(null);
@@ -2047,6 +2055,16 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const gridRowHeight = (activeView.config as GridViewConfig).rowHeight || 'low';
   const useDocFloatToolbar = activeView.type === 'gallery' || activeView.type === 'kanban';
   const showDocFloatToolbar = isViewToolsVisible || showSettings || Boolean(activeToolbarPanel);
+  const closeSettingsPanel = useCallback(() => setShowSettings(false), []);
+  const closeActiveToolbarPanel = useCallback(() => setActiveToolbarPanel(null), []);
+  const floatSettingsHover = useBitablePanelHoverHandlers(closeSettingsPanel, showSettings && useDocFloatToolbar);
+  const docSettingsHover = useBitablePanelHoverHandlers(closeSettingsPanel, showSettings && !useDocFloatToolbar);
+  const fieldsPanelHover = useBitablePanelHoverHandlers(closeActiveToolbarPanel, activeToolbarPanel === 'fields');
+  const groupPanelHover = useBitablePanelHoverHandlers(closeActiveToolbarPanel, activeToolbarPanel === 'group');
+  const filterPanelHover = useBitablePanelHoverHandlers(closeActiveToolbarPanel, activeToolbarPanel === 'filter');
+  const sortPanelHover = useBitablePanelHoverHandlers(closeActiveToolbarPanel, activeToolbarPanel === 'sort');
+  const sharePanelHover = useBitablePanelHoverHandlers(closeActiveToolbarPanel, activeToolbarPanel === 'share');
+  const rowHeightPanelHover = useBitablePanelHoverHandlers(closeActiveToolbarPanel, activeToolbarPanel === 'rowHeight');
 
   useEffect(() => {
     if (cardRecordId && !table.records.some(record => record.id === cardRecordId)) setCardRecordId(null);
@@ -2232,7 +2250,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 draggingViewIndex={draggingViewIndex}
                 contextMenuViewId={viewContextMenuId}
                 contextMenuRef={viewContextMenuRef}
-                canDeleteView={table.views.length > 1}
+                canDeleteView={getVisibleViews(table).length > 1}
                 onSelectView={setView}
                 onCreateView={createView}
                 onOpenContextMenu={openViewContextMenu}
@@ -2267,7 +2285,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         <div className={`bitable-float-toolbar-wrapper${showDocFloatToolbar ? ' show' : ''}`}>
           <div className="bitable-float-toolbar-list">
             <div className="bitable-float-toolbar-btn-field">
-              <div className="bitable-float-toolbar-btn-wrapper">
+              <div
+                className={`bitable-float-toolbar-btn-wrapper${showSettings ? ' is-panel-open' : ''}`}
+                {...floatSettingsHover}
+              >
                 <BitableTooltip tip={settingsLabel} placement="bottom">
                   <button
                     type="button"
@@ -2302,7 +2323,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             </div>
             {activeView.type === 'kanban' && (
             <div className="bitable-float-toolbar-kanban-group-btn">
-              <div className="bitable-float-toolbar-btn-wrapper">
+              <div
+                className={`bitable-float-toolbar-btn-wrapper${activeToolbarPanel === 'group' ? ' is-panel-open' : ''}`}
+                {...groupPanelHover}
+              >
                 <BitableTooltip tip="分组" placement="bottom">
                   <button
                     type="button"
@@ -2329,7 +2353,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             </div>
             )}
             <div className="bitable-float-toolbar-btn-filter">
-              <div className="bitable-float-toolbar-btn-wrapper">
+              <div
+                className={`bitable-float-toolbar-btn-wrapper${activeToolbarPanel === 'filter' ? ' is-panel-open' : ''}`}
+                {...filterPanelHover}
+              >
                 <BitableTooltip tip="筛选" placement="bottom">
                   <button
                     type="button"
@@ -2357,7 +2384,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               </div>
             </div>
             <div className="bitable-float-toolbar-btn-sort">
-              <div className="bitable-float-toolbar-btn-wrapper">
+              <div
+                className={`bitable-float-toolbar-btn-wrapper${activeToolbarPanel === 'sort' ? ' is-panel-open' : ''}`}
+                {...sortPanelHover}
+              >
                 <BitableTooltip tip="排序" placement="bottom">
                   <button
                     type="button"
@@ -2382,7 +2412,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               </div>
             </div>
             <div className="bitable-doc-float-toolbar-separator" aria-hidden />
-            <div className="bitable-float-toolbar-btn-wrapper">
+            <div
+              className={`bitable-float-toolbar-btn-wrapper${activeToolbarPanel === 'share' ? ' is-panel-open' : ''}`}
+              {...sharePanelHover}
+            >
               <BitableTooltip tip="在新窗口打开" placement="bottom">
                 <button
                   type="button"
@@ -2412,7 +2445,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         </div>
         ) : (
         <div className="base-viewbar__tools">
-          <span className="base-viewbar__tool-anchor" ref={fieldPanelAnchorRef}>
+          <span
+            className={`base-viewbar__tool-anchor${activeToolbarPanel === 'fields' ? ' is-panel-open' : ''}`}
+            ref={fieldPanelAnchorRef}
+            {...fieldsPanelHover}
+          >
             <BitableTooltip tip="字段配置" placement="bottom">
               <button
                 type="button"
@@ -2436,7 +2473,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               />
             )}
           </span>
-          <span className="base-viewbar__tool-anchor">
+          <span
+            className={`base-viewbar__tool-anchor${showSettings && (activeView.type === 'grid' || activeView.type === 'gantt') ? ' is-panel-open' : ''}`}
+            {...docSettingsHover}
+          >
             <BitableTooltip tip={useHierarchySettingsIcon ? hierarchySettingsLabel : settingsLabel} placement="bottom">
               <button
                 type="button"
@@ -2458,8 +2498,22 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 onTable={mutate}
               />
             )}
+            {showSettings && activeView.type === 'gantt' && (
+              <GanttSettings
+                table={table}
+                view={activeView}
+                config={ganttConfig}
+                panelRef={settingsRef}
+                onClose={() => setShowSettings(false)}
+                onConfig={setGanttConfig}
+                onTable={mutate}
+              />
+            )}
           </span>
-          <span className="base-viewbar__tool-anchor">
+          <span
+            className={`base-viewbar__tool-anchor${activeToolbarPanel === 'filter' ? ' is-panel-open' : ''}`}
+            {...filterPanelHover}
+          >
             <BitableTooltip tip="筛选" placement="bottom">
               <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'filter' || hasActiveFilters ? ' is-active' : ''}`} aria-label="筛选" onClick={() => openToolbarPanel('filter')}><ToolGlyphFilter /></button>
             </BitableTooltip>
@@ -2475,7 +2529,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               />
             )}
           </span>
-          <span className="base-viewbar__tool-anchor">
+          <span
+            className={`base-viewbar__tool-anchor${activeToolbarPanel === 'group' ? ' is-panel-open' : ''}`}
+            {...groupPanelHover}
+          >
             <BitableTooltip tip="分组" placement="bottom">
               <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'group' || hasActiveGroups ? ' is-active' : ''}`} aria-label="分组" onClick={() => openToolbarPanel('group')}>
                 <ToolGlyphGroup />
@@ -2502,7 +2559,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
               />
             )}
           </span>
-          <span className="base-viewbar__tool-anchor">
+          <span
+            className={`base-viewbar__tool-anchor${activeToolbarPanel === 'sort' ? ' is-panel-open' : ''}`}
+            {...sortPanelHover}
+          >
             <BitableTooltip tip="排序" placement="bottom">
               <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'sort' || hasSortRules ? ' is-active' : ''}`} aria-label="排序" onClick={() => openToolbarPanel('sort')}>
                 <ToolGlyphSort />
@@ -2519,7 +2579,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             )}
           </span>
           {activeView.type === 'grid' && (
-            <span className="base-viewbar__tool-anchor">
+            <span
+              className={`base-viewbar__tool-anchor${activeToolbarPanel === 'rowHeight' ? ' is-panel-open' : ''}`}
+              {...rowHeightPanelHover}
+            >
               <BitableTooltip tip="行高" placement="bottom">
                 <button
                   type="button"
@@ -2548,7 +2611,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             <button type="button" className={`base-viewbar__tool${commentPanelOpen ? ' is-active' : ''}`} aria-label="评论" onClick={toggleCommentPanel}><ToolGlyphComment /></button>
           </BitableTooltip>
           <span className="base-viewbar__tool-sep" aria-hidden />
-          <span className="base-viewbar__tool-anchor">
+          <span
+            className={`base-viewbar__tool-anchor${activeToolbarPanel === 'share' ? ' is-panel-open' : ''}`}
+            {...sharePanelHover}
+          >
             <BitableTooltip tip="在新窗口打开" placement="bottom">
               <button type="button" className={`base-viewbar__tool${activeToolbarPanel === 'share' ? ' is-active' : ''}`} aria-label="分享" onClick={() => openToolbarPanel('share')}><ToolGlyphShare /></button>
             </BitableTooltip>
@@ -2572,17 +2638,6 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       </div>
       </div>
       {bitableCommentPanel && commentTrackHost && createPortal(bitableCommentPanel, commentTrackHost)}
-      {showSettings && activeView.type === 'gantt' && (
-        <GanttSettings
-          table={table}
-          view={activeView}
-          config={ganttConfig}
-          panelRef={settingsRef}
-          onClose={() => setShowSettings(false)}
-          onConfig={setGanttConfig}
-          onTable={mutate}
-        />
-      )}
       {deleteViewTarget && (
         <DeleteViewDialog
           viewName={deleteViewTarget.name}

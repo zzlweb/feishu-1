@@ -32,7 +32,6 @@ import {
   SlashGlyphSubDoc,
   SlashGlyphBitableGrid,
   SlashGlyphGallery,
-  SlashGlyphGantt,
 } from '../../../icons/slashMenuGlyphs';
 
 export type DocIcon = ComponentType<{
@@ -338,7 +337,6 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
       { Icon: SlashGlyphBitableGrid, iconColor: '#34c759', label: '表格', matchText: '多维表格 bitable database grid', action: e => insertBitableBlockFromSlash(e, 'grid') },
       { Icon: SlashGlyphBitableGrid, iconColor: '#3370ff', label: '看板', matchText: '多维表格 kanban 看板', action: e => insertBitableBlockFromSlash(e, 'kanban') },
       { Icon: SlashGlyphGallery, iconColor: '#7b61ff', label: '画册', matchText: '多维表格 gallery album 画册', action: e => insertBitableBlockFromSlash(e, 'gallery') },
-      { Icon: SlashGlyphGantt, iconColor: '#e9519f', label: '甘特图', matchText: '多维表格 gantt 甘特图 时间轴', action: e => insertBitableBlockFromSlash(e, 'gantt') },
     ],
   },
 ];

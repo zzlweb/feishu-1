@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type MouseEvent, type MutableRefObject, type Ref } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type MutableRefObject, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import * as React from 'react';
 import { SelGlyphChevronDown } from '../../../icons/selectionToolbarGlyphs';
@@ -275,4 +275,41 @@ export function GridFieldHeader({
 export function attachmentCellLabel(record: BaseRecord, fieldId: string) {
   const count = getAttachments(record, fieldId).length;
   return count ? `${count} 个附件` : '+ 添加附件';
+}
+
+export const BITABLE_PANEL_PORTAL_SELECTOR =
+  '.bitable-field-condition-picker__menu--portal, .bitable-group-field-picker__menu--portal, .base-filter-select__menu--portal, .base-field-edit-popover-portal, .base-b-field-type-picker-portal, .base-b-select-color-panel, .base-b-select-default-panel, .base-view-contextmenu--portal';
+
+export function isBitablePanelPortalTarget(node: EventTarget | null): boolean {
+  return node instanceof Element && Boolean(node.closest(BITABLE_PANEL_PORTAL_SELECTOR));
+}
+
+export function useBitablePanelHoverHandlers(onClose: () => void, enabled = true) {
+  const timerRef = useRef<number>();
+
+  useEffect(() => () => {
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+  }, []);
+
+  const cancelClose = useCallback(() => {
+    if (timerRef.current) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    }
+  }, []);
+
+  const scheduleClose = useCallback((event?: MouseEvent<HTMLElement>) => {
+    if (!enabled) return;
+    cancelClose();
+    timerRef.current = window.setTimeout(() => {
+      const related = event?.relatedTarget;
+      if (isBitablePanelPortalTarget(related)) return;
+      onClose();
+    }, 120);
+  }, [cancelClose, enabled, onClose]);
+
+  return {
+    onMouseEnter: cancelClose,
+    onMouseLeave: scheduleClose,
+  };
 }
