@@ -19,6 +19,8 @@
 @editor-page-padding-right: 56px;
 /** 目录轨与正文之间的固定间距（轨宽由 Layout 中 .doc-page-catalogue-rail 占位） */
 @editor-content-rail-gap: 24px;
+/** 顶层块之间的垂直间距，对齐飞书行与行之间的留白 */
+@editor-block-gap: 12px;
 
 .editor-wrap {
   display: flex;
@@ -294,12 +296,12 @@
         }
 
         > * + * {
-          margin-top: 6px;
+          margin-top: @editor-block-gap;
         }
 
         > * + .feishu-code-block,
         > .feishu-code-block + * {
-          margin-top: 16px;
+          margin-top: max(@editor-block-gap, 16px);
         }
 
         .feishu-block-link-highlight {
@@ -319,7 +321,12 @@
         h5 { font-size: 14px; font-weight: 600; line-height: 1.55; }
         h6 { font-size: 13px; font-weight: 600; line-height: 1.55; color: @text-secondary; }
 
-        p { font-size: 15px; line-height: 26px; color: @text-primary; }
+        p {
+          font-size: 15px;
+          line-height: 26px;
+          min-height: 26px;
+          color: @text-primary;
+        }
 
         // 正文/标题块缩进（选区工具栏「增加缩进」，与列表嵌套独立）
         .loop-block-indent(@i) when (@i > 0) {
@@ -1059,8 +1066,11 @@
         .feishu-divider {
           display: flex;
           align-items: center;
-          padding: 10px 0;
+          width: 100%;
+          max-width: 100%;
           box-sizing: border-box;
+          margin: @editor-block-gap 0;
+          padding: 0;
           cursor: default;
           user-select: none;
           border-radius: 4px;
@@ -1080,6 +1090,8 @@
 
           .feishu-divider__line {
             flex: 1;
+            width: 100%;
+            min-width: 0;
             height: 1px;
             background: @border-color;
             border: none;
@@ -2402,6 +2414,10 @@
 
           > :last-child {
             margin-bottom: 0;
+          }
+
+          > * + * {
+            margin-top: @editor-block-gap;
           }
 
           p {

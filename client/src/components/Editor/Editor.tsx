@@ -43,6 +43,8 @@ import EmojiPicker from './panels/EmojiPicker';
 import { HighlightBlock } from './blocks/HighlightBlock';
 import { BlockIndent } from './blocks/blockIndent';
 import { copyCurrentBlockLink, scrollToBlockFromHash } from './blocks/blockLink';
+import { resolveListItemHighlightRect } from './blocks/blockDom';
+import { normalizeHorizontalRulesOutOfLists } from './blocks/blockOperations';
 import { resolveInlineBlockElementFromEditor, syncEditorSelectionToAnchoredBlock } from './blocks/blockAnchorSelection';
 import { moveDraggableBlock, resolveDraggableBlockPos } from './blocks/feishuBlockDrag';
 import { FeishuBlockBackspace } from './blocks/feishuBlockBackspace';
@@ -668,6 +670,14 @@ function FeishuDividerView({ node, selected, getPos, editor }: NodeViewProps) {
 const FeishuHorizontalRule = HorizontalRule.extend({
   addNodeView() {
     return ReactNodeViewRenderer(FeishuDividerView);
+  },
+
+  onCreate() {
+    normalizeHorizontalRulesOutOfLists(this.editor as TipTapEditor);
+  },
+
+  onUpdate() {
+    normalizeHorizontalRulesOutOfLists(this.editor as TipTapEditor);
   },
 });
 
@@ -2070,6 +2080,21 @@ function resolveBlockRowHighlightRect(
   areaRect: DOMRect,
   columnContent: HTMLElement | null,
 ): { top: number; left: number; width: number; height: number } {
+  const contentRight = columnContent?.isConnected
+    ? columnContent.getBoundingClientRect().right
+    : areaRect.right;
+
+  if (blockEl.tagName.toLowerCase() === 'li') {
+    const listRect = resolveListItemHighlightRect(blockEl, contentRight);
+    const textSpan = editorInstance ? measureTextBlockVerticalSpan(editorInstance, blockEl) : null;
+    return {
+      top: (textSpan?.top ?? listRect.top) - areaRect.top,
+      left: listRect.left - areaRect.left,
+      width: listRect.width,
+      height: Math.max(1, textSpan ? textSpan.bottom - textSpan.top : listRect.height),
+    };
+  }
+
   const width = columnContent?.isConnected
     ? columnContent.getBoundingClientRect().width
     : areaRect.width;

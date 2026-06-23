@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/react';
 import { TextSelection } from '@tiptap/pm/state';
 import { insertFeishuTable } from '../tables/tableInsert';
 import { insertFeishuColumns } from '../blocks/columnsInsert';
+import { insertStandaloneHorizontalRule } from '../blocks/blockOperations';
 import { createBaseTable, serializeBaseTable } from '../../Bitable/model/bitableModel';
 import { readApiPayload } from '../../../api/http';
 import {
@@ -132,6 +133,16 @@ function runTextCommand(editor: Editor, run: (editor: Editor) => void) {
     editor.chain().focus().deleteRange(getSlashRange(editor)).run();
   }
   run(editor);
+}
+
+function insertDividerFromSlash(editor: Editor) {
+  const plusRange = consumePlusInsertRange(editor);
+  if (plusRange) {
+    insertStandaloneHorizontalRule(editor, { pos: plusRange.from, deleteRange: plusRange });
+    return;
+  }
+  const slashRange = getSlashRange(editor);
+  insertStandaloneHorizontalRule(editor, { pos: slashRange.from, deleteRange: slashRange });
 }
 
 function pickFile(accept: string, onPick: (file: File) => void) {
@@ -293,7 +304,7 @@ export const SLASH_SECTIONS: SlashMenuSection[] = [
       { Icon: SlashGlyphTaskList, iconColor: '#646a73', label: '任务列表', matchText: '任务 待办 勾选 todo task', tooltip: { shortcut: 'Ctrl + Shift + 9', markdown: '[] 空格' }, action: e => runTextCommand(e, ed => ed.chain().focus().toggleTaskList().run()) },
       { Icon: SlashGlyphCode, iconColor: '#646a73', label: '代码块', matchText: 'code 代码', tooltip: { markdown: '``` 空格' }, action: e => runTextCommand(e, ed => ed.chain().focus().setCodeBlock({ language: 'plaintext' }).run()) },
       { Icon: SlashGlyphQuote, iconColor: '#646a73', label: '引用', matchText: 'blockquote quote 引用', tooltip: { markdown: '> 空格' }, action: e => runTextCommand(e, ed => ed.chain().focus().toggleBlockquote().run()) },
-      { Icon: SlashGlyphDivider, iconColor: '#646a73', label: '分割线', matchText: '分隔 横线 divider hr', tooltip: { markdown: '--- 回车' }, action: e => runTextCommand(e, ed => ed.chain().focus().setHorizontalRule().run()) },
+      { Icon: SlashGlyphDivider, iconColor: '#646a73', label: '分割线', matchText: '分隔 横线 divider hr', tooltip: { markdown: '--- 回车' }, action: insertDividerFromSlash },
       { Icon: SlashGlyphSyncMuted, iconColor: '#646a73', label: '同步块', matchText: '同步 synced sync', tooltip: { markdown: '' }, action: e => replacePlusOrSlash(e, createSyncBlockNode()) },
       {
         Icon: SlashGlyphLink,

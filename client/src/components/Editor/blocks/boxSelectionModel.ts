@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/react';
 import type { Node as ProseNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import { getBlockAtPos } from './blockOperations';
+import { resolveListItemHighlightRect } from './blockDom';
 import { resolveTableHostFromElement } from '../tables/tableDom';
 
 export interface SelectableUnit {
@@ -437,13 +438,39 @@ function resolveBitableSelectionRect(dom: HTMLElement): DOMRect | null {
     : dom.closest('.feishu-bitable-block');
   if (!(block instanceof HTMLElement)) return null;
 
+  if (block.getAttribute('data-base-view-type') === 'grid') {
+    const grid = block.querySelector(':scope .base-grid-wrap');
+    const scroll = block.querySelector(':scope .base-grid-canvas-scroll');
+    if (grid instanceof HTMLElement && scroll instanceof HTMLElement) {
+      const viewbarRect = (block.querySelector(':scope .base-viewbar') as HTMLElement | null)?.getBoundingClientRect();
+      const scrollRect = scroll.getBoundingClientRect();
+      const footerRect = (block.querySelector(':scope .base-grid-footer') as HTMLElement | null)?.getBoundingClientRect();
+      const hscroll = block.querySelector(':scope .base-grid-hscroll.is-active') as HTMLElement | null;
+      const hscrollRect = hscroll?.getBoundingClientRect();
+      const left = scrollRect.left;
+      const top = viewbarRect ? Math.min(viewbarRect.top, scrollRect.top) : scrollRect.top;
+      const bottom = Math.max(
+        scrollRect.bottom,
+        footerRect?.bottom ?? scrollRect.bottom,
+        hscrollRect?.bottom ?? scrollRect.bottom,
+      );
+      return new DOMRect(left, top, scrollRect.width, Math.max(1, bottom - top));
+    }
+  }
+
   const parts = Array.from(block.querySelectorAll(
-    ':scope .base-viewbar, :scope .base-grid-wrap, :scope .base-grid-hscroll, :scope .base-gallery-surface, :scope .base-kanban, :scope .base-kanban-hscroll, :scope .base-gantt-shell',
+    ':scope .base-viewbar, :scope .base-grid-canvas-scroll, :scope .base-grid-footer, :scope .base-grid-hscroll.is-active, :scope .base-gallery-surface, :scope .base-kanban, :scope .base-kanban-hscroll, :scope .base-gantt-shell',
   )).filter((item): item is HTMLElement => item instanceof HTMLElement);
   return unionRects(parts.map(part => part.getBoundingClientRect()));
 }
 
-export function measureSelectableUnitRect(unit: SelectableUnit): DOMRect {
+export function measureSelectableUnitRect(
+  unit: SelectableUnit,
+  options?: { extendToRight?: number },
+): DOMRect {
+  if (unit.kind === 'listItem') {
+    return resolveListItemHighlightRect(unit.dom, options?.extendToRight);
+  }
   if (unit.dom.classList.contains('feishu-bitable-block') || unit.dom.closest('.feishu-bitable-block')) {
     return resolveBitableSelectionRect(unit.dom) ?? unit.dom.getBoundingClientRect();
   }
@@ -680,7 +707,7 @@ export function measureUnitBand(
   unit: SelectableUnit,
   areaRect: DOMRect,
 ): { top: number; left: number; width: number; height: number } {
-  const r = measureSelectableUnitRect(unit);
+  const r = measureSelectableUnitRect(unit, { extendToRight: areaRect.right });
   return {
     top: r.top - areaRect.top,
     left: r.left - areaRect.left,

@@ -18,6 +18,7 @@ import {
 } from 'tdesign-icons-react';
 import { wrapIcon } from '../../../icons/wrap';
 import FeishuColorPickerPanel from '../panels/FeishuColorPickerPanel';
+import { insertStandaloneHorizontalRule } from '../blocks/blockOperations';
 import './Toolbar.less';
 
 const Bold = wrapIcon(TextformatBoldIcon);
@@ -283,7 +284,7 @@ export default function Toolbar({ editor }: ToolbarProps) {
         {/* Horizontal Rule */}
         <button
           className="toolbar-btn"
-          onClick={() => editor.chain().focus().setHorizontalRule().run()}
+          onClick={() => insertStandaloneHorizontalRule(editor)}
           title="分割线"
         >
           <HorizontalRule size={ICON_SIZE} strokeWidth={ICON_STROKE} fill="currentColor" />

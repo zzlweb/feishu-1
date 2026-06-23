@@ -3,6 +3,7 @@ import { parseJsonPayload } from '../../../api/http';
 import type { ButtonActionType, SlashMenuItem } from './slashMenuConfig';
 import { insertFeishuTableAt } from '../tables/tableInsert';
 import { insertFeishuColumnsAt } from '../blocks/columnsInsert';
+import { insertStandaloneHorizontalRule } from '../blocks/blockOperations';
 import { createBaseTable, serializeBaseTable } from '../../Bitable/model/bitableModel';
 
 function pickFile(accept: string, onPick: (file: File) => void) {
@@ -167,7 +168,7 @@ export function insertSlashItemAt(editor: Editor, sectionTitle: string, item: Sl
       chain.insertContentAt(pos, { type: 'blockquote', content: [{ type: 'paragraph' }] }).run();
       return;
     case '分割线':
-      chain.insertContentAt(pos, { type: 'horizontalRule' }).run();
+      insertStandaloneHorizontalRule(editor, { pos });
       return;
     case '高亮块':
       chain.insertContentAt(pos, {

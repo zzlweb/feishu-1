@@ -31,6 +31,96 @@ export interface EditorBlockRef {
   node: ProseNode;
 }
 
+interface InsertRange {
+  from: number;
+  to: number;
+}
+
+const LIST_BLOCK_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
+
+function resolveStandaloneBlockInsertPos(editor: Editor, pos: number): number {
+  const doc = editor.state.doc;
+  const clamped = Math.max(0, Math.min(pos, doc.content.size));
+  const $pos = doc.resolve(clamped);
+
+  let listDepth = -1;
+  for (let depth = $pos.depth; depth > 0; depth -= 1) {
+    if (LIST_BLOCK_TYPES.has($pos.node(depth).type.name)) {
+      listDepth = depth;
+    }
+  }
+
+  return listDepth > 0 ? $pos.after(listDepth) : clamped;
+}
+
+export function insertStandaloneHorizontalRule(
+  editor: Editor,
+  options?: { pos?: number; deleteRange?: InsertRange },
+): boolean {
+  const { state, view } = editor;
+  const pos = options?.pos ?? state.selection.from;
+  const insertPos = resolveStandaloneBlockInsertPos(editor, pos);
+  const horizontalRule = state.schema.nodes.horizontalRule?.create();
+  if (!horizontalRule) return false;
+
+  let tr = state.tr;
+  if (options?.deleteRange && options.deleteRange.from < options.deleteRange.to) {
+    tr = tr.delete(options.deleteRange.from, options.deleteRange.to);
+  }
+
+  const mappedInsertPos = tr.mapping.map(insertPos, -1);
+  tr = tr.insert(mappedInsertPos, horizontalRule);
+  view.dispatch(tr.scrollIntoView());
+  view.focus();
+  return true;
+}
+
+function findHorizontalRuleInsideList(doc: ProseNode): { from: number; to: number; insertPos: number } | null {
+  let found: { from: number; to: number; insertPos: number } | null = null;
+  doc.descendants((node, pos) => {
+    if (found || node.type.name !== 'horizontalRule') return false;
+    const $pos = doc.resolve(pos);
+    let listDepth = -1;
+    for (let depth = $pos.depth; depth > 0; depth -= 1) {
+      if (LIST_BLOCK_TYPES.has($pos.node(depth).type.name)) {
+        listDepth = depth;
+      }
+    }
+    if (listDepth > 0) {
+      found = {
+        from: pos,
+        to: pos + node.nodeSize,
+        insertPos: $pos.after(listDepth),
+      };
+      return false;
+    }
+    return true;
+  });
+  return found;
+}
+
+export function normalizeHorizontalRulesOutOfLists(editor: Editor): boolean {
+  let tr = editor.state.tr;
+  let changed = false;
+
+  for (let guard = 0; guard < 20; guard += 1) {
+    const match = findHorizontalRuleInsideList(tr.doc);
+    if (!match) break;
+
+    const node = tr.doc.nodeAt(match.from);
+    if (!node) break;
+
+    const size = match.to - match.from;
+    const insertPos = match.from < match.insertPos ? match.insertPos - size : match.insertPos;
+    tr = tr.delete(match.from, match.to).insert(insertPos, node);
+    changed = true;
+  }
+
+  if (!changed) return false;
+  editor.view.dispatch(tr.setMeta('addToHistory', false));
+  return true;
+}
+
 function getSelectedNode(editor: Editor): EditorBlockRef | null {
   const selection = editor.state.selection;
   if (!(selection instanceof NodeSelection)) return null;
