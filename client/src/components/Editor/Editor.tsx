@@ -47,7 +47,12 @@ import { resolveInlineBlockElementFromEditor, syncEditorSelectionToAnchoredBlock
 import { moveDraggableBlock, resolveDraggableBlockPos } from './blocks/feishuBlockDrag';
 import { FeishuBlockBackspace } from './blocks/feishuBlockBackspace';
 import { FeishuBoxSelectionKeyboard } from './blocks/feishuBoxSelectionKeyboard';
-import { FeishuTrailingParagraph } from './blocks/feishuTrailingParagraph';
+import {
+  FeishuTrailingParagraph,
+  findEmptyParagraphNearPoint,
+  handleEditorBlankAreaClick,
+  handleEditorBlankAreaDoubleClick,
+} from './blocks/feishuTrailingParagraph';
 import BoxBlockSelectionLayer from './blocks/FeishuBoxBlockSelection';
 import { FeishuHeading, readHeadingId } from './blocks/feishuHeading';
 import { FeishuBlockId, makeFeishuBlockId } from './blocks/feishuBlockId';
@@ -569,27 +574,6 @@ function isPointerInBlockToolsBridge(
     clientY >= bridgeTop &&
     clientY <= bridgeBottom
   );
-}
-
-function findEmptyParagraphNearPoint(root: HTMLElement, clientX: number, clientY: number): HTMLParagraphElement | null {
-  const rootRect = root.getBoundingClientRect();
-  if (clientX < rootRect.left || clientX > rootRect.right) return null;
-
-  let best: { paragraph: HTMLParagraphElement; distance: number } | null = null;
-  const paragraphs = Array.from(root.querySelectorAll(':scope > p'));
-  for (const paragraph of paragraphs) {
-    if (!(paragraph instanceof HTMLParagraphElement)) continue;
-    const text = (paragraph.textContent ?? '').replace(/\u200b/g, '').trim();
-    if (text) continue;
-    const rect = paragraph.getBoundingClientRect();
-    const expandedTop = rect.top - 18;
-    const expandedBottom = rect.bottom + 18;
-    if (clientY < expandedTop || clientY > expandedBottom) continue;
-    const center = rect.top + rect.height / 2;
-    const distance = Math.abs(clientY - center);
-    if (!best || distance < best.distance) best = { paragraph, distance };
-  }
-  return best?.paragraph ?? null;
 }
 
 const BLOCK_CONTENT_SELECTOR = 'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre';
@@ -2433,15 +2417,26 @@ export default function Editor({
   const updateBlockTools = useCallback((editorInstance: any) => {
     if (readOnly || !editorAreaRef.current) return;
     const selectedRow = getBlockDomFromEditor(editorInstance);
+    const selectedIsEmptyParagraph = Boolean(
+      selectedRow?.tagName.toLowerCase() === 'p'
+      && (selectedRow.textContent ?? '').replace(/\u200b/g, '').trim() === '',
+    );
+
     let row = activeBlockElRef.current;
+    if (selectedIsEmptyParagraph && selectedRow?.isConnected) {
+      row = selectedRow;
+      activeBlockElRef.current = row;
+    } else if (selectedRow && row?.isConnected && selectedRow !== row) {
+      return;
+    }
+
     if (!row?.isConnected) {
       row = selectedRow;
-      const isEmptyParagraph = row?.tagName.toLowerCase() === 'p'
-        && (row.textContent ?? '').replace(/\u200b/g, '').trim() === '';
-      if (!row?.isConnected || !isEmptyParagraph) return;
+      if (!row?.isConnected || !selectedIsEmptyParagraph) return;
       activeBlockElRef.current = row;
     }
-    if (selectedRow && selectedRow !== row) return;
+
+    if (selectedRow && row && selectedRow !== row) return;
 
     const { from, to } = editorInstance.state.selection;
     const isEmpty = (from === to && editorInstance.state.doc.textBetween(Math.max(0, from - 1), Math.min(editorInstance.state.doc.content.size, from + 1), ' ', '\0').trim() === '') && editorInstance.isActive('paragraph');
@@ -2887,7 +2882,7 @@ export default function Editor({
       if (slashMenuVisible && slashMenuFromPlus) return;
       if (contextMenu) return;
 
-      const resolved = resolveHoveredBlockInfo(e.target);
+      const resolved = resolveHoveredBlockInfo(e.target, e.clientX, e.clientY);
       if (resolved === 'keep' || !resolved) return;
       revealBlockToolsFromInfo(resolved);
     },
@@ -3112,47 +3107,45 @@ export default function Editor({
       && !isEmptyParagraphTarget
     ) return;
 
-    const tiptap = editor.view.dom as HTMLElement;
-    const emptyParagraphAtPoint = findEmptyParagraphNearPoint(tiptap, e.clientX, e.clientY);
-    if (emptyParagraphAtPoint) {
-      const pos = editor.view.posAtDOM(emptyParagraphAtPoint, 0);
-      const textPos = Math.max(1, Math.min(pos + 1, editor.state.doc.content.size - 1));
-      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, textPos)));
-      editor.view.focus();
-      return;
-    }
+    const handled = handleEditorBlankAreaClick(editor, e.clientX, e.clientY);
+    if (!handled) return;
 
-    const lastBlock = tiptap.lastElementChild as HTMLElement | null;
-    const lastBlockRect = lastBlock?.getBoundingClientRect();
-    const clickedBelowLastBlock = Boolean(lastBlockRect && e.clientY > lastBlockRect.bottom + 8);
-
-    if (!clickedBelowLastBlock) {
-      const posAtClick = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
-      if (posAtClick) {
-        const resolved = editor.state.doc.resolve(posAtClick.pos);
-        editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(resolved)));
-        editor.view.focus();
-        return;
+    window.requestAnimationFrame(() => {
+      const row = getBlockDomFromEditor(editor);
+      if (!row) return;
+      const info = getElementBlockInfo(row);
+      if (info?.isEmpty && info.type === 'paragraph') {
+        revealBlockToolsFromInfo(info);
       }
-    }
+    });
+  }, [contextMenu, editor, getElementBlockInfo, readOnly, revealBlockToolsFromInfo, slashMenuVisible]);
 
-    const docEnd = editor.state.doc.content.size;
-    const lastChild = editor.state.doc.lastChild;
-    const needsTrailingParagraph = !lastChild || lastChild.type.name !== 'paragraph' || lastChild.textContent.length > 0;
+  const handleEditorBlankDoubleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (readOnly || !editor) return;
+    if (slashMenuVisible || contextMenu) return;
+    if (e.defaultPrevented) return;
+    const target = e.target;
+    const isEmptyParagraphTarget = target instanceof HTMLElement
+      && target.matches('p')
+      && (target.textContent ?? '').replace(/\u200b/g, '').trim() === '';
+    if (
+      target !== e.currentTarget
+      && !(target instanceof Element && target.classList.contains('tiptap'))
+      && !isEmptyParagraphTarget
+    ) return;
 
-    if (needsTrailingParagraph) {
-      editor.chain().insertContentAt(docEnd, { type: 'paragraph' }).run();
-      window.requestAnimationFrame(() => {
-        const nextEnd = editor.state.doc.content.size;
-        editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, nextEnd - 1)));
-        editor.view.focus();
-      });
-      return;
-    }
+    const handled = handleEditorBlankAreaDoubleClick(editor, e.clientX, e.clientY);
+    if (!handled) return;
 
-    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, docEnd - 1)));
-    editor.view.focus();
-  }, [contextMenu, editor, readOnly, slashMenuVisible]);
+    window.requestAnimationFrame(() => {
+      const row = getBlockDomFromEditor(editor);
+      if (!row) return;
+      const info = getElementBlockInfo(row);
+      if (info?.isEmpty && info.type === 'paragraph') {
+        revealBlockToolsFromInfo(info);
+      }
+    });
+  }, [contextMenu, editor, getElementBlockInfo, readOnly, revealBlockToolsFromInfo, slashMenuVisible]);
 
   const hasDraggedFiles = (event: React.DragEvent<HTMLDivElement>) =>
     Array.from(event.dataTransfer?.types ?? []).includes('Files');
@@ -3935,6 +3928,7 @@ export default function Editor({
             onContextMenu={handleEditorContextMenu}
             onMouseLeave={handleEditorMouseLeave}
             onClick={handleEditorBlankClick}
+            onDoubleClick={handleEditorBlankDoubleClick}
             onDragEnter={handleFileDragOver}
             onDragOver={handleFileDragOver}
             onDragLeave={event => {

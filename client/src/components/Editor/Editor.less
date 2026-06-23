@@ -15,6 +15,8 @@
 
 /** 版心宽度：视口变窄时不缩小该宽度，超出部分由外层横向裁切，正文不因容器变窄而重排换�?*/
 @editor-page-width: 860px;
+@editor-page-padding-left: 48px;
+@editor-page-padding-right: 56px;
 /** 目录轨与正文之间的固定间距（轨宽由 Layout 中 .doc-page-catalogue-rail 占位） */
 @editor-content-rail-gap: 24px;
 
@@ -27,6 +29,20 @@
   font-family: @font;
   position: relative;
   overflow-x: hidden;
+
+  &:has(.feishu-bitable-block),
+  &:has(.feishu-bitable-block.is-grid-bleed-active),
+  &:has(.feishu-bitable-block.is-grid-hscroll-active) {
+    overflow-x: visible;
+
+    .editor-scroll {
+      overflow-x: visible;
+    }
+
+    .editor-container {
+      overflow: visible;
+    }
+  }
 
   // ---- Scroll area ----
   .editor-scroll {
@@ -48,7 +64,24 @@
     flex-shrink: 0;
     margin-left: max(calc((100% - @editor-page-width) / 2), @editor-content-rail-gap);
     margin-right: auto;
-    padding: 0 56px 0 48px;
+    padding: 0 @editor-page-padding-right 0 @editor-page-padding-left;
+
+    &:has(.feishu-bitable-block) {
+      padding-left: 0;
+      padding-right: 0;
+
+      > .editor-title-area,
+      > .editor-meta {
+        padding-left: @editor-page-padding-left;
+        padding-right: @editor-page-padding-right;
+      }
+
+      > .editor-content-area {
+        box-sizing: border-box;
+        width: @editor-page-width;
+        max-width: @editor-page-width;
+      }
+    }
 
     // Title area wrapper (hover detection zone)
     .editor-title-area {
@@ -2989,7 +3022,8 @@
         .feishu-bitable-block.is-selected,
         .feishu-bitable-block.is-block-gutter-active,
         .feishu-bitable-block.ProseMirror-selectednode {
-          box-shadow: inset 0 0 0 2px #3370ff;
+          /* 对齐飞书多维表格：块选中/块柄悬停不显示蓝色描边 */
+          box-shadow: none;
           background: #fff;
           user-select: none;
         }

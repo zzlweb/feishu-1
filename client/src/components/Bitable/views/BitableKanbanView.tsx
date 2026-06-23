@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { valueText, type BaseField, type BaseRecord, type BaseTable, type CellValue, type GalleryViewConfig } from '../model/bitableModel';
-import { FieldDisplay } from '../shared/BitableViewShared';
+import { FieldDisplay, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
 
-const KANBAN_COLUMN_WIDTH = 257;
-const KANBAN_COLUMN_GAP = 8;
+const KANBAN_DOC_WIDTH = 860;
+const KANBAN_COLUMN_WIDTH = 276;
+const KANBAN_COLUMN_GAP = 16;
 const KANBAN_CREATE_GROUP_WIDTH = 146;
 const KANBAN_EDGE_MARGIN = 72;
 
@@ -29,6 +30,24 @@ function getStatusField(table: BaseTable, config?: GalleryViewConfig): BaseField
     if (field?.type === 'single_select') return field;
   }
   return table.fields.find(field => field.type === 'single_select') ?? null;
+}
+
+function resolveKanbanContentWidth(columnCount: number): number {
+  if (columnCount <= 0) return KANBAN_CREATE_GROUP_WIDTH;
+  return columnCount * KANBAN_COLUMN_WIDTH
+    + columnCount * KANBAN_COLUMN_GAP
+    + KANBAN_CREATE_GROUP_WIDTH;
+}
+
+function syncKanbanDocAlign(block: HTMLElement) {
+  const editorContainer = block.closest<HTMLElement>('.editor-container');
+  if (editorContainer) {
+    const paddingLeft = Number.parseFloat(getComputedStyle(editorContainer).paddingLeft) || 0;
+    block.style.setProperty('--bitable-doc-align-shift', `${paddingLeft}px`);
+  } else {
+    block.style.setProperty('--bitable-doc-align-shift', '0px');
+  }
+  block.style.setProperty('--bitable-kanban-width', `${KANBAN_DOC_WIDTH}px`);
 }
 
 function stop(event: MouseEvent) {
@@ -62,14 +81,22 @@ export function BitableKanbanView({
   const scrollLeftRef = useRef(0);
   const anchorWidthRef = useRef(0);
   const layoutOriginRef = useRef({ blockLeft: 0, bleedLeft: 0 });
-  const thumbDragRef = useRef<{ startX: number; startScrollLeft: number } | null>(null);
+  const prevScrollLeftForLayoutRef = useRef(0);
+  const thumbDragRef = useRef<{
+    startX: number;
+    startScrollLeft: number;
+    maxScrollLeft: number;
+    travel: number;
+  } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [thumbDragging, setThumbDragging] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(0);
   const [layoutCaps, setLayoutCaps] = useState({
     anchor: 0,
     maxBleedWidth: 0,
     trackWidth: 0,
     shiftMax: 0,
+    panScrollMax: 0,
   });
 
   const statusField = getStatusField(table, config);
@@ -87,39 +114,46 @@ export function BitableKanbanView({
   }, [choices, records, statusField?.id]);
 
   const visibleFieldIds = config.visibleFieldIds.filter(fieldId => fieldId !== statusField?.id && fieldId !== table.primaryFieldId);
-  const contentWidth = choices.length * KANBAN_COLUMN_WIDTH
-    + choices.length * KANBAN_COLUMN_GAP
-    + KANBAN_CREATE_GROUP_WIDTH;
-  const { anchor, maxBleedWidth, trackWidth, shiftMax } = layoutCaps;
-  const baseScrollWidth = trackWidth || anchor;
+  const boardContentWidth = useMemo(
+    () => resolveKanbanContentWidth(choices.length),
+    [choices.length],
+  );
+  const boardWidth = Math.max(KANBAN_DOC_WIDTH, boardContentWidth, viewportWidth);
+  const { anchor, maxBleedWidth, trackWidth, shiftMax, panScrollMax } = layoutCaps;
+  const baseScrollWidth = trackWidth || anchor || viewportWidth;
   const wideLimit = maxBleedWidth || baseScrollWidth;
   const restingDisplayWidth = anchor > 0
     ? Math.min(
       baseScrollWidth || wideLimit,
-      Math.max(anchor, Math.min(contentWidth, baseScrollWidth || contentWidth)),
+      Math.max(anchor, Math.min(boardWidth, baseScrollWidth || boardWidth)),
     )
-    : 0;
-  const maxScrollLeft = Math.max(0, contentWidth - baseScrollWidth);
+    : viewportWidth;
+  const maxScrollLeft = Math.max(0, boardWidth - baseScrollWidth);
   const blockShift = Math.min(shiftMax, scrollLeft);
   const displayWidth = scrollLeft > 0
     ? Math.min(
       wideLimit,
-      Math.max(restingDisplayWidth, Math.min(contentWidth, baseScrollWidth + blockShift)),
+      Math.max(restingDisplayWidth, Math.min(boardWidth, baseScrollWidth + blockShift)),
     )
     : restingDisplayWidth;
-  const panAmount = Math.max(0, scrollLeft - shiftMax);
+  const panAmount = Math.max(0, scrollLeft - blockShift);
+  const scrollTrackWidth = baseScrollWidth;
+  const effectiveMaxScrollLeft = thumbDragging && thumbDragRef.current
+    ? thumbDragRef.current.maxScrollLeft
+    : maxScrollLeft;
+
   const hScrollMetrics = useMemo(() => {
-    const currentTrackWidth = baseScrollWidth || displayWidth;
-    if (currentTrackWidth <= 0 || maxScrollLeft <= 0) {
+    const currentTrackWidth = scrollTrackWidth > 0 ? scrollTrackWidth : viewportWidth;
+    if (currentTrackWidth <= 0 || effectiveMaxScrollLeft <= 0) {
       return { trackWidth: currentTrackWidth, thumbWidth: 0, thumbLeft: 0, travel: 0 };
     }
-    const virtualScrollWidth = currentTrackWidth + maxScrollLeft;
+    const virtualScrollWidth = currentTrackWidth + effectiveMaxScrollLeft;
     let thumbWidth = Math.max(48, Math.round((currentTrackWidth * currentTrackWidth) / virtualScrollWidth));
     thumbWidth = Math.min(thumbWidth, Math.max(48, currentTrackWidth - 48));
     const travel = Math.max(0, currentTrackWidth - thumbWidth);
-    const thumbLeft = travel > 0 ? (scrollLeft / maxScrollLeft) * travel : 0;
+    const thumbLeft = travel > 0 ? (scrollLeft / effectiveMaxScrollLeft) * travel : 0;
     return { trackWidth: currentTrackWidth, thumbWidth, thumbLeft, travel };
-  }, [baseScrollWidth, displayWidth, maxScrollLeft, scrollLeft]);
+  }, [effectiveMaxScrollLeft, scrollLeft, scrollTrackWidth, viewportWidth]);
 
   const applyScrollLeft = useCallback((next: number) => {
     const clamped = Math.max(0, Math.min(next, maxScrollLeft));
@@ -130,56 +164,82 @@ export function BitableKanbanView({
   const syncLayoutCaps = useCallback(() => {
     const root = rootRef.current;
     const block = root?.closest<HTMLElement>('.feishu-bitable-block');
-    if (!root || !block) return;
-    const commentRail = Number.parseFloat(
-      getComputedStyle(document.documentElement).getPropertyValue('--comment-rail-width'),
-    ) || 0;
-    const blockLeftNow = block.getBoundingClientRect().left;
-    const bleedHost = block.closest<HTMLElement>('.doc-page-workspace')
-      ?? block.closest<HTMLElement>('.editor-container')
-      ?? block.parentElement;
-    const bleedLeftNow = bleedHost?.getBoundingClientRect().left ?? blockLeftNow;
+    if (!root || !block) {
+      setViewportWidth(root?.clientWidth ?? 0);
+      return;
+    }
 
-    if (scrollLeftRef.current <= 0) {
-      anchorWidthRef.current = block.getBoundingClientRect().width
-        || block.parentElement?.clientWidth
-        || root.clientWidth;
-      layoutOriginRef.current = { blockLeft: blockLeftNow, bleedLeft: bleedLeftNow };
-    } else if (!anchorWidthRef.current) {
-      anchorWidthRef.current = block.getBoundingClientRect().width
-        || block.parentElement?.clientWidth
-        || root.clientWidth;
-      layoutOriginRef.current = { blockLeft: blockLeftNow, bleedLeft: bleedLeftNow };
+    syncKanbanDocAlign(block);
+
+    const blockLeftNow = block.getBoundingClientRect().left;
+
+    if (scrollLeftRef.current <= 0 || !anchorWidthRef.current) {
+      anchorWidthRef.current = Math.max(
+        KANBAN_DOC_WIDTH,
+        block.getBoundingClientRect().width
+          || block.parentElement?.clientWidth
+          || root.clientWidth,
+      );
+      layoutOriginRef.current = { blockLeft: blockLeftNow, bleedLeft: blockLeftNow };
     }
 
     const anchorWidth = anchorWidthRef.current;
-    const { blockLeft, bleedLeft } = layoutOriginRef.current;
-    const nextMaxBleedWidth = Math.max(
-      KANBAN_CREATE_GROUP_WIDTH,
-      window.innerWidth - commentRail - KANBAN_EDGE_MARGIN * 2,
+    const { blockLeft } = layoutOriginRef.current;
+    const rightEdge = resolveBitableBleedRightEdge(block, KANBAN_EDGE_MARGIN);
+    const pageMain = block.closest<HTMLElement>('.doc-page-main');
+    const catalogueRail = pageMain?.querySelector<HTMLElement>('.doc-page-catalogue-rail');
+    const railRect = catalogueRail?.getBoundingClientRect();
+    const railVisible = Boolean(
+      catalogueRail
+      && railRect
+      && railRect.width > 1
+      && getComputedStyle(catalogueRail).display !== 'none',
     );
-    const wideLeft = Math.max(bleedLeft, (window.innerWidth - commentRail - nextMaxBleedWidth) / 2);
-    const nextShiftMax = Math.max(0, blockLeft - wideLeft);
-    const nextTrackWidth = Math.max(KANBAN_CREATE_GROUP_WIDTH, nextMaxBleedWidth - nextShiftMax);
+    const railRight = railVisible && railRect ? railRect.right : 0;
+    const safeLeft = Math.max(
+      KANBAN_EDGE_MARGIN,
+      railRight ? railRight + 8 : 0,
+    );
+    const nextMaxBleedWidth = Math.max(
+      KANBAN_DOC_WIDTH,
+      KANBAN_CREATE_GROUP_WIDTH,
+      rightEdge - safeLeft,
+    );
+    const nextShiftMax = Math.max(0, blockLeft - safeLeft);
+    const nextTrackWidth = Math.max(
+      KANBAN_DOC_WIDTH,
+      nextMaxBleedWidth - nextShiftMax,
+    );
+    const nextPanScrollMax = Math.max(0, boardWidth - nextMaxBleedWidth);
+    const nextMaxScrollLeft = Math.max(0, boardWidth - nextTrackWidth);
 
-    const resolvedDisplayWidth = displayWidth || anchorWidth;
-    if (resolvedDisplayWidth > 0) {
-      block.style.setProperty('--bitable-display-width', `${resolvedDisplayWidth}px`);
-    }
-    block.style.setProperty('--bitable-block-shift', `${blockShift}px`);
-    block.style.setProperty('--bitable-bleed-left', `${wideLeft}px`);
+    block.style.setProperty('--bitable-bleed-left', `${safeLeft}px`);
+    block.style.setProperty('--bitable-block-left', `${blockLeft}px`);
     block.style.setProperty('--bitable-anchor-width', `${anchorWidth}px`);
     block.style.setProperty('--bitable-anchor-scroll-width', `${nextTrackWidth}px`);
-    block.classList.toggle('is-grid-hscroll-active', contentWidth > nextTrackWidth);
-    block.classList.toggle('is-grid-bleed-active', blockShift > 0 || contentWidth > nextTrackWidth);
+    block.classList.toggle('is-grid-hscroll-active', nextMaxScrollLeft > 0);
 
     setLayoutCaps({
       anchor: anchorWidth,
       maxBleedWidth: nextMaxBleedWidth,
       trackWidth: nextTrackWidth,
       shiftMax: nextShiftMax,
+      panScrollMax: nextPanScrollMax,
     });
-  }, [blockShift, contentWidth, displayWidth]);
+    setViewportWidth(Math.max(KANBAN_DOC_WIDTH, anchorWidth));
+  }, [boardWidth]);
+
+  useEffect(() => {
+    const block = rootRef.current?.closest<HTMLElement>('.feishu-bitable-block');
+    if (!block) return;
+    block.style.setProperty('--bitable-display-width', `${displayWidth}px`);
+    block.style.setProperty('--bitable-block-shift', `${blockShift}px`);
+    block.classList.toggle(
+      'is-grid-bleed-active',
+      blockShift > 0 || displayWidth > anchor + 1 || panScrollMax > 0,
+    );
+    block.dispatchEvent(new CustomEvent('bitable-grid-scroll', { bubbles: true }));
+  }, [anchor, blockShift, displayWidth, panScrollMax]);
 
   useEffect(() => {
     syncLayoutCaps();
@@ -193,16 +253,12 @@ export function BitableKanbanView({
   }, [syncLayoutCaps]);
 
   useEffect(() => {
-    const block = rootRef.current?.closest<HTMLElement>('.feishu-bitable-block');
-    if (!block) return;
-    const resolvedDisplayWidth = displayWidth || anchor || anchorWidthRef.current;
-    if (resolvedDisplayWidth > 0) {
-      block.style.setProperty('--bitable-display-width', `${resolvedDisplayWidth}px`);
+    if (scrollLeft <= 0 && prevScrollLeftForLayoutRef.current > 0) {
+      layoutOriginRef.current = { blockLeft: 0, bleedLeft: 0 };
+      syncLayoutCaps();
     }
-    block.style.setProperty('--bitable-block-shift', `${blockShift}px`);
-    block.classList.toggle('is-grid-bleed-active', blockShift > 0 || contentWidth > baseScrollWidth);
-    block.dispatchEvent(new CustomEvent('bitable-grid-scroll', { bubbles: true }));
-  }, [anchor, baseScrollWidth, blockShift, contentWidth, displayWidth]);
+    prevScrollLeftForLayoutRef.current = scrollLeft;
+  }, [scrollLeft, syncLayoutCaps]);
 
   useEffect(() => {
     if (scrollLeftRef.current > maxScrollLeft) {
@@ -260,17 +316,22 @@ export function BitableKanbanView({
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    thumbDragRef.current = { startX: event.clientX, startScrollLeft: scrollLeftRef.current };
+    const rect = trackRef.current?.getBoundingClientRect();
+    const travel = rect ? Math.max(1, rect.width - hScrollMetrics.thumbWidth) : Math.max(1, hScrollMetrics.travel);
+    thumbDragRef.current = {
+      startX: event.clientX,
+      startScrollLeft: scrollLeftRef.current,
+      maxScrollLeft,
+      travel,
+    };
     setThumbDragging(true);
   };
 
   const handleThumbPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = thumbDragRef.current;
     if (!drag || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const rect = trackRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || maxScrollLeft <= 0) return;
-    const effectiveTravel = Math.max(1, rect.width - hScrollMetrics.thumbWidth);
-    const deltaScroll = ((event.clientX - drag.startX) / effectiveTravel) * maxScrollLeft;
+    if (drag.maxScrollLeft <= 0) return;
+    const deltaScroll = ((event.clientX - drag.startX) / drag.travel) * drag.maxScrollLeft;
     applyScrollLeft(drag.startScrollLeft + deltaScroll);
   };
 
@@ -331,8 +392,9 @@ export function BitableKanbanView({
           role="list"
           aria-label="看板"
           style={{
-            width: contentWidth,
-            transform: panAmount ? `translate3d(${-panAmount}px, 0, 0)` : undefined,
+            ['--kanban-column-width' as string]: `${KANBAN_COLUMN_WIDTH}px`,
+            width: boardContentWidth,
+            transform: panAmount > 0 ? `translate3d(${-panAmount}px, 0, 0)` : undefined,
           }}
         >
           {choices.map(choice => {

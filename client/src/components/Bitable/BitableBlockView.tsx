@@ -424,6 +424,62 @@ function ViewSidebarMenu({
   );
 }
 
+function DeleteRecordsDialog({
+  count,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel]);
+
+  return createPortal(
+    <div className="base-delete-view-overlay" data-no-marquee-selection="true" onMouseDown={onCancel}>
+      <div
+        className="base-delete-records-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="base-delete-records-title"
+        onMouseDown={event => event.stopPropagation()}
+      >
+        <header className="base-delete-records-dialog__header">
+          <div className="base-delete-records-dialog__title-row">
+            <span className="base-delete-records-dialog__icon" aria-hidden>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 5.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM11 11.25a1 1 0 1 1 2 0v6.5a1 1 0 1 1-2 0v-6.5Z" fill="currentColor" />
+              </svg>
+            </span>
+            <h2 id="base-delete-records-title" className="base-delete-records-dialog__title">操作确认</h2>
+          </div>
+          <button type="button" className="base-delete-view-dialog__close" aria-label="关闭" onClick={onCancel}>
+            ×
+          </button>
+        </header>
+        <p className="base-delete-records-dialog__body">
+          该操作将删除 {count} 行记录，请确认是否继续？
+        </p>
+        <footer className="base-delete-view-dialog__footer">
+          <button type="button" className="base-delete-view-dialog__btn base-delete-view-dialog__btn--cancel" onClick={onCancel}>
+            取消
+          </button>
+          <button type="button" className="base-delete-view-dialog__btn base-delete-view-dialog__btn--danger" onClick={onConfirm}>
+            删除
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function DeleteViewDialog({
   viewName,
   onCancel,
@@ -645,6 +701,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const [renamingViewId, setRenamingViewId] = useState<string | null>(null);
   const [viewContextMenuId, setViewContextMenuId] = useState<string | null>(null);
   const [deleteViewTarget, setDeleteViewTarget] = useState<{ id: string; name: string } | null>(null);
+  const [pendingDeleteRecordIds, setPendingDeleteRecordIds] = useState<string[] | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [draggingViewIndex, setDraggingViewIndex] = useState<number | null>(null);
   const dragFromIndexRef = useRef<number | null>(null);
@@ -1192,14 +1249,28 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     }));
   };
 
-  const removeRecords = (recordIds: string[], requireConfirm = false) => {
-    if (requireConfirm && !window.confirm(`确认删除 ${recordIds.length} 条记录？`)) return false;
+  const performRemoveRecords = useCallback((recordIds: string[]) => {
     mutate(current => {
       const removeIds = collectRecordSubtreeIds(current.records, recordIds);
       return { ...current, records: current.records.filter(record => !removeIds.has(record.id)) };
     });
     setSelectedIds(new Set());
+  }, [mutate]);
+
+  const removeRecords = (recordIds: string[], requireConfirm = false) => {
+    if (activeView.locked || recordIds.length === 0) return false;
+    if (requireConfirm) {
+      setPendingDeleteRecordIds(recordIds);
+      return false;
+    }
+    performRemoveRecords(recordIds);
     return true;
+  };
+
+  const confirmDeleteRecords = () => {
+    if (!pendingDeleteRecordIds) return;
+    performRemoveRecords(pendingDeleteRecordIds);
+    setPendingDeleteRecordIds(null);
   };
 
   const openAddFieldPanel = (anchor?: { left: number; top: number }) => {
@@ -2643,6 +2714,13 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           viewName={deleteViewTarget.name}
           onCancel={() => setDeleteViewTarget(null)}
           onConfirm={confirmDeleteView}
+        />
+      )}
+      {pendingDeleteRecordIds && (
+        <DeleteRecordsDialog
+          count={pendingDeleteRecordIds.length}
+          onCancel={() => setPendingDeleteRecordIds(null)}
+          onConfirm={confirmDeleteRecords}
         />
       )}
       {addFieldPanel && createPortal(
@@ -4187,7 +4265,6 @@ function KanbanGroupMenuPanel({
               'bitable-toolbar__group-menu-item',
               'bitable-toolbar__group-menu-list-item',
               activeFieldId === field.id ? 'selected' : '',
-              'bitable-field-item',
             ].filter(Boolean).join(' ')}
             role="button"
             tabIndex={view.locked ? -1 : 0}
@@ -4199,10 +4276,12 @@ function KanbanGroupMenuPanel({
               }
             }}
           >
-            <div className="icon bitable-field-icon" style={{ lineHeight: '16px' }}>
-              <span className="universe-icon">{fieldTypeGlyph(field.type, 16)}</span>
+            <div className="icon bitable-toolbar__group-menu-item-icon" aria-hidden>
+              <span className="universe-icon">
+                <ToolGlyphKanbanGroup size={16} />
+              </span>
             </div>
-            <span className="bitable-toolbar__group-menu-item-text bitable-field-name">{field.name}</span>
+            <span className="bitable-toolbar__group-menu-item-text">{field.name}</span>
           </li>
         ))}
       </ul>

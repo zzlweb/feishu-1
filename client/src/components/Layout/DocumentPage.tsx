@@ -24,6 +24,27 @@ import {
 import { resolveBlockElement } from '../Editor/blocks/blockDom';
 import './Layout.less';
 
+const EDITOR_PAGE_MIN_WIDTH = 860;
+const CATALOGUE_RAIL_WIDTH = 128;
+const DOC_MAIN_MIN_GUTTER = 24;
+const COMMENT_SIDEBAR_WIDTH = 280;
+
+function isCatalogueAreaSqueezed(pageMain: HTMLElement, commentSidebarOpen: boolean): boolean {
+  const bitableBlocks = pageMain.querySelectorAll<HTMLElement>('.feishu-bitable-block');
+  for (const block of bitableBlocks) {
+    const shift = Number.parseFloat(
+      getComputedStyle(block).getPropertyValue('--bitable-block-shift'),
+    ) || 0;
+    if (shift > 1) return true;
+  }
+
+  const squeezeMinWidth = CATALOGUE_RAIL_WIDTH
+    + EDITOR_PAGE_MIN_WIDTH
+    + DOC_MAIN_MIN_GUTTER * 2
+    + (commentSidebarOpen ? COMMENT_SIDEBAR_WIDTH : 0);
+  return pageMain.clientWidth < squeezeMinWidth;
+}
+
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -51,7 +72,12 @@ export default function DocumentPage() {
   } | null>(null);
   const outlineWasVisibleRef = useRef(false);
   const mainScrollRef = useRef<HTMLDivElement>(null);
+  const pageMainRef = useRef<HTMLElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const sidebarCollapsedRef = useRef(sidebarCollapsed);
+  const sidebarAutoCollapsedRef = useRef(false);
+  const sidebarUserCollapsedRef = useRef(false);
+  sidebarCollapsedRef.current = sidebarCollapsed;
   const collapsedPersistReadyRef = useRef(false);
   const collapsedPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [titleInputSnapshot, setTitleInputSnapshot] = useState('');
@@ -104,6 +130,8 @@ export default function DocumentPage() {
   useEffect(() => {
     if (showOutlineSidebar && !outlineWasVisibleRef.current) {
       setSidebarCollapsed(false);
+      sidebarAutoCollapsedRef.current = false;
+      sidebarUserCollapsedRef.current = false;
     }
     outlineWasVisibleRef.current = showOutlineSidebar;
   }, [showOutlineSidebar]);
@@ -152,6 +180,68 @@ export default function DocumentPage() {
 
   const commentSidebarOpen = commentSidebarVisible;
   const commentSidebarMounted = commentSidebarVisible || bitableCommentActive;
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [commentSidebarOpen]);
+
+  const syncCatalogueAutoCollapse = useCallback(() => {
+    if (!showOutlineSidebar) return;
+    const pageMain = pageMainRef.current;
+    if (!pageMain) return;
+
+    const squeezed = isCatalogueAreaSqueezed(pageMain, commentSidebarOpen);
+
+    if (squeezed) {
+      if (!sidebarCollapsedRef.current) {
+        sidebarAutoCollapsedRef.current = true;
+        setSidebarCollapsed(true);
+      }
+      return;
+    }
+
+    if (sidebarAutoCollapsedRef.current && !sidebarUserCollapsedRef.current) {
+      sidebarAutoCollapsedRef.current = false;
+      setSidebarCollapsed(false);
+    }
+  }, [commentSidebarOpen, showOutlineSidebar]);
+
+  const handleSidebarToggle = useCallback(() => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      sidebarAutoCollapsedRef.current = false;
+      sidebarUserCollapsedRef.current = next;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!showOutlineSidebar) return;
+    syncCatalogueAutoCollapse();
+
+    const pageMain = pageMainRef.current;
+    const workspace = mainScrollRef.current;
+    if (!pageMain) return;
+
+    const onBitableLayout = () => syncCatalogueAutoCollapse();
+    workspace?.addEventListener('bitable-grid-scroll', onBitableLayout);
+    window.addEventListener('resize', onBitableLayout);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(onBitableLayout);
+      ro.observe(pageMain);
+    }
+
+    return () => {
+      workspace?.removeEventListener('bitable-grid-scroll', onBitableLayout);
+      window.removeEventListener('resize', onBitableLayout);
+      ro?.disconnect();
+    };
+  }, [showOutlineSidebar, syncCatalogueAutoCollapse]);
 
   useEffect(() => {
     const handleBitableOpen = (event: Event) => {
@@ -439,7 +529,7 @@ export default function DocumentPage() {
   if (!doc) return null;
 
   return (
-    <div className="doc-page">
+    <div className={`doc-page${commentSidebarOpen ? ' doc-page--comment-open' : ''}`}>
       <DocumentHeader doc={doc} saveStatus={saveStatus} readOnly={readOnly} onReadOnlyChange={setReadOnly} />
       <div className={`doc-page-body${commentSidebarOpen ? ' doc-page-body--comment-open' : ''}`}>
         <div className="doc-page-workspace" ref={mainScrollRef}>
@@ -457,7 +547,7 @@ export default function DocumentPage() {
           )}
           <CommentSidebarTrackContext.Provider value={commentTrackHost}>
           <div className="doc-page-workspace-inner">
-            <main className="doc-page-main">
+            <main className="doc-page-main" ref={pageMainRef}>
               <div className="doc-page-catalogue-rail" aria-hidden={!showOutlineSidebar}>
                 {showOutlineSidebar && (
                   <Sidebar
@@ -467,7 +557,7 @@ export default function DocumentPage() {
                     activeId={catalogueActiveId}
                     onTocItemActivate={setCatalogueActiveId}
                     collapsed={sidebarCollapsed}
-                    onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+                    onToggle={handleSidebarToggle}
                     collapsedHeadingIds={collapsedHeadingIds}
                     onToggleHeadingCollapse={handleToggleHeadingCollapse}
                   />

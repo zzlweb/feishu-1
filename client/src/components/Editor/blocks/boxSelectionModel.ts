@@ -195,7 +195,7 @@ function isPointInsideBlockContent(clientX: number, clientY: number, child: HTML
 }
 
 /** 点击是否落在顶层块之间的空白区（含块左右边距、块间缝隙、文末空白） */
-function isBlankEditorPoint(clientX: number, clientY: number, tiptap: HTMLElement): boolean {
+export function isBlankEditorPoint(clientX: number, clientY: number, tiptap: HTMLElement): boolean {
   const editorRect = tiptap.getBoundingClientRect();
   if (clientY < editorRect.top - 4 || clientY > editorRect.bottom + 120) return false;
 

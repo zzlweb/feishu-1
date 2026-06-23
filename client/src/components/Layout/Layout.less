@@ -30,6 +30,11 @@
   flex-direction: column;
   background: @bg-white;
   font-family: @font;
+  --comment-rail-width: 0px;
+
+  &.doc-page--comment-open {
+    --comment-rail-width: 280px;
+  }
 
   // ---- Header ----
   .doc-page-header {
@@ -452,11 +457,17 @@
     overflow: hidden;
     min-height: 0;
     position: relative;
-    /** 评论侧栏展开时轨宽（供版心计算，与 .comment-sidebar-positioned 宽度一致） */
-    --comment-rail-width: 0px;
+  }
 
-    &.doc-page-body--comment-open {
-      --comment-rail-width: 280px;
+  &.doc-page--comment-open {
+    .doc-page-workspace:has(.feishu-bitable-block),
+    .doc-page-workspace:has(.feishu-bitable-block.is-grid-bleed-active),
+    .doc-page-workspace:has(.feishu-bitable-block.is-grid-hscroll-active) {
+      overflow-x: hidden;
+    }
+
+    .doc-page-main:has(.feishu-bitable-block) {
+      overflow-x: hidden;
     }
   }
 
@@ -472,6 +483,7 @@
     overflow-y: auto;
     overflow-x: hidden;
 
+    &:has(.feishu-bitable-block),
     &:has(.feishu-bitable-block.is-grid-bleed-active),
     &:has(.feishu-bitable-block.is-grid-hscroll-active) {
       overflow-x: visible;
@@ -506,6 +518,13 @@
     position: relative;
   }
 
+  .doc-page-main {
+    .editor-container {
+      /* 目录轨占据了正文左侧空间，这里按整个页面中心线校正文档版心。 */
+      margin-left: max(calc((100% - @editor-page-width - @catalogue-rail-width) / 2), 24px);
+    }
+  }
+
   // ---- Content row: editor + comment sidebar side-by-side below cover ----
   .doc-content-row {
     display: flex;
@@ -517,6 +536,7 @@
     min-width: 0;
     position: relative;
 
+    &:has(.feishu-bitable-block),
     &:has(.feishu-bitable-block.is-grid-bleed-active),
     &:has(.feishu-bitable-block.is-grid-hscroll-active) {
       overflow-x: visible;

@@ -284,6 +284,20 @@ export function isBitablePanelPortalTarget(node: EventTarget | null): boolean {
   return node instanceof Element && Boolean(node.closest(BITABLE_PANEL_PORTAL_SELECTOR));
 }
 
+export function resolveBitableBleedRightEdge(block: HTMLElement, edgeMargin: number): number {
+  const pageMain = block.closest<HTMLElement>('.doc-page-main');
+  const mainRect = pageMain?.getBoundingClientRect();
+  if (mainRect && mainRect.width > 0) {
+    return mainRect.right - edgeMargin;
+  }
+
+  const docPage = block.closest<HTMLElement>('.doc-page');
+  const commentRail = docPage
+    ? Number.parseFloat(getComputedStyle(docPage).getPropertyValue('--comment-rail-width')) || 0
+    : 0;
+  return window.innerWidth - commentRail - edgeMargin;
+}
+
 export function useBitablePanelHoverHandlers(onClose: () => void, enabled = true) {
   const timerRef = useRef<number>();
 

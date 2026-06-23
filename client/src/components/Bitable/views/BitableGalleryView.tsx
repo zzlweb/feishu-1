@@ -58,10 +58,12 @@ interface GalleryHeaderLayout {
 
 type GalleryLayoutItem = GalleryCardLayout | GalleryHeaderLayout;
 
-const GALLERY_PADDING_X = 18;
+/** 与文档版心 @base-doc-page-width 一致 */
+const GALLERY_DOC_WIDTH = 860;
+const GALLERY_PADDING_X = 0;
 const GALLERY_PADDING_TOP = 16;
 const GALLERY_PADDING_BOTTOM = 16;
-const GALLERY_GAP = 17;
+const GALLERY_GAP = 16;
 const GALLERY_GROUP_GAP = 18;
 const HEADER_HEIGHT = 34;
 const HEADER_MARGIN_BOTTOM = 10;
@@ -89,15 +91,49 @@ const MIN_CARD_WIDTH_BY_SIZE: Record<GalleryViewConfig['cardSize'], number> = {
   large: 210,
 };
 
-function resolveGalleryColumns(usableWidth: number, cardSize: GalleryViewConfig['cardSize']) {
+interface GalleryColumnLayout {
+  columns: number;
+  cardWidths: number[];
+  cardWidth: number;
+}
+
+function resolveGalleryColumns(usableWidth: number, cardSize: GalleryViewConfig['cardSize']): GalleryColumnLayout {
   const minWidth = MIN_CARD_WIDTH_BY_SIZE[cardSize] || MIN_CARD_WIDTH_BY_SIZE.medium;
   let columns = PREFERRED_COLUMNS_BY_SIZE[cardSize] || 3;
   while (columns > 1) {
-    const cardWidth = Math.floor((usableWidth - (columns - 1) * GALLERY_GAP) / columns);
-    if (cardWidth >= minWidth) return { columns, cardWidth };
+    const totalGap = (columns - 1) * GALLERY_GAP;
+    const baseCardWidth = Math.floor((usableWidth - totalGap) / columns);
+    if (baseCardWidth >= minWidth) {
+      const remainder = (usableWidth - totalGap) - baseCardWidth * columns;
+      const cardWidths = Array.from(
+        { length: columns },
+        (_, index) => baseCardWidth + (index < remainder ? 1 : 0),
+      );
+      return { columns, cardWidths, cardWidth: cardWidths[0] ?? baseCardWidth };
+    }
     columns -= 1;
   }
-  return { columns: 1, cardWidth: usableWidth };
+  return { columns: 1, cardWidths: [usableWidth], cardWidth: usableWidth };
+}
+
+function cardOffsetX(paddingX: number, cardWidths: number[], columnIndex: number) {
+  let x = paddingX;
+  for (let i = 0; i < columnIndex; i += 1) {
+    x += cardWidths[i] + GALLERY_GAP;
+  }
+  return x;
+}
+
+function syncGalleryBleed(block: HTMLElement) {
+  const editorContainer = block.closest<HTMLElement>('.editor-container');
+  if (editorContainer) {
+    const paddingLeft = Number.parseFloat(getComputedStyle(editorContainer).paddingLeft) || 0;
+    block.style.setProperty('--bitable-doc-align-shift', `${paddingLeft}px`);
+  } else {
+    block.style.setProperty('--bitable-doc-align-shift', '0px');
+  }
+  block.style.setProperty('--bitable-block-shift', '0px');
+  block.style.setProperty('--bitable-gallery-width', `${GALLERY_DOC_WIDTH}px`);
 }
 
 const CARD_TITLE_BODY_HEIGHT = 56;
@@ -219,7 +255,6 @@ function drawGalleryCanvas(
   items: GalleryLayoutItem[],
   table: BaseTable,
   config: GalleryViewConfig,
-  selectedIds: Set<string>,
   collapsedGroups: Set<string>,
   imageCache: Map<string, HTMLImageElement>,
   recordsLength: number,
@@ -250,7 +285,6 @@ function drawGalleryCanvas(
     }
 
     const { record, x, y, width: cardWidth, height: cardHeight, coverHeight } = item;
-    const isSelected = selectedIds.has(record.id);
 
     ctx.save();
     ctx.shadowColor = 'rgba(31, 35, 41, .08)';
@@ -261,8 +295,8 @@ function drawGalleryCanvas(
     ctx.fill();
     ctx.restore();
 
-    ctx.strokeStyle = isSelected ? '#3370ff' : '#e6e8eb';
-    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.strokeStyle = '#e6e8eb';
+    ctx.lineWidth = 1;
     roundRect(ctx, x + 0.5, y + 0.5, cardWidth - 1, cardHeight - 1, 6);
     ctx.stroke();
 
@@ -415,7 +449,6 @@ export function BitableGalleryView({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const imageCacheRef = useRef(new Map<string, HTMLImageElement>());
-  const [surfaceWidth, setSurfaceWidth] = useState(720);
   const [imagePaintTick, forceImagePaint] = useState(0);
   const [recordMenu, setRecordMenu] = useState<{ recordId: string; left: number; top: number } | null>(null);
 
@@ -448,25 +481,35 @@ export function BitableGalleryView({
 
   useEffect(() => {
     const surface = surfaceRef.current;
-    if (!surface) return undefined;
-    const updateWidth = () => setSurfaceWidth(Math.max(320, Math.round(surface.clientWidth || 720)));
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(surface);
-    return () => observer.disconnect();
+    const block = surface?.closest<HTMLElement>('.feishu-bitable-block');
+    if (!surface || !block) return undefined;
+
+    const syncGalleryLayout = () => {
+      syncGalleryBleed(block);
+    };
+
+    syncGalleryLayout();
+    const observer = new ResizeObserver(syncGalleryLayout);
+    observer.observe(block);
+    if (block.parentElement) observer.observe(block.parentElement);
+    window.addEventListener('resize', syncGalleryLayout);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncGalleryLayout);
+    };
   }, []);
 
   const layout = useMemo(() => {
-    const usableWidth = Math.max(240, surfaceWidth - GALLERY_PADDING_X * 2);
-    const { columns, cardWidth } = resolveGalleryColumns(usableWidth, config.cardSize);
-    const coverHeight = coverHeightFor(cardWidth, config);
+    const usableWidth = Math.max(240, GALLERY_DOC_WIDTH - GALLERY_PADDING_X * 2);
+    const { columns, cardWidths, cardWidth } = resolveGalleryColumns(usableWidth, config.cardSize);
     let maxVisibleFieldRows = 0;
     records.forEach(record => {
       const count = displayedFieldIds(record, table, config).length;
       maxVisibleFieldRows = Math.max(maxVisibleFieldRows, count);
     });
     const bodyHeight = CARD_TITLE_BODY_HEIGHT + Math.min(maxVisibleFieldRows, 4) * CARD_FIELD_ROW_HEIGHT;
-    const cardHeight = coverHeight + bodyHeight;
+    const rowCoverHeight = Math.max(...cardWidths.map(width => coverHeightFor(width, config)));
+    const rowCardHeight = rowCoverHeight + bodyHeight;
     const items: GalleryLayoutItem[] = [];
     let y = GALLERY_PADDING_TOP;
 
@@ -479,15 +522,28 @@ export function BitableGalleryView({
         group.records.forEach((record, index) => {
           const col = index % columns;
           const row = Math.floor(index / columns);
-          const x = GALLERY_PADDING_X + col * (cardWidth + GALLERY_GAP);
-          const cardY = y + row * (cardHeight + GALLERY_GAP);
+          const cardItemWidth = cardWidths[col] ?? cardWidth;
+          const x = cardOffsetX(GALLERY_PADDING_X, cardWidths, col);
+          const coverHeight = coverHeightFor(cardItemWidth, config);
+          const cardHeight = coverHeight + bodyHeight;
+          const cardY = y + row * (rowCardHeight + GALLERY_GAP);
           const deleteRect = config.showRecordActions
-            ? { x: x + cardWidth - 34, y: cardY + 8, width: 26, height: 26 }
+            ? { x: x + cardItemWidth - 34, y: cardY + 8, width: 26, height: 26 }
             : undefined;
-          items.push({ type: 'card', key: record.id, record, x, y: cardY, width: cardWidth, height: cardHeight, coverHeight, deleteRect });
+          items.push({
+            type: 'card',
+            key: record.id,
+            record,
+            x,
+            y: cardY,
+            width: cardItemWidth,
+            height: cardHeight,
+            coverHeight,
+            deleteRect,
+          });
         });
         if (group.records.length > 0) {
-          y += Math.ceil(group.records.length / columns) * cardHeight + (Math.ceil(group.records.length / columns) - 1) * GALLERY_GAP;
+          y += Math.ceil(group.records.length / columns) * rowCardHeight + (Math.ceil(group.records.length / columns) - 1) * GALLERY_GAP;
         }
       }
       if (groupIndex < groups.length - 1) {
@@ -499,7 +555,7 @@ export function BitableGalleryView({
     let height: number;
     if (records.length === 0) {
       height = GALLERY_PADDING_TOP + EMPTY_HEIGHT + GALLERY_PADDING_BOTTOM;
-      addRect = { x: surfaceWidth / 2 - 48, y: GALLERY_PADDING_TOP + EMPTY_HEIGHT / 2 + 4, width: 96, height: 32 };
+      addRect = { x: GALLERY_DOC_WIDTH / 2 - 48, y: GALLERY_PADDING_TOP + EMPTY_HEIGHT / 2 + 4, width: 96, height: 32 };
     } else {
       const addY = y + ADD_RECORD_MARGIN_TOP;
       addRect = { x: GALLERY_PADDING_X, y: addY, width: ADD_RECORD_WIDTH, height: ADD_RECORD_HEIGHT };
@@ -511,7 +567,7 @@ export function BitableGalleryView({
       height,
       addRect,
     };
-  }, [collapsedGroups, config, groups, records, surfaceWidth, table]);
+  }, [collapsedGroups, config, groups, records, table]);
 
   useEffect(() => {
     const urls = new Set<string>();
@@ -535,15 +591,15 @@ export function BitableGalleryView({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(surfaceWidth * dpr);
+    canvas.width = Math.round(GALLERY_DOC_WIDTH * dpr);
     canvas.height = Math.round(layout.height * dpr);
-    canvas.style.width = `${surfaceWidth}px`;
+    canvas.style.width = `${GALLERY_DOC_WIDTH}px`;
     canvas.style.height = `${layout.height}px`;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawGalleryCanvas(ctx, surfaceWidth, layout.height, layout.items, table, config, selectedIds, collapsedGroups, imageCacheRef.current, records.length, layout.addRect);
-  }, [collapsedGroups, config, imagePaintTick, layout, records.length, selectedIds, surfaceWidth, table]);
+    drawGalleryCanvas(ctx, GALLERY_DOC_WIDTH, layout.height, layout.items, table, config, collapsedGroups, imageCacheRef.current, records.length, layout.addRect);
+  }, [collapsedGroups, config, imagePaintTick, layout, records.length, table]);
 
   const toggleGroup = useCallback((groupKey: string) => {
     setCollapsedGroups(current => {
