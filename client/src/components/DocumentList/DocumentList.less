@@ -145,6 +145,21 @@
           box-shadow: @shadow-sm;
         }
 
+        &:disabled {
+          cursor: default;
+          opacity: 0.72;
+        }
+
+        &.action-card-upload.is-dragging {
+          border-color: #f57c00;
+          background: #fff8ec;
+          box-shadow: 0 0 0 2px rgba(245, 124, 0, 0.12), @shadow-sm;
+        }
+
+        &.action-card-upload.is-dragging .icon-upload {
+          background: #ffe5bd;
+        }
+
         .action-card-icon {
           width: 32px;
           height: 32px;

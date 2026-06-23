@@ -26,6 +26,7 @@ import './DocumentList.less';
 
 const TABS = ['最近访问', '归我所有', '与我共享', '收藏'];
 const CURRENT_USER = '张正人';
+const SUPPORTED_IMPORT_EXTENSIONS = new Set(['txt', 'md', 'csv', 'log']);
 
 type ViewMode = 'list' | 'grid';
 type SortKey = 'updated_at' | 'created_at' | 'title';
@@ -83,8 +84,11 @@ export default function DocumentList() {
   const [rowMenu, setRowMenu] = useState<RowMenu | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [templateDialogVisible, setTemplateDialogVisible] = useState(false);
+  const [isUploadDragging, setIsUploadDragging] = useState(false);
+  const [isImportingFile, setIsImportingFile] = useState(false);
   const rowMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadDragDepthRef = useRef(0);
   const navigate = useNavigate();
 
   const loadDocuments = useCallback(async () => {
@@ -162,22 +166,78 @@ export default function DocumentList() {
     fileInputRef.current?.click();
   };
 
+  const importFile = useCallback(async (file: File) => {
+    const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+    if (!SUPPORTED_IMPORT_EXTENSIONS.has(extension)) {
+      void MessagePlugin.warning('暂只支持导入 txt、md、csv、log 文本文件');
+      return;
+    }
+
+    setIsImportingFile(true);
+    try {
+      const text = await file.text();
+      const res = await createDocument({
+        title: file.name.replace(/\.[^.]+$/, ''),
+        content: buildPlainTextDocument(text),
+        author: CURRENT_USER,
+      });
+      if (res.code === 0 && res.data) {
+        void MessagePlugin.success('已导入为新文档');
+        navigate(`/doc/${res.data.id}`);
+      } else {
+        void MessagePlugin.error(res.message || '导入失败');
+      }
+    } catch {
+      void MessagePlugin.error('读取文件失败，请重试');
+    } finally {
+      setIsImportingFile(false);
+    }
+  }, [navigate]);
+
   const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    const text = await file.text();
-    const res = await createDocument({
-      title: file.name.replace(/\.[^.]+$/, ''),
-      content: buildPlainTextDocument(text),
-      author: CURRENT_USER,
-    });
-    if (res.code === 0 && res.data) {
-      void MessagePlugin.success('已导入为新文档');
-      navigate(`/doc/${res.data.id}`);
-    } else {
-      void MessagePlugin.error(res.message || '导入失败');
-    }
+    await importFile(file);
+  };
+
+  const hasDraggedFiles = (event: React.DragEvent<HTMLElement>) =>
+    Array.from(event.dataTransfer.types ?? []).includes('Files');
+
+  const handleUploadDragEnter = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    uploadDragDepthRef.current += 1;
+    setIsUploadDragging(true);
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleUploadDragOver = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleUploadDragLeave = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    uploadDragDepthRef.current = Math.max(0, uploadDragDepthRef.current - 1);
+    if (uploadDragDepthRef.current === 0) setIsUploadDragging(false);
+  };
+
+  const handleUploadDrop = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    uploadDragDepthRef.current = 0;
+    setIsUploadDragging(false);
+
+    const file = event.dataTransfer.files?.[0];
+    if (!file) return;
+    void importFile(file);
   };
 
   const openRowMenu = useCallback((e: React.MouseEvent, docId: string) => {
@@ -280,13 +340,22 @@ export default function DocumentList() {
             </span>
           </button>
 
-          <button type="button" className="action-card" onClick={handleUploadClick}>
+          <button
+            type="button"
+            className={`action-card action-card-upload${isUploadDragging ? ' is-dragging' : ''}${isImportingFile ? ' is-importing' : ''}`}
+            onClick={handleUploadClick}
+            onDragEnter={handleUploadDragEnter}
+            onDragOver={handleUploadDragOver}
+            onDragLeave={handleUploadDragLeave}
+            onDrop={handleUploadDrop}
+            disabled={isImportingFile}
+          >
             <span className="action-card-icon icon-upload">
               <UploadIcon size="18px" />
             </span>
             <span className="action-card-text">
               <span className="action-card-name">上传导入</span>
-              <span className="action-card-desc">本地文本快速转为文档</span>
+              <span className="action-card-desc">{isUploadDragging ? '松开以上传文件' : '本地文本快速转为文档'}</span>
             </span>
           </button>
 
