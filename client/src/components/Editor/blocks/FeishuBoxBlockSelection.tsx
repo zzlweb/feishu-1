@@ -14,6 +14,7 @@ import {
   findSelectableUnitAtPoint,
   findUnitsInClientRect,
   isBlankEditorPoint,
+  isListItemEmpty,
   isListItemTextArea,
   isListSelectableUnit,
   isListTextPoint,
@@ -388,6 +389,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, editorCo
         && isListSelectableUnit(unitAtPoint)
         && targetElement
         && isListItemTextArea(targetElement)
+        && !isListItemEmpty(unitAtPoint.dom)
         && !isListTextPoint(targetElement, e.clientX, e.clientY)
       ) {
         if (selectedRef.current.length > 0) clearSelection();

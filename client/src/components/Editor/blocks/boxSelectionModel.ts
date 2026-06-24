@@ -65,7 +65,7 @@ const WIDGET_BLOCK_SELECTOR =
   '[data-local-block], [contenteditable="false"], img, video, audio, iframe, .feishu-image-block, .feishu-local-card, .feishu-button-block, .feishu-formula-editor, .feishu-bitable-block, .feishu-sync-block, .feishu-media-preview, .feishu-file-actions, .feishu-divider, .feishu-code-block__toolbar, .feishu-highlight-block-wrap';
 
 const BITABLE_VIEW_INTERACTION_SELECTOR =
-  '.base-grid-wrap, .base-grid-shell, .base-grid-canvas-scroll, .base-grid-canvas, .base-gantt-shell, .base-toolbar-panel, .base-settings, .base-field-edit-popover-portal, .base-delete-view-overlay, .bitable-record-card-mask';
+  '.base-grid-wrap, .base-grid-shell, .base-grid-canvas-scroll, .base-grid-canvas, .base-gantt-shell, .base-toolbar-panel, .base-settings, .base-field-edit-popover-portal, .base-delete-view-overlay, .bitable-record-card-mask, .base-kanban__card, .base-gallery-card, .base-gallery-add-record';
 
 const BITABLE_BLOCK_SELECTABLE_SURFACE_SELECTOR =
   '.base-gallery-surface, .base-kanban, .base-kanban__scroll, .base-kanban__board';
@@ -223,7 +223,7 @@ function isBitableBlockSelectionSurface(element: Element): boolean {
   if (element.closest('.base-viewbar, .base-toolbar-panel, .base-settings, .base-field-edit-popover-portal, .base-delete-view-overlay')) {
     return false;
   }
-  if (element.closest('.base-kanban-hscroll, .base-kanban-hscroll__thumb, .base-gallery-canvas-delete-hit, .base-gallery-canvas-add-hit')) {
+  if (element.closest('.base-kanban-hscroll, .base-kanban-hscroll__thumb, .base-kanban__card, .base-gallery-card, .base-gallery-add-record, .base-gallery-canvas-delete-hit, .base-gallery-canvas-add-hit')) {
     return false;
   }
   return Boolean(element.closest(BITABLE_BLOCK_SELECTABLE_SURFACE_SELECTOR));

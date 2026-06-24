@@ -78,7 +78,8 @@ export function insertStandaloneHorizontalRule(
 function findHorizontalRuleInsideList(doc: ProseNode): { from: number; to: number; insertPos: number } | null {
   let found: { from: number; to: number; insertPos: number } | null = null;
   doc.descendants((node, pos) => {
-    if (found || node.type.name !== 'horizontalRule') return false;
+    if (found) return false;
+    if (node.type.name !== 'horizontalRule') return true;
     const $pos = doc.resolve(pos);
     let listDepth = -1;
     for (let depth = $pos.depth; depth > 0; depth -= 1) {

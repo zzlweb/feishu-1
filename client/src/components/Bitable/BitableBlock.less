@@ -1035,8 +1035,8 @@
   }
 
   .base-gallery-card__body {
-    min-height: 150px;
-    padding: 16px;
+    min-height: 0;
+    padding: 14px 16px 16px;
   }
 
   .base-gallery-card__title {
@@ -1070,6 +1070,15 @@
   .base-gallery-card__field label {
     flex-shrink: 0;
     color: #8f959e;
+  }
+
+  .base-gallery-card__empty-value {
+    color: #bbbfc4;
+  }
+
+  .base-gallery-card.is-selected {
+    border-color: #3370ff;
+    box-shadow: 0 0 0 1px #3370ff, 0 6px 18px rgba(31, 35, 41, .12);
   }
 
   .base-cell-tag {
@@ -1953,17 +1962,13 @@
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
+    background: #fff;
+    border-left: 1px solid #dee0e3;
+    border-right: 1px solid #dee0e3;
     pointer-events: none;
 
     &::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 1px;
-      height: 100%;
-      background: #dee0e3;
-      pointer-events: none;
+      content: none;
     }
 
     &__header {
@@ -1977,7 +1982,7 @@
       margin: 0;
       border: 0;
       border-top: 1px solid #dee0e3;
-      border-left: 1px solid #dee0e3;
+      border-bottom: 1px solid #dee0e3;
       background: #fff;
       color: #8f959e;
       font-size: 16px;
@@ -4207,7 +4212,7 @@
     margin-left: 0;
   }
 
-  .base-gallery-surface.base-gallery-surface--canvas {
+  .base-gallery-surface {
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
@@ -8330,70 +8335,127 @@
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.bitable-card-history {
+.bitable-records-history {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
-  padding: 0 20px 12px;
-  overflow: auto;
+  padding: 0 20px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.bitable-card-history-table {
+.bitable-records-history-table__container {
+  position: relative;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.bitable-records-history-table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
-.bitable-card-history-table th {
-  padding: 10px 8px;
-  border-bottom: 1px solid #dee0e3;
-  color: #8f959e;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 20px;
-  text-align: left;
+.bitable-records-history-table th:nth-child(1),
+.bitable-records-history-table td:nth-child(1) {
+  width: 9%;
 }
 
-.bitable-card-history-table td {
-  padding: 12px 8px;
+.bitable-records-history-table th:nth-child(2),
+.bitable-records-history-table td:nth-child(2) {
+  width: 18%;
+}
+
+.bitable-records-history-table th:nth-child(3),
+.bitable-records-history-table td:nth-child(3) {
+  width: 20%;
+}
+
+.bitable-records-history-table th:nth-child(4),
+.bitable-records-history-table td:nth-child(4) {
+  width: 24%;
+}
+
+.bitable-records-history-table th:nth-child(5),
+.bitable-records-history-table td:nth-child(5) {
+  width: 4%;
+}
+
+.bitable-records-history-table th:nth-child(6),
+.bitable-records-history-table td:nth-child(6) {
+  width: 25%;
+}
+
+.bitable-records-history-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+}
+
+.bitable-records-history-table th {
+  padding: 8px 8px 10px;
+  border-bottom: 1px solid #dee0e3;
+  color: #646a73;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.bitable-records-history-table td {
+  height: 60px;
+  padding: 0 8px;
   border-bottom: 1px solid #f0f1f2;
   vertical-align: middle;
   font-size: 14px;
   line-height: 22px;
 }
 
-.bitable-card-history-table th:nth-child(1),
-.bitable-card-history-table td:nth-child(1) { width: 72px; }
+.bitable-records-history-table .history-change-content {
+  max-width: 0;
+  overflow: hidden;
+}
 
-.bitable-card-history-table th:nth-child(2),
-.bitable-card-history-table td:nth-child(2) { width: 120px; }
-
-.bitable-card-history-table th:nth-child(3),
-.bitable-card-history-table td:nth-child(3) { width: 120px; }
-
-.bitable-card-history-table th:nth-child(5),
-.bitable-card-history-table td:nth-child(5) { width: 24px; padding: 0; text-align: center; }
-
-.bitable-card-history-time {
+.bitable-records-history-table__cell__date {
   color: #646a73;
   white-space: nowrap;
 }
 
-.bitable-card-history-operator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.bitable-records-history-table__cell__user {
   min-width: 0;
 }
 
-.bitable-card-history-avatar {
+.bitable-records-history-table__cell__user .b-user-tag-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.bitable-records-history-table__cell__user .b-user-tag-text {
+  overflow: hidden;
+  color: #1f2329;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bitable-records-history-table__cell__user-avatar {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
+  overflow: hidden;
   border-radius: 50%;
   color: #fff;
   background: #3370ff;
@@ -8401,7 +8463,7 @@
   line-height: 1;
 }
 
-.bitable-card-history-field {
+.bitable-records-history-table__cell__field {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -8409,47 +8471,138 @@
   color: #646a73;
 }
 
-.bitable-card-history-field-icon {
+.bitable-records-history-table__cell__field-icon {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 16px;
+  color: #8f959e;
 }
 
-.bitable-card-history-arrow {
+.bitable-records-history-table__cell__field-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bitable-records-history-table__cell__field-content {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.bitable-records-history-table__cell__empty {
   color: #bbbfc4;
-  font-size: 12px;
 }
 
-.bitable-card-history-value.is-empty {
+.bitable-records-history-table__cell-arrow {
+  padding: 0;
+  text-align: center;
+}
+
+.bitable-records-history-table__cell__change-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: #bbbfc4;
+  font-size: 14px;
+  line-height: 1;
 }
 
-.bitable-card-history-end,
-.bitable-card-history-empty .bitable-card-history-end {
-  margin: 16px 0 0;
+.bitable-rh-text {
+  overflow: hidden;
+  color: #1f2329;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bitable-rh-text__multi-line {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.bitable-rh-attachment-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.bitable-rh-attachment-cell__image {
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 24px;
+  max-width: 42px;
+  overflow: hidden;
+  border: 1px solid #dee0e3;
+  border-radius: 4px;
+  background: #f5f6f7;
+}
+
+.bitable-rh-attachment-cell__image .bitable-attachment-item__image {
+  display: block;
+  width: auto;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bitable-rh-attachment-cell__file {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid #dee0e3;
+  border-radius: 4px;
+  color: #3370ff;
+  background: #eef3ff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.bitable-records-history-table .bitable-card-select-tag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.bitable-records-history-table__footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 85px;
   color: #8f959e;
   font-size: 13px;
   line-height: 20px;
   text-align: center;
 }
 
-.bitable-card-history-empty {
+.bitable-records-history--empty {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 240px;
-  padding: 48px 0 24px;
+  padding: 48px 0 0;
   color: #8f959e;
   text-align: center;
 }
 
-.bitable-card-history-empty p {
-  margin: 0;
+.bitable-records-history--empty p {
+  margin: 0 0 auto;
+}
+
+.bitable-records-history--empty .bitable-records-history-table__footer {
+  width: 100%;
+  margin-top: auto;
 }
 
 .card-modal-form {
@@ -8507,6 +8660,49 @@
 .bitable-card-field-value {
   position: relative;
   min-width: 0;
+}
+
+.bitable-card-field-value--tdesign {
+  min-height: 32px;
+}
+
+.bitable-card-tdesign-control {
+  width: 100%;
+}
+
+.bitable-card-tdesign-control.t-input,
+.bitable-card-tdesign-control .t-input,
+.bitable-card-tdesign-control .t-input__wrap,
+.bitable-card-tdesign-control .t-select__wrap {
+  width: 100%;
+}
+
+.bitable-card-tdesign-control .t-input,
+.bitable-card-tdesign-control.t-input {
+  min-height: 32px;
+  border-radius: 6px;
+  background: transparent;
+  color: #1f2329;
+  font-size: 14px;
+}
+
+.bitable-card-tdesign-control:hover .t-input,
+.bitable-card-tdesign-control.t-input:hover {
+  background: #fff;
+}
+
+.bitable-card-tdesign-control .t-input__inner {
+  font-size: 14px;
+}
+
+.bitable-card-tdesign-control .t-input__inner::placeholder {
+  color: #bbbfc4;
+}
+
+.bitable-card-checkbox {
+  min-height: 32px;
+  color: #646a73;
+  font-size: 14px;
 }
 
 .bitable-card-field-value--select,
@@ -8640,6 +8836,458 @@
   color: #646a73;
   font-size: 14px;
   line-height: 32px;
+}
+
+.bitable-card-field-value--attachment {
+  z-index: 2;
+  min-height: 32px;
+}
+
+.bitable-card-attachment-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 2px;
+}
+
+.bitable-card-attachment-inline.is-empty {
+  min-height: 32px;
+}
+
+.bitable-card-attachment-inline.is-active .bitable-card-attachment-add {
+  background: #edf4ff;
+  color: #3370ff;
+}
+
+.bitable-card-attachment-previews {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.bitable-card-attachment-empty {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding-left: 8px;
+  cursor: pointer;
+}
+
+.bitable-card-attachment-preview {
+  position: relative;
+  flex-shrink: 0;
+  width: 72px;
+  height: 40px;
+  overflow: hidden;
+  border: 1px solid #dee0e3;
+  border-radius: 4px;
+  background: #f5f6f7;
+}
+
+.bitable-card-attachment-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bitable-card-attachment-preview--file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3370ff;
+  background: #eef3ff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bitable-card-attachment-preview.is-failed {
+  border-color: #f54a45;
+}
+
+.bitable-card-attachment-preview.is-uploading::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: rgba(255, 255, 255, .72);
+}
+
+.bitable-card-attachment-preview__progress {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3370ff;
+  background: rgba(255, 255, 255, .72);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.bitable-card-attachment-add {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: #646a73;
+  background: transparent;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.bitable-card-attachment-add:hover:not(:disabled) {
+  color: #1f2329;
+  background: #f2f3f5;
+}
+
+.bitable-card-attachment-add:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.bitable-card-attachment-trigger {
+  box-sizing: border-box;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #8f959e;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 32px;
+  text-align: left;
+}
+
+.bitable-card-attachment-trigger.t-button {
+  justify-content: flex-start;
+  height: 32px;
+}
+
+.bitable-card-attachment-trigger .t-button__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bitable-card-attachment-trigger.has-files {
+  color: #1f2329;
+}
+
+.bitable-card-attachment-trigger:hover:not(:disabled),
+.bitable-card-attachment-trigger.is-active {
+  border-color: #dbe7ff;
+  background: #edf4ff;
+}
+
+.bitable-card-attachment-trigger:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.bitable-card-attachment-popup .t-popup__content {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.bitable-card-date-popup .t-popup__content {
+  padding: 0;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(31, 35, 41, .12);
+}
+
+.bitable-card-date-input-wrap {
+  width: 100%;
+  cursor: pointer;
+}
+
+.bitable-card-date-input-wrap .t-input {
+  cursor: pointer;
+}
+
+.bitable-card-date-shell {
+  width: 280px;
+  overflow: hidden;
+  border: 1px solid #dee0e3;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.bitable-card-date-calendar {
+  padding: 16px 20px 12px;
+}
+
+.bitable-card-date-calendar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin-bottom: 12px;
+}
+
+.bitable-card-date-calendar__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  color: #1f2329;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.bitable-card-date-calendar__title-arrow {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: #8f959e;
+  font-size: 12px;
+}
+
+.bitable-card-date-calendar__nav {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.bitable-card-date-calendar__nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: #646a73;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.bitable-card-date-calendar__nav-btn:hover {
+  background: #f2f3f5;
+}
+
+.bitable-card-date-calendar__weekdays,
+.bitable-card-date-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.bitable-card-date-calendar__weekdays {
+  margin-bottom: 8px;
+  color: #8f959e;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.bitable-card-date-calendar__day {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #1f2329;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 32px;
+  text-align: center;
+}
+
+.bitable-card-date-calendar__day:hover {
+  background: #f2f3f5;
+}
+
+.bitable-card-date-calendar__day.is-outside {
+  color: #bbbfc4;
+}
+
+.bitable-card-date-calendar__day.is-today:not(.is-selected) {
+  color: #3370ff;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #3370ff;
+}
+
+.bitable-card-date-calendar__day.is-selected {
+  color: #fff;
+  background: #3370ff;
+  box-shadow: none;
+}
+
+.bitable-card-date-calendar__day.is-selected:hover {
+  background: #2860e1;
+}
+
+.bitable-card-date-reminder {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 20px;
+  border-top: 1px solid #dee0e3;
+  color: #1f2329;
+  font-size: 14px;
+}
+
+.bitable-card-date-reminder__label {
+  margin-right: 6px;
+}
+
+.bitable-card-date-reminder__help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: auto;
+  border: 1px solid #8f959e;
+  border-radius: 50%;
+  color: #8f959e;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.bitable-card-date-reminder .t-switch {
+  flex-shrink: 0;
+}
+
+.bitable-card-attachment-popover-panel {
+  box-sizing: border-box;
+  min-width: 360px;
+  padding: 8px;
+  border: 1px solid #dee0e3;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(31, 35, 41, .14);
+}
+
+.bitable-card-attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.bitable-card-attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: #f8f9fa;
+}
+
+.bitable-card-attachment-item.is-failed {
+  background: #fff2f0;
+}
+
+.bitable-card-attachment-item__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 24px;
+  border-radius: 4px;
+  color: #3370ff;
+  background: #e8f0ff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.bitable-card-attachment-item__body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.bitable-card-attachment-item__name {
+  overflow: hidden;
+  color: #1f2329;
+  font-size: 13px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bitable-card-attachment-item__meta {
+  color: #8f959e;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.bitable-card-attachment-item.is-failed .bitable-card-attachment-item__meta {
+  color: #d83931;
+}
+
+.bitable-card-attachment-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 68px;
+  border: 1px dashed #d0d3d6;
+  border-radius: 4px;
+  color: #646a73;
+  background: #f8f9fa;
+  font-size: 13px;
+}
+
+.bitable-card-attachment-popover-panel.is-dragging .bitable-card-attachment-dropzone {
+  border-color: #3370ff;
+  color: #3370ff;
+  background: #f5f8ff;
+}
+
+.bitable-card-attachment-local {
+  width: 100%;
+  min-height: 34px;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: #1f2329;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.bitable-card-attachment-local.t-button {
+  justify-content: center;
+  height: 34px;
+}
+
+.bitable-card-attachment-local:hover {
+  background: #f5f6f7;
+}
+
+.bitable-card-attachment-input {
+  display: none;
 }
 
 .bitable-card-field-checkbox {

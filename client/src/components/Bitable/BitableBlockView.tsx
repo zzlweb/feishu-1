@@ -1640,32 +1640,6 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     input.click();
   };
 
-  const cardClick = (event: MouseEvent, recordId: string) => {
-    if (event.shiftKey && selectionAnchorRef.current) {
-      const first = records.findIndex(record => record.id === selectionAnchorRef.current);
-      const last = records.findIndex(record => record.id === recordId);
-      if (first >= 0 && last >= 0) {
-        const [start, end] = first < last ? [first, last] : [last, first];
-        setSelectedIds(new Set(records.slice(start, end + 1).map(record => record.id)));
-        return;
-      }
-    }
-    if (event.ctrlKey || event.metaKey) {
-      setSelectedIds(current => {
-        const next = new Set(current);
-        if (next.has(recordId)) next.delete(recordId); else next.add(recordId);
-        return next;
-      });
-      selectionAnchorRef.current = recordId;
-      return;
-    }
-    selectionAnchorRef.current = recordId;
-    setSelectedIds(new Set([recordId]));
-    if (activeView.type === 'gallery') {
-      setCardRecordId(recordId);
-    }
-  };
-
   const selectBlock = () => {
     const pos = typeof getPos === 'function' ? getPos() : null;
     if (typeof pos !== 'number') return;
@@ -1711,7 +1685,6 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       setCollapsedGroups={setCollapsedGroups}
       onDropFiles={onDropFiles}
       setDropActive={setDropActive}
-      cardClick={cardClick}
       removeRecords={removeRecords}
       addRecord={() => addRecord()}
       locked={activeView.locked}
@@ -2778,6 +2751,9 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             }
           }}
           onAddField={() => openAddFieldPanel()}
+          onUploadAttachment={(recordId, fieldId, files) => {
+            files.forEach(file => uploadAttachment(recordId, file, fieldId));
+          }}
         />,
         document.body,
       )}

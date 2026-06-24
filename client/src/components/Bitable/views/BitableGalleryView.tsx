@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { getAttachments, selectCoverAttachment, valueText, type AttachmentValue, type BaseRecord, type BaseTable, type GalleryViewConfig } from '../model/bitableModel';
+import {
+  getAttachments,
+  selectCoverAttachment,
+  valueText,
+  type BaseRecord,
+  type BaseTable,
+  type GalleryViewConfig,
+} from '../model/bitableModel';
 import { BitableGalleryRecordContextMenu } from '../records/BitableGalleryRecordContextMenu';
-import { isPreviewImage } from '../shared/BitableViewShared';
+import { FileBadge, isPreviewImage } from '../shared/BitableViewShared';
 
 export interface BitableGalleryGroup {
   key: string;
@@ -21,7 +28,6 @@ export interface BitableGalleryViewProps {
   setCollapsedGroups: (update: (current: Set<string>) => Set<string>) => void;
   onDropFiles: (event: DragEvent, recordId?: string) => void;
   setDropActive: (active: boolean) => void;
-  cardClick: (event: ReactMouseEvent, recordId: string) => void;
   removeRecords: (recordIds: string[], requireConfirm?: boolean) => boolean;
   addRecord: () => void;
   locked?: boolean;
@@ -34,96 +40,6 @@ export interface BitableGalleryViewProps {
   onOpenComment: (recordId: string) => void;
 }
 
-interface GalleryCardLayout {
-  type: 'card';
-  key: string;
-  record: BaseRecord;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  coverHeight: number;
-  deleteRect?: { x: number; y: number; width: number; height: number };
-}
-
-interface GalleryHeaderLayout {
-  type: 'header';
-  key: string;
-  group: BitableGalleryGroup;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-type GalleryLayoutItem = GalleryCardLayout | GalleryHeaderLayout;
-
-/** 与文档版心 @base-doc-page-width 一致 */
-const GALLERY_DOC_WIDTH = 860;
-const GALLERY_PADDING_X = 0;
-const GALLERY_PADDING_TOP = 16;
-const GALLERY_PADDING_BOTTOM = 16;
-const GALLERY_GAP = 16;
-const GALLERY_GROUP_GAP = 18;
-const HEADER_HEIGHT = 34;
-const HEADER_MARGIN_BOTTOM = 10;
-const ADD_RECORD_HEIGHT = 28;
-const ADD_RECORD_MARGIN_TOP = 8;
-const ADD_RECORD_WIDTH = 118;
-const EMPTY_HEIGHT = 176;
-
-const CARD_WIDTH_BY_SIZE: Record<GalleryViewConfig['cardSize'], number> = {
-  small: 188,
-  medium: 258,
-  large: 292,
-};
-
-/** 飞书画册默认列数：中号一行三列 */
-const PREFERRED_COLUMNS_BY_SIZE: Record<GalleryViewConfig['cardSize'], number> = {
-  small: 4,
-  medium: 3,
-  large: 2,
-};
-
-const MIN_CARD_WIDTH_BY_SIZE: Record<GalleryViewConfig['cardSize'], number> = {
-  small: 140,
-  medium: 168,
-  large: 210,
-};
-
-interface GalleryColumnLayout {
-  columns: number;
-  cardWidths: number[];
-  cardWidth: number;
-}
-
-function resolveGalleryColumns(usableWidth: number, cardSize: GalleryViewConfig['cardSize']): GalleryColumnLayout {
-  const minWidth = MIN_CARD_WIDTH_BY_SIZE[cardSize] || MIN_CARD_WIDTH_BY_SIZE.medium;
-  let columns = PREFERRED_COLUMNS_BY_SIZE[cardSize] || 3;
-  while (columns > 1) {
-    const totalGap = (columns - 1) * GALLERY_GAP;
-    const baseCardWidth = Math.floor((usableWidth - totalGap) / columns);
-    if (baseCardWidth >= minWidth) {
-      const remainder = (usableWidth - totalGap) - baseCardWidth * columns;
-      const cardWidths = Array.from(
-        { length: columns },
-        (_, index) => baseCardWidth + (index < remainder ? 1 : 0),
-      );
-      return { columns, cardWidths, cardWidth: cardWidths[0] ?? baseCardWidth };
-    }
-    columns -= 1;
-  }
-  return { columns: 1, cardWidths: [usableWidth], cardWidth: usableWidth };
-}
-
-function cardOffsetX(paddingX: number, cardWidths: number[], columnIndex: number) {
-  let x = paddingX;
-  for (let i = 0; i < columnIndex; i += 1) {
-    x += cardWidths[i] + GALLERY_GAP;
-  }
-  return x;
-}
-
 function syncGalleryBleed(block: HTMLElement) {
   const editorContainer = block.closest<HTMLElement>('.editor-container');
   if (editorContainer) {
@@ -133,293 +49,124 @@ function syncGalleryBleed(block: HTMLElement) {
     block.style.setProperty('--bitable-doc-align-shift', '0px');
   }
   block.style.setProperty('--bitable-block-shift', '0px');
-  block.style.setProperty('--bitable-gallery-width', `${GALLERY_DOC_WIDTH}px`);
 }
 
-const CARD_TITLE_BODY_HEIGHT = 56;
-const CARD_FIELD_ROW_HEIGHT = 28;
-const CARD_BODY_PADDING_X = 16;
-const CARD_BODY_PADDING_TOP = 16;
-
-function coverHeightFor(width: number, config: GalleryViewConfig) {
-  if (config.emptyCoverMode === 'hide-cover') return 0;
-  if (config.cardAspectRatio === '1:1') return width;
-  if (config.cardAspectRatio === '16:9') return Math.round(width * 9 / 16);
-  if (config.cardAspectRatio === 'auto') return 120;
-  return Math.round(width * 160 / CARD_WIDTH_BY_SIZE.medium);
+function coverRatioClass(ratio: GalleryViewConfig['cardAspectRatio']) {
+  if (ratio === '1:1') return 'ratio-1-1';
+  if (ratio === '16:9') return 'ratio-16-9';
+  if (ratio === 'auto') return 'ratio-auto';
+  return '';
 }
 
-function getCoverUrl(attachment: AttachmentValue | undefined) {
-  if (!isPreviewImage(attachment)) return '';
-  return attachment?.thumbnailUrl || attachment?.previewUrl || attachment?.url || '';
+function gridSizeClass(cardSize: GalleryViewConfig['cardSize']) {
+  if (cardSize === 'small') return 'size-small';
+  if (cardSize === 'large') return 'size-large';
+  return '';
 }
 
-function displayedFieldIds(record: BaseRecord, table: BaseTable, config: GalleryViewConfig) {
-  return config.visibleFieldIds.filter(fieldId => {
-    const field = table.fields.find(item => item.id === fieldId);
-    if (!field) return false;
-    return config.showEmptyFields || Boolean(valueText(record.fields[field.id]));
-  });
+function GalleryCardCover({
+  record,
+  config,
+}: {
+  record: BaseRecord;
+  config: GalleryViewConfig;
+}) {
+  const attachments = getAttachments(record, config.coverFieldId);
+  const cover = selectCoverAttachment(attachments);
+  const coverStyle = {
+    objectFit: config.coverFit,
+    objectPosition: config.coverPosition || 'center',
+  } as const;
+
+  return (
+    <>
+      {isPreviewImage(cover) ? (
+        <img
+          loading="lazy"
+          src={cover!.thumbnailUrl || cover!.previewUrl || cover!.url}
+          alt=""
+          style={coverStyle}
+        />
+      ) : cover ? (
+        <FileBadge attachment={cover} />
+      ) : (
+        <div className="base-gallery-empty-cover">
+          <span aria-hidden>▧</span>
+          {!config.coverFieldId ? <small>选择附件字段作为封面</small> : null}
+        </div>
+      )}
+      {attachments.length > 1 && config.showAttachmentCount ? (
+        <span className="base-gallery-count">{attachments.length}</span>
+      ) : null}
+      {cover?.mimeType.startsWith('video/') ? <span className="base-gallery-video" aria-hidden>▶</span> : null}
+    </>
+  );
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
-  const r = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-  ctx.lineTo(x + r, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
+function stopPointer(event: ReactMouseEvent) {
+  event.stopPropagation();
 }
 
-function drawEllipsisText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number) {
-  if (ctx.measureText(text).width <= maxWidth) {
-    ctx.fillText(text, x, y);
-    return;
-  }
-  let next = text;
-  while (next.length > 0 && ctx.measureText(`${next}…`).width > maxWidth) {
-    next = next.slice(0, -1);
-  }
-  ctx.fillText(next ? `${next}…` : '…', x, y);
-}
+function GalleryCard({
+  record,
+  table,
+  config,
+  selected,
+  onOpenRecord,
+  onContextMenu,
+  onDrop,
+  onDragOver,
+  showDelete,
+  onDelete,
+}: {
+  record: BaseRecord;
+  table: BaseTable;
+  config: GalleryViewConfig;
+  selected: boolean;
+  onOpenRecord: (recordId: string) => void;
+  onContextMenu: (event: ReactMouseEvent) => void;
+  onDrop: (event: DragEvent) => void;
+  onDragOver: (event: DragEvent) => void;
+  showDelete: boolean;
+  onDelete: (event: ReactMouseEvent) => void;
+}) {
+  const titleFieldId = config.titleFieldId || table.primaryFieldId;
+  const rawTitle = valueText(record.fields[titleFieldId]);
+  const title = rawTitle || '未命名记录';
+  const hideCover = config.emptyCoverMode === 'hide-cover';
 
-function drawWrappedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number) {
-  const words = Array.from(text);
-  let line = '';
-  let lineIndex = 0;
-  for (const word of words) {
-    const test = `${line}${word}`;
-    if (line && ctx.measureText(test).width > maxWidth) {
-      if (lineIndex === maxLines - 1) {
-        drawEllipsisText(ctx, line, x, y + lineIndex * lineHeight, maxWidth);
-        return;
-      }
-      ctx.fillText(line, x, y + lineIndex * lineHeight);
-      line = word;
-      lineIndex += 1;
-    } else {
-      line = test;
-    }
-  }
-  if (line) drawEllipsisText(ctx, line, x, y + lineIndex * lineHeight, maxWidth);
-}
-
-function clipRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
-  roundRect(ctx, x, y, width, height, radius);
-  ctx.clip();
-}
-
-function drawImageCover(
-  ctx: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  fit: GalleryViewConfig['coverFit'],
-  position: GalleryViewConfig['coverPosition'],
-) {
-  const iw = image.naturalWidth || image.width;
-  const ih = image.naturalHeight || image.height;
-  if (!iw || !ih) return;
-
-  const scale = fit === 'contain' ? Math.min(width / iw, height / ih) : Math.max(width / iw, height / ih);
-  const dw = iw * scale;
-  const dh = ih * scale;
-  let dx = x + (width - dw) / 2;
-  let dy = y + (height - dh) / 2;
-  if (position === 'top') dy = y;
-  if (position === 'bottom') dy = y + height - dh;
-  ctx.drawImage(image, dx, dy, dw, dh);
-}
-
-function drawVideoGlyph(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x, y + 10);
-  ctx.lineTo(x + 8, y + 5);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawGalleryCanvas(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  items: GalleryLayoutItem[],
-  table: BaseTable,
-  config: GalleryViewConfig,
-  collapsedGroups: Set<string>,
-  imageCache: Map<string, HTMLImageElement>,
-  recordsLength: number,
-  addRect: { x: number; y: number; width: number; height: number } | null,
-) {
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, width, height);
-
-  for (const item of items) {
-    if (item.type === 'header') {
-      const collapsed = collapsedGroups.has(item.group.key);
-      ctx.fillStyle = '#1f2329';
-      ctx.font = '500 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(collapsed ? '▸' : '▾', item.x, item.y + item.height / 2);
-      ctx.fillText(item.group.label, item.x + 22, item.y + item.height / 2);
-      const countText = String(item.group.records.length);
-      const countWidth = Math.ceil(ctx.measureText(countText).width) + 14;
-      const countX = item.x + 22 + ctx.measureText(item.group.label).width + 8;
-      ctx.fillStyle = '#f2f3f5';
-      roundRect(ctx, countX, item.y + 8, countWidth, 18, 9);
-      ctx.fill();
-      ctx.fillStyle = '#646a73';
-      ctx.font = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-      ctx.fillText(countText, countX + 7, item.y + 17);
-      continue;
-    }
-
-    const { record, x, y, width: cardWidth, height: cardHeight, coverHeight } = item;
-
-    ctx.save();
-    ctx.shadowColor = 'rgba(31, 35, 41, .08)';
-    ctx.shadowBlur = 8;
-    ctx.shadowOffsetY = 2;
-    ctx.fillStyle = '#fff';
-    roundRect(ctx, x, y, cardWidth, cardHeight, 6);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.strokeStyle = '#e6e8eb';
-    ctx.lineWidth = 1;
-    roundRect(ctx, x + 0.5, y + 0.5, cardWidth - 1, cardHeight - 1, 6);
-    ctx.stroke();
-
-    if (coverHeight > 0) {
-      ctx.save();
-      clipRoundedRect(ctx, x, y, cardWidth, coverHeight + 6, 6);
-      ctx.fillStyle = '#f5f6f7';
-      ctx.fillRect(x, y, cardWidth, coverHeight);
-      const attachments = getAttachments(record, config.coverFieldId);
-      const cover = selectCoverAttachment(attachments);
-      const url = getCoverUrl(cover);
-      const image = url ? imageCache.get(url) : undefined;
-      if (image?.complete && image.naturalWidth > 0) {
-        drawImageCover(ctx, image, x, y, cardWidth, coverHeight, config.coverFit, config.coverPosition || 'center');
-      } else if (cover) {
-        const kind = cover.mimeType.startsWith('video/') ? 'VIDEO' : cover.extension.toUpperCase() || 'FILE';
-        ctx.fillStyle = '#eef3ff';
-        roundRect(ctx, x + cardWidth / 2 - 28, y + coverHeight / 2 - 28, 56, 38, 5);
-        ctx.fill();
-        ctx.fillStyle = '#3370ff';
-        ctx.font = '700 12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        drawEllipsisText(ctx, kind, x + cardWidth / 2 - 22, y + coverHeight / 2 - 9, 44);
-        ctx.fillStyle = '#646a73';
-        ctx.font = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-        drawEllipsisText(ctx, cover.name, x + 24, y + coverHeight / 2 + 18, cardWidth - 48);
-        ctx.textAlign = 'left';
-      } else {
-        ctx.fillStyle = '#a8abb2';
-        ctx.font = '26px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('▧', x + cardWidth / 2, y + coverHeight / 2 - (config.coverFieldId ? 0 : 10));
-        if (!config.coverFieldId) {
-          ctx.fillStyle = '#8f959e';
-          ctx.font = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-          ctx.fillText('选择附件字段作为封面', x + cardWidth / 2, y + coverHeight / 2 + 18);
-        }
-        ctx.textAlign = 'left';
-      }
-      if (attachments.length > 1 && config.showAttachmentCount) {
-        const text = String(attachments.length);
-        const badgeWidth = Math.max(22, Math.ceil(ctx.measureText(text).width) + 14);
-        ctx.fillStyle = 'rgba(31, 35, 41, .62)';
-        roundRect(ctx, x + cardWidth - badgeWidth - 9, y + coverHeight - 27, badgeWidth, 18, 9);
-        ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, x + cardWidth - badgeWidth + 7 - 9, y + coverHeight - 18);
-      }
-      if (cover?.mimeType.startsWith('video/')) {
-        ctx.fillStyle = 'rgba(31, 35, 41, .62)';
-        roundRect(ctx, x + 9, y + coverHeight - 27, 25, 18, 9);
-        ctx.fill();
-        ctx.fillStyle = '#fff';
-        drawVideoGlyph(ctx, x + 18, y + coverHeight - 22);
-      }
-      ctx.restore();
-    }
-
-    const bodyX = x + CARD_BODY_PADDING_X;
-    const bodyY = y + coverHeight + CARD_BODY_PADDING_TOP;
-    const rawTitle = valueText(record.fields[config.titleFieldId || table.primaryFieldId]);
-    const title = rawTitle || '未命名记录';
-    ctx.fillStyle = rawTitle ? '#1f2329' : '#bbbfc4';
-    ctx.font = `${rawTitle ? '500' : '400'} 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-    ctx.textBaseline = 'top';
-    drawWrappedText(ctx, title, bodyX, bodyY, cardWidth - 32, 22, 2);
-
-    let fieldY = bodyY + 50;
-    ctx.font = '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    for (const fieldId of displayedFieldIds(record, table, config)) {
-      const field = table.fields.find(item => item.id === fieldId);
-      if (!field) continue;
-      const text = valueText(record.fields[field.id]);
-      const displayText = text || '空';
-      ctx.fillStyle = '#646a73';
-      const label = config.showFieldNames ? `${field.name} ` : '';
-      if (config.showFieldNames) {
-        ctx.fillStyle = '#8f959e';
-        drawEllipsisText(ctx, label, bodyX, fieldY, 88);
-        ctx.fillStyle = '#646a73';
-        drawEllipsisText(ctx, displayText, bodyX + Math.min(88, ctx.measureText(label).width + 6), fieldY, cardWidth - 44 - 88);
-      } else {
-        drawEllipsisText(ctx, displayText, bodyX, fieldY, cardWidth - 32);
-      }
-      fieldY += CARD_FIELD_ROW_HEIGHT;
-      if (fieldY > y + cardHeight - 18) break;
-    }
-
-    if (config.showRecordActions && item.deleteRect) {
-      const rect = item.deleteRect;
-      ctx.fillStyle = 'rgba(31, 35, 41, .62)';
-      roundRect(ctx, rect.x, rect.y, rect.width, rect.height, 5);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = '18px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('×', rect.x + rect.width / 2, rect.y + rect.height / 2 - 1);
-      ctx.textAlign = 'left';
-    }
-  }
-
-  if (recordsLength === 0) {
-    ctx.fillStyle = '#8f959e';
-    ctx.font = '14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('暂无记录', width / 2, GALLERY_PADDING_TOP + EMPTY_HEIGHT / 2 - 18);
-    ctx.strokeStyle = '#3370ff';
-    ctx.strokeRect(width / 2 - 48.5, GALLERY_PADDING_TOP + EMPTY_HEIGHT / 2 + 4.5, 96, 32);
-    ctx.fillStyle = '#3370ff';
-    ctx.fillText('新建记录', width / 2, GALLERY_PADDING_TOP + EMPTY_HEIGHT / 2 + 21);
-    ctx.textAlign = 'left';
-  } else if (addRect) {
-    ctx.fillStyle = '#646a73';
-    ctx.font = '14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('+ 添加记录', addRect.x + 10, addRect.y + addRect.height / 2);
-  }
+  return (
+    <article
+      className={`base-gallery-card${selected ? ' is-selected' : ''}`}
+      onMouseDown={stopPointer}
+      onClick={event => {
+        event.stopPropagation();
+        onOpenRecord(record.id);
+      }}
+      onContextMenu={onContextMenu}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      {!hideCover ? (
+        <div className={`base-gallery-card__cover ${coverRatioClass(config.cardAspectRatio)}`.trim()}>
+          <GalleryCardCover record={record} config={config} />
+        </div>
+      ) : null}
+      <div className="base-gallery-card__body">
+        <strong className={`base-gallery-card__title${rawTitle ? '' : ' is-placeholder'}`}>{title}</strong>
+      </div>
+      {showDelete ? (
+        <button
+          type="button"
+          className="base-gallery-card__delete"
+          aria-label="删除记录"
+          onClick={onDelete}
+        >
+          ×
+        </button>
+      ) : null}
+    </article>
+  );
 }
 
 export function BitableGalleryView({
@@ -433,7 +180,6 @@ export function BitableGalleryView({
   setCollapsedGroups,
   onDropFiles,
   setDropActive,
-  cardClick,
   removeRecords,
   addRecord,
   locked = false,
@@ -446,10 +192,7 @@ export function BitableGalleryView({
   onOpenComment,
 }: BitableGalleryViewProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const imageCacheRef = useRef(new Map<string, HTMLImageElement>());
-  const [imagePaintTick, forceImagePaint] = useState(0);
   const [recordMenu, setRecordMenu] = useState<{ recordId: string; left: number; top: number } | null>(null);
 
   const closeRecordMenu = useCallback(() => setRecordMenu(null), []);
@@ -475,9 +218,9 @@ export function BitableGalleryView({
   const openRecordMenu = useCallback((event: ReactMouseEvent, recordId: string) => {
     event.preventDefault();
     event.stopPropagation();
-    cardClick(event, recordId);
+    onOpenRecord(recordId);
     setRecordMenu({ recordId, left: event.clientX, top: event.clientY });
-  }, [cardClick]);
+  }, [onOpenRecord]);
 
   useEffect(() => {
     const surface = surfaceRef.current;
@@ -499,108 +242,6 @@ export function BitableGalleryView({
     };
   }, []);
 
-  const layout = useMemo(() => {
-    const usableWidth = Math.max(240, GALLERY_DOC_WIDTH - GALLERY_PADDING_X * 2);
-    const { columns, cardWidths, cardWidth } = resolveGalleryColumns(usableWidth, config.cardSize);
-    let maxVisibleFieldRows = 0;
-    records.forEach(record => {
-      const count = displayedFieldIds(record, table, config).length;
-      maxVisibleFieldRows = Math.max(maxVisibleFieldRows, count);
-    });
-    const bodyHeight = CARD_TITLE_BODY_HEIGHT + Math.min(maxVisibleFieldRows, 4) * CARD_FIELD_ROW_HEIGHT;
-    const rowCoverHeight = Math.max(...cardWidths.map(width => coverHeightFor(width, config)));
-    const rowCardHeight = rowCoverHeight + bodyHeight;
-    const items: GalleryLayoutItem[] = [];
-    let y = GALLERY_PADDING_TOP;
-
-    groups.forEach((group, groupIndex) => {
-      if (group.label) {
-        items.push({ type: 'header', key: `header:${group.key || 'all'}`, group, x: GALLERY_PADDING_X, y, width: usableWidth, height: HEADER_HEIGHT });
-        y += HEADER_HEIGHT + HEADER_MARGIN_BOTTOM;
-      }
-      if (!collapsedGroups.has(group.key)) {
-        group.records.forEach((record, index) => {
-          const col = index % columns;
-          const row = Math.floor(index / columns);
-          const cardItemWidth = cardWidths[col] ?? cardWidth;
-          const x = cardOffsetX(GALLERY_PADDING_X, cardWidths, col);
-          const coverHeight = coverHeightFor(cardItemWidth, config);
-          const cardHeight = coverHeight + bodyHeight;
-          const cardY = y + row * (rowCardHeight + GALLERY_GAP);
-          const deleteRect = config.showRecordActions
-            ? { x: x + cardItemWidth - 34, y: cardY + 8, width: 26, height: 26 }
-            : undefined;
-          items.push({
-            type: 'card',
-            key: record.id,
-            record,
-            x,
-            y: cardY,
-            width: cardItemWidth,
-            height: cardHeight,
-            coverHeight,
-            deleteRect,
-          });
-        });
-        if (group.records.length > 0) {
-          y += Math.ceil(group.records.length / columns) * rowCardHeight + (Math.ceil(group.records.length / columns) - 1) * GALLERY_GAP;
-        }
-      }
-      if (groupIndex < groups.length - 1) {
-        y += GALLERY_GROUP_GAP;
-      }
-    });
-
-    let addRect: { x: number; y: number; width: number; height: number } | null = null;
-    let height: number;
-    if (records.length === 0) {
-      height = GALLERY_PADDING_TOP + EMPTY_HEIGHT + GALLERY_PADDING_BOTTOM;
-      addRect = { x: GALLERY_DOC_WIDTH / 2 - 48, y: GALLERY_PADDING_TOP + EMPTY_HEIGHT / 2 + 4, width: 96, height: 32 };
-    } else {
-      const addY = y + ADD_RECORD_MARGIN_TOP;
-      addRect = { x: GALLERY_PADDING_X, y: addY, width: ADD_RECORD_WIDTH, height: ADD_RECORD_HEIGHT };
-      height = addY + ADD_RECORD_HEIGHT + GALLERY_PADDING_BOTTOM;
-    }
-
-    return {
-      items,
-      height,
-      addRect,
-    };
-  }, [collapsedGroups, config, groups, records, table]);
-
-  useEffect(() => {
-    const urls = new Set<string>();
-    for (const record of records) {
-      const cover = selectCoverAttachment(getAttachments(record, config.coverFieldId));
-      const url = getCoverUrl(cover);
-      if (url) urls.add(url);
-    }
-
-    urls.forEach(url => {
-      if (imageCacheRef.current.has(url)) return;
-      const image = new Image();
-      image.onload = () => forceImagePaint(value => value + 1);
-      image.onerror = () => forceImagePaint(value => value + 1);
-      image.src = url;
-      imageCacheRef.current.set(url, image);
-    });
-  }, [config.coverFieldId, records]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(GALLERY_DOC_WIDTH * dpr);
-    canvas.height = Math.round(layout.height * dpr);
-    canvas.style.width = `${GALLERY_DOC_WIDTH}px`;
-    canvas.style.height = `${layout.height}px`;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawGalleryCanvas(ctx, GALLERY_DOC_WIDTH, layout.height, layout.items, table, config, collapsedGroups, imageCacheRef.current, records.length, layout.addRect);
-  }, [collapsedGroups, config, imagePaintTick, layout, records.length, table]);
-
   const toggleGroup = useCallback((groupKey: string) => {
     setCollapsedGroups(current => {
       const next = new Set(current);
@@ -610,17 +251,12 @@ export function BitableGalleryView({
     });
   }, [setCollapsedGroups]);
 
-  const renderButtonStyle = (rect: { x: number; y: number; width: number; height: number }): CSSProperties => ({
-    left: rect.x,
-    top: rect.y,
-    width: rect.width,
-    height: rect.height,
-  });
+  const gridClassName = `base-gallery-grid ${gridSizeClass(config.cardSize)}`.trim();
 
   return (
     <div
       ref={surfaceRef}
-      className={`base-gallery-surface base-gallery-surface--canvas${dropActive ? ' is-drop-active' : ''}`}
+      className={`base-gallery-surface${dropActive ? ' is-drop-active' : ''}`}
       onDragOver={event => {
         if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
@@ -629,60 +265,58 @@ export function BitableGalleryView({
       onDragLeave={() => setDropActive(false)}
       onDrop={event => onDropFiles(event)}
     >
-      <div className="base-gallery-canvas-stage" style={{ height: layout.height }}>
-        <canvas ref={canvasRef} className="base-gallery-canvas" />
-        <div className="base-gallery-hit-layer" aria-hidden={false}>
-          {layout.items.map(item => {
-            if (item.type === 'header') {
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  className="base-gallery-canvas-header-hit"
-                  style={renderButtonStyle(item)}
-                  onClick={() => toggleGroup(item.group.key)}
-                  aria-label={`${collapsedGroups.has(item.group.key) ? '展开' : '折叠'}${item.group.label}`}
-                />
-              );
-            }
-            return (
-              <div key={item.key}>
-                <button
-                  type="button"
-                  className={`base-gallery-canvas-card-hit${selectedIds.has(item.record.id) ? ' is-selected' : ''}`}
-                  style={renderButtonStyle(item)}
-                  onClick={event => cardClick(event, item.record.id)}
-                  onContextMenu={event => openRecordMenu(event, item.record.id)}
-                  onDragOver={event => event.preventDefault()}
-                  onDrop={event => onDropFiles(event, item.record.id)}
-                  aria-label={`打开${valueText(item.record.fields[config.titleFieldId || table.primaryFieldId]) || '未命名记录'}`}
-                />
-                {config.showRecordActions && item.deleteRect && (
-                  <button
-                    type="button"
-                    className="base-gallery-canvas-delete-hit"
-                    style={renderButtonStyle(item.deleteRect)}
-                    aria-label="删除记录"
-                    onClick={event => {
+      {records.length === 0 ? (
+        <div className="base-gallery-empty">
+          <span>暂无记录</span>
+          <button type="button" onClick={() => addRecord()}>新建记录</button>
+        </div>
+      ) : (
+        groups.map(group => (
+          <section key={group.key || 'all'} className="base-gallery-group">
+            {group.label ? (
+              <button
+                type="button"
+                className="base-gallery-group__header"
+                onClick={() => toggleGroup(group.key)}
+                aria-label={`${collapsedGroups.has(group.key) ? '展开' : '折叠'}${group.label}`}
+              >
+                <span aria-hidden>{collapsedGroups.has(group.key) ? '▸' : '▾'}</span>
+                <span>{group.label}</span>
+                <em>{group.records.length}</em>
+              </button>
+            ) : null}
+            {!collapsedGroups.has(group.key) ? (
+              <div className={gridClassName}>
+                {group.records.map(record => (
+                  <GalleryCard
+                    key={record.id}
+                    record={record}
+                    table={table}
+                    config={config}
+                    selected={selectedIds.has(record.id)}
+                    onOpenRecord={onOpenRecord}
+                    onContextMenu={event => openRecordMenu(event, record.id)}
+                    onDragOver={event => event.preventDefault()}
+                    onDrop={event => onDropFiles(event, record.id)}
+                    showDelete={config.showRecordActions}
+                    onDelete={event => {
                       event.stopPropagation();
-                      removeRecords([item.record.id], true);
+                      removeRecords([record.id], true);
                     }}
                   />
-                )}
+                ))}
               </div>
-            );
-          })}
-          {layout.addRect && (
-            <button
-              type="button"
-              className="base-gallery-canvas-add-hit"
-              style={renderButtonStyle(layout.addRect)}
-              onClick={() => addRecord()}
-              aria-label={records.length === 0 ? '新建记录' : '添加记录'}
-            />
-          )}
-        </div>
-      </div>
+            ) : null}
+          </section>
+        ))
+      )}
+
+      {records.length > 0 ? (
+        <button type="button" className="base-gallery-add-record" onClick={() => addRecord()}>
+          + 添加记录
+        </button>
+      ) : null}
+
       {recordMenu && createPortal(
         <BitableGalleryRecordContextMenu
           menuRef={menuRef}

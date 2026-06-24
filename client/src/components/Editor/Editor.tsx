@@ -2040,6 +2040,7 @@ function getBlockToolsAnchorLeft(blockEl: HTMLElement, areaRectLeft: number, col
 }
 
 const TEXT_BLOCK_HIGHLIGHT_TAGS = /^(p|h[1-6]|li|blockquote)$/;
+const TEXT_BLOCK_HIGHLIGHT_HEIGHT = 30;
 
 function measureTextBlockVerticalSpan(
   editorInstance: {
@@ -2087,11 +2088,14 @@ function resolveBlockRowHighlightRect(
   if (blockEl.tagName.toLowerCase() === 'li') {
     const listRect = resolveListItemHighlightRect(blockEl, contentRight);
     const textSpan = editorInstance ? measureTextBlockVerticalSpan(editorInstance, blockEl) : null;
+    const baseTop = textSpan?.top ?? listRect.top;
+    const baseBottom = textSpan?.bottom ?? listRect.bottom;
+    const center = (baseTop + baseBottom) / 2;
     return {
-      top: (textSpan?.top ?? listRect.top) - areaRect.top,
+      top: center - TEXT_BLOCK_HIGHLIGHT_HEIGHT / 2 - areaRect.top,
       left: listRect.left - areaRect.left,
       width: listRect.width,
-      height: Math.max(1, textSpan ? textSpan.bottom - textSpan.top : listRect.height),
+      height: TEXT_BLOCK_HIGHLIGHT_HEIGHT,
     };
   }
 
@@ -2103,11 +2107,12 @@ function resolveBlockRowHighlightRect(
     : 0;
   const textSpan = editorInstance ? measureTextBlockVerticalSpan(editorInstance, blockEl) : null;
   if (textSpan) {
+    const center = (textSpan.top + textSpan.bottom) / 2;
     return {
-      top: textSpan.top - areaRect.top,
+      top: center - TEXT_BLOCK_HIGHLIGHT_HEIGHT / 2 - areaRect.top,
       left,
       width,
-      height: Math.max(1, textSpan.bottom - textSpan.top),
+      height: TEXT_BLOCK_HIGHLIGHT_HEIGHT,
     };
   }
   const highlightRect = columnContent?.isConnected

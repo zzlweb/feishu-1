@@ -369,7 +369,7 @@
         // Lists
         ul:not([data-type="taskList"]),
         ol {
-          margin: 2px 0;
+          margin: 0;
           padding-left: 22px;
           list-style-position: outside;
         }
@@ -378,6 +378,11 @@
         ol li {
           padding-left: 2px;
           line-height: 26px;
+        }
+
+        ul:not([data-type="taskList"]) li + li,
+        ol li + li {
+          margin-top: @editor-block-gap;
         }
 
         ul:not([data-type="taskList"]) li::marker,
@@ -396,7 +401,7 @@
         ul[data-type="taskList"] {
           list-style: none;
           padding-left: 0;
-          margin: 2px 0;
+          margin: 0;
 
           li {
             display: flex;
@@ -467,6 +472,10 @@
               text-decoration: line-through;
               color: @text-secondary;
             }
+          }
+
+          li + li {
+            margin-top: @editor-block-gap;
           }
         }
 

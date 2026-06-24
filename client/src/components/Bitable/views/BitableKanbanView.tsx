@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { valueText, type BaseField, type BaseRecord, type BaseTable, type CellValue, type GalleryViewConfig } from '../model/bitableModel';
 import { FieldDisplay, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
@@ -50,8 +50,22 @@ function syncKanbanDocAlign(block: HTMLElement) {
   block.style.setProperty('--bitable-kanban-width', `${KANBAN_DOC_WIDTH}px`);
 }
 
-function stop(event: MouseEvent) {
+function stop(event: { stopPropagation: () => void }) {
   event.stopPropagation();
+}
+
+function handleKanbanCardClick(
+  event: { stopPropagation: () => void },
+  recordId: string,
+  dragMovedRef: MutableRefObject<boolean>,
+  openRecord: (recordId: string) => void,
+) {
+  event.stopPropagation();
+  if (dragMovedRef.current) {
+    dragMovedRef.current = false;
+    return;
+  }
+  openRecord(recordId);
 }
 
 export function BitableKanbanView({
@@ -486,14 +500,11 @@ export function BitableKanbanView({
                           setDraggingRecordId(null);
                           setDropStatus(null);
                         }}
-                        onMouseDown={stop}
-                        onClick={() => {
-                          if (dragMovedRef.current) {
-                            dragMovedRef.current = false;
-                            return;
-                          }
-                          openRecord(record.id);
+                        onMouseDown={event => {
+                          stop(event);
+                          dragMovedRef.current = false;
                         }}
+                        onClick={event => handleKanbanCardClick(event, record.id, dragMovedRef, openRecord)}
                         onContextMenu={event => {
                           event.preventDefault();
                           event.stopPropagation();

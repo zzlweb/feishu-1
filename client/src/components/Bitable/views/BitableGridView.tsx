@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { valueText, buildRecordTreeMeta, buildGridDisplayRows, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, resolveRecordInsertIndex, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridDisplayRow, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from '../model/bitableModel';
 import { createPortal } from 'react-dom';
 import type { Ref } from 'react';
@@ -1509,20 +1509,34 @@ export function BitableGridView({
     ctx.lineWidth = 1;
     ctx.beginPath();
     const addRowTop = HEADER_HEIGHT + addRowIndex * ROW_HEIGHT;
+    const addFieldCrisp = Math.round(addFieldLeft) + 0.5;
+    const contentRightCrisp = gridContentRight - 0.5;
     const verticals = [0, ...columns.map(column => column.left + column.width), gridContentRight];
     verticals.forEach(x => {
       const crisp = Math.round(x) + 0.5;
       const isLeftEdge = Math.round(x) <= 0;
+      const isAddFieldEdge = Math.round(x) === Math.round(addFieldLeft);
+      if (isAddFieldEdge) {
+        // 表头区先画分隔线，表体区白底后会重绘
+        ctx.moveTo(crisp, 0);
+        ctx.lineTo(crisp, HEADER_HEIGHT);
+        return;
+      }
       ctx.moveTo(crisp, 0);
       ctx.lineTo(crisp, isLeftEdge ? canvasHeight : addRowTop);
     });
+    // 数据区横线；右侧「新增字段」列保持合并样式，不绘制行间横线
     for (let row = 0; row <= rowCount; row += 1) {
       const y = Math.round(HEADER_HEIGHT + row * ROW_HEIGHT) + 0.5;
+      const lineRight = row === rowCount ? contentRightCrisp : addFieldCrisp;
       ctx.moveTo(0, y);
-      ctx.lineTo(gridContentRight, y);
+      ctx.lineTo(lineRight, y);
     }
+    const headerBottomY = Math.round(HEADER_HEIGHT) + 0.5;
+    ctx.moveTo(addFieldCrisp, headerBottomY);
+    ctx.lineTo(contentRightCrisp, headerBottomY);
     ctx.moveTo(0.5, 0.5);
-    ctx.lineTo(gridContentRight - 0.5, 0.5);
+    ctx.lineTo(contentRightCrisp, 0.5);
     ctx.stroke();
 
     if (hoverAddFieldHeader) {
@@ -1534,7 +1548,7 @@ export function BitableGridView({
     ctx.textBaseline = 'middle';
     gridRows.forEach((row, rowIndex) => {
       if (row.kind === 'group') {
-        drawGridGroupRow(ctx, row, rowIndex, HEADER_HEIGHT, ROW_HEIGHT, gridContentRight, collapsedGroupKeys.has(row.key));
+        drawGridGroupRow(ctx, row, rowIndex, HEADER_HEIGHT, ROW_HEIGHT, addFieldLeft, collapsedGroupKeys.has(row.key));
         return;
       }
       const record = row.record;
@@ -1589,8 +1603,23 @@ export function BitableGridView({
 
     if (hoverAddRow) {
       ctx.fillStyle = '#f8f9fa';
-      ctx.fillRect(0, HEADER_HEIGHT + addRowIndex * ROW_HEIGHT, gridContentRight, ROW_HEIGHT);
+      ctx.fillRect(0, HEADER_HEIGHT + addRowIndex * ROW_HEIGHT, addFieldLeft, ROW_HEIGHT);
     }
+
+    // 新增字段列：表头以下合并为整块白底，覆盖分组行等背景
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(addFieldLeft, HEADER_HEIGHT, addFieldWidth, Math.max(0, addRowTop - HEADER_HEIGHT));
+
+    // 白底会盖住网格线，需重绘新增字段列左右边线与右边线
+    ctx.strokeStyle = '#dee0e3';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const addFieldRightCrisp = Math.round(gridContentRight) + 0.5;
+    ctx.moveTo(addFieldCrisp, HEADER_HEIGHT);
+    ctx.lineTo(addFieldCrisp, canvasHeight);
+    ctx.moveTo(addFieldRightCrisp, HEADER_HEIGHT);
+    ctx.lineTo(addFieldRightCrisp, canvasHeight);
+    ctx.stroke();
 
     if (shouldFreezeColumns && frozenCanvasRef.current) {
       const frozen = frozenCanvasRef.current;

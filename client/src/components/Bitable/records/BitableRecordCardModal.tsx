@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { fieldTypeGlyph } from '../shared/BitableViewShared';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { Button, Checkbox, Input, Popup, Select, Switch, Upload } from 'tdesign-react';
+import { CalendarIcon } from 'tdesign-icons-react';
+import type { PopupProps } from 'tdesign-react';
+import { fieldTypeGlyph, isPreviewImage } from '../shared/BitableViewShared';
 import {
   DEFAULT_RECORD_OPERATOR,
   findSelectChoice,
-  formatCardDateValue,
   formatHistoryCellValue,
   formatHistoryTime,
+  formatCardDateValue,
   getAttachments,
   textColorForBackground,
   valueText,
+  type AttachmentValue,
   type BaseField,
   type BaseRecord,
   type BaseTable,
@@ -30,6 +34,7 @@ export interface BitableRecordCardModalProps {
   onNavigate: (recordId: string) => void;
   onDelete?: (recordId: string) => void;
   onAddField?: () => void;
+  onUploadAttachment?: (recordId: string, fieldId: string, files: File[]) => void;
 }
 
 function fieldPlaceholder(field: BaseField) {
@@ -37,6 +42,98 @@ function fieldPlaceholder(field: BaseField) {
   if (field.type === 'relation') return '请选择记录';
   if (field.type === 'date') return '年/月/日';
   return '请输入内容';
+}
+
+/** 卡片弹层 z-index 为 10060，TDesign 浮层需挂到 body 并抬高层级 */
+const CARD_MODAL_POPUP_PROPS: PopupProps = {
+  attach: () => document.body,
+  zIndex: 10070,
+};
+
+function formatCardDateDisplay(value: CellValue): string {
+  const raw = valueText(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const [year, month, day] = raw.split('-');
+  return `${year}/${month}/${day}`;
+}
+
+function toNativeDateValue(value: CellValue): string {
+  const raw = valueText(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function dateValueFromParts(year: number, monthIndex: number, day: number): string {
+  return `${year}-${padDatePart(monthIndex + 1)}-${padDatePart(day)}`;
+}
+
+function parseDateParts(value: string): { year: number; monthIndex: number; day: number } | null {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  return Number.isFinite(year) && monthIndex >= 0 && monthIndex <= 11 && day >= 1 && day <= 31
+    ? { year, monthIndex, day }
+    : null;
+}
+
+function todayDateValue(): string {
+  const today = new Date();
+  return dateValueFromParts(today.getFullYear(), today.getMonth(), today.getDate());
+}
+
+function calendarCells(year: number, monthIndex: number, selectedValue: string) {
+  const firstDay = new Date(year, monthIndex, 1).getDay();
+  const offsetFromMonday = (firstDay + 6) % 7;
+  const todayValue = todayDateValue();
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(year, monthIndex, index - offsetFromMonday + 1);
+    const dateValue = dateValueFromParts(date.getFullYear(), date.getMonth(), date.getDate());
+    return {
+      dateValue,
+      day: date.getDate(),
+      isCurrentMonth: date.getMonth() === monthIndex,
+      isSelected: dateValue === selectedValue,
+      isToday: dateValue === todayValue,
+    };
+  });
+}
+
+function shiftedMonth(year: number, monthIndex: number, delta: number) {
+  const date = new Date(year, monthIndex + delta, 1);
+  return { year: date.getFullYear(), monthIndex: date.getMonth() };
+}
+
+/** 卡片弹层 stopPropagation 会阻断 TDesign 浮层的 document 关闭逻辑，需在 capture 阶段补一层 */
+function useCardModalOutsideDismiss(
+  open: boolean,
+  onDismiss: () => void,
+  rootRef: RefObject<HTMLElement | null>,
+  overlayRefOrCheck?: RefObject<HTMLElement | null> | ((target: Node) => boolean),
+) {
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (typeof overlayRefOrCheck === 'function') {
+        if (overlayRefOrCheck(target)) return;
+      } else if (overlayRefOrCheck?.current?.contains(target)) {
+        return;
+      }
+      onDismiss();
+    };
+    document.addEventListener('mousedown', onPointerDown, true);
+    return () => document.removeEventListener('mousedown', onPointerDown, true);
+  }, [open, onDismiss, rootRef, overlayRefOrCheck]);
+}
+
+function isSelectDropdownTarget(target: Node) {
+  return Boolean((target as Element).closest?.('.t-select__dropdown'));
 }
 
 const GlyphUp = () => (
@@ -75,18 +172,219 @@ const GlyphChevronDown = () => (
   </svg>
 );
 
-const GlyphCalendar = () => (
-  <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" aria-hidden>
-    <rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" strokeWidth="1.5" />
-    <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-  </svg>
-);
-
 const GlyphTrash = () => (
   <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" aria-hidden>
     <path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 6h2v9h-2V9Zm4 0h2v9h-2V9ZM7 9h2v9H7V9Z" fill="currentColor" />
   </svg>
 );
+
+function formatAttachmentSize(size: number) {
+  if (!Number.isFinite(size) || size <= 0) return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function getAttachmentPreviewUrl(attachment: AttachmentValue): string {
+  if (!isPreviewImage(attachment)) return '';
+  return attachment.thumbnailUrl || attachment.previewUrl || attachment.url || '';
+}
+
+function AttachmentPreviewChip({ attachment }: { attachment: AttachmentValue }) {
+  const previewUrl = getAttachmentPreviewUrl(attachment);
+  const isUploading = attachment.uploadStatus === 'uploading';
+  const isFailed = attachment.uploadStatus === 'failed';
+
+  if (previewUrl) {
+    return (
+      <div
+        className={`bitable-card-attachment-preview${isFailed ? ' is-failed' : ''}${isUploading ? ' is-uploading' : ''}`}
+        title={attachment.name}
+      >
+        <img src={previewUrl} alt={attachment.name} />
+        {isUploading ? (
+          <span className="bitable-card-attachment-preview__progress">{attachment.uploadProgress ?? 0}%</span>
+        ) : null}
+      </div>
+    );
+  }
+
+  const kind = attachment.mimeType.startsWith('video/') ? 'VIDEO' : (attachment.extension || 'file').slice(0, 3).toUpperCase();
+  return (
+    <div
+      className={`bitable-card-attachment-preview bitable-card-attachment-preview--file${isFailed ? ' is-failed' : ''}`}
+      title={attachment.name}
+    >
+      <span>{kind}</span>
+    </div>
+  );
+}
+
+function AttachmentFileItem({ attachment }: { attachment: AttachmentValue }) {
+  const statusText = attachment.uploadStatus === 'failed'
+    ? attachment.error || '上传失败'
+    : attachment.uploadStatus === 'uploading'
+      ? `上传中 ${attachment.uploadProgress ?? 0}%`
+      : formatAttachmentSize(attachment.size);
+
+  return (
+    <div className={`bitable-card-attachment-item${attachment.uploadStatus === 'failed' ? ' is-failed' : ''}`}>
+      <span className="bitable-card-attachment-item__icon" aria-hidden>
+        {(attachment.extension || 'file').slice(0, 3).toUpperCase()}
+      </span>
+      <span className="bitable-card-attachment-item__body">
+        <span className="bitable-card-attachment-item__name">{attachment.name}</span>
+        {statusText ? <span className="bitable-card-attachment-item__meta">{statusText}</span> : null}
+      </span>
+    </div>
+  );
+}
+
+function AttachmentUploadPopover({
+  field,
+  record,
+  disabled,
+  onUpload,
+}: {
+  field: BaseField;
+  record: BaseRecord;
+  disabled?: boolean;
+  onUpload?: (recordId: string, fieldId: string, files: File[]) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const attachments = getAttachments(record, field.id);
+  const canUpload = !disabled && Boolean(onUpload);
+
+  useEffect(() => {
+    if (!open) return;
+    popoverRef.current?.focus({ preventScroll: true });
+  }, [open]);
+
+  useCardModalOutsideDismiss(open, () => {
+    setOpen(false);
+    setIsDragging(false);
+  }, rootRef, popoverRef);
+
+  function uploadFiles(files: File[]) {
+    if (!files.length || !canUpload) return;
+    onUpload?.(record.id, field.id, files);
+    setOpen(false);
+    setIsDragging(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    uploadFiles(Array.from(event.dataTransfer.files));
+  }
+
+  const panel = (
+    <div
+      ref={popoverRef}
+      tabIndex={-1}
+      className={`bitable-card-attachment-popover-panel${isDragging ? ' is-dragging' : ''}`}
+      onMouseDown={event => event.stopPropagation()}
+      onPaste={event => {
+        const files = Array.from(event.clipboardData.files);
+        if (files.length > 0) {
+          event.preventDefault();
+          uploadFiles(files);
+        }
+      }}
+      onDragEnter={event => {
+        event.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragOver={event => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      }}
+      onDragLeave={event => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false);
+      }}
+      onDrop={handleDrop}
+    >
+      {attachments.length > 0 && (
+        <div className="bitable-card-attachment-list">
+          {attachments.map(attachment => <AttachmentFileItem key={attachment.id} attachment={attachment} />)}
+        </div>
+      )}
+      <div className="bitable-card-attachment-dropzone">
+        <span>粘贴或拖拽至这里上传</span>
+      </div>
+      <Upload
+        theme="custom"
+        multiple
+        autoUpload={false}
+        accept="image/*,video/*,application/pdf,*/*"
+        onSelectChange={files => {
+          uploadFiles(files);
+        }}
+      >
+        <Button
+          type="button"
+          variant="text"
+          className="bitable-card-attachment-local"
+        >
+          + 添加本地文件
+        </Button>
+      </Upload>
+    </div>
+  );
+
+  return (
+    <div ref={rootRef} className="bitable-card-field-value bitable-card-field-value--attachment bitable-card-field-value--tdesign">
+      <div className={`bitable-card-attachment-inline${open ? ' is-active' : ''}${attachments.length ? '' : ' is-empty'}`}>
+        <div
+          className="bitable-card-attachment-previews"
+          onClick={() => {
+            if (!attachments.length && canUpload) setOpen(true);
+          }}
+        >
+          {attachments.length > 0 ? (
+            attachments.map(attachment => (
+              <AttachmentPreviewChip key={attachment.id} attachment={attachment} />
+            ))
+          ) : (
+            <span className="bitable-card-attachment-empty bitable-card-field-placeholder">暂无附件</span>
+          )}
+        </div>
+        <Popup
+          visible={open}
+          trigger="click"
+          placement="bottom-left"
+          showArrow={false}
+          destroyOnClose={false}
+          disabled={!canUpload}
+          overlayClassName="bitable-card-attachment-popup"
+          overlayInnerStyle={{ padding: 0, background: 'transparent', boxShadow: 'none' }}
+          attach={CARD_MODAL_POPUP_PROPS.attach}
+          zIndex={CARD_MODAL_POPUP_PROPS.zIndex}
+          content={panel}
+          onVisibleChange={visible => {
+            if (!canUpload && visible) return;
+            setOpen(visible);
+            if (!visible) setIsDragging(false);
+          }}
+        >
+          <button
+            type="button"
+            className="bitable-card-attachment-add"
+            disabled={!canUpload}
+            aria-label="添加附件"
+            onMouseDown={event => event.stopPropagation()}
+          >
+            +
+          </button>
+        </Popup>
+      </div>
+    </div>
+  );
+}
 
 function SelectTag({ choice, label }: { choice: SelectChoice | null; label: string }) {
   const background = choice?.color || '#e8f0ff';
@@ -109,39 +407,172 @@ function DateFieldEditor({
   disabled?: boolean;
   onChange: (value: CellValue) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const display = formatCardDateValue(value);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const displayValue = formatCardDateDisplay(value);
+  const pickerValue = toNativeDateValue(value) || undefined;
+  const selectedParts = parseDateParts(pickerValue || todayDateValue())!;
+  const [viewMonth, setViewMonth] = useState(() => ({
+    year: selectedParts.year,
+    monthIndex: selectedParts.monthIndex,
+  }));
+  const days = useMemo(
+    () => calendarCells(viewMonth.year, viewMonth.monthIndex, pickerValue || todayDateValue()),
+    [pickerValue, viewMonth.monthIndex, viewMonth.year],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const nextParts = parseDateParts(pickerValue || todayDateValue())!;
+    setViewMonth({ year: nextParts.year, monthIndex: nextParts.monthIndex });
+  }, [open, pickerValue]);
+
+  useCardModalOutsideDismiss(open, () => setOpen(false), rootRef, target => {
+    return panelRef.current?.contains(target) ?? false;
+  });
+
   return (
-    <div className="bitable-card-field-value bitable-card-field-value--date">
-      <div className="bitable-card-date-display">
-        {display ? (
-          <span className="bitable-card-field-text">{display}</span>
-        ) : (
-          <span className="bitable-card-field-placeholder">{fieldPlaceholder(field)}</span>
-        )}
-        <button
-          type="button"
-          className="bitable-card-field-suffix bitable-card-date-trigger"
-          aria-label={`选择${field.name}`}
-          disabled={disabled}
-          onClick={() => {
-            const input = inputRef.current;
-            if (!input) return;
-            input.showPicker?.();
-            input.focus();
-          }}
-        >
-          <GlyphCalendar />
-        </button>
-      </div>
-      <input
-        ref={inputRef}
-        className="bitable-card-date-native"
-        type="date"
-        value={valueText(value)}
+    <div ref={rootRef} className="bitable-card-field-value bitable-card-field-value--tdesign bitable-card-field-value--date">
+      <Popup
+        visible={open}
+        trigger="click"
+        placement="bottom-left"
+        showArrow={false}
+        destroyOnClose={false}
         disabled={disabled}
-        aria-label={field.name}
-        onChange={event => onChange(event.target.value)}
+        overlayClassName="bitable-card-date-popup"
+        overlayInnerStyle={{ padding: 0 }}
+        attach={CARD_MODAL_POPUP_PROPS.attach}
+        zIndex={CARD_MODAL_POPUP_PROPS.zIndex}
+        content={(
+          <div ref={panelRef} className="bitable-card-date-shell">
+            <div className="bitable-card-date-calendar">
+              <div className="bitable-card-date-calendar__header">
+                <button
+                  type="button"
+                  className="bitable-card-date-calendar__title"
+                  aria-label="当前月份"
+                >
+                  <span>{viewMonth.year}年 {viewMonth.monthIndex + 1}月</span>
+                  <span className="bitable-card-date-calendar__title-arrow" aria-hidden><GlyphChevronDown /></span>
+                </button>
+                <div className="bitable-card-date-calendar__nav">
+                  <button
+                    type="button"
+                    className="bitable-card-date-calendar__nav-btn"
+                    aria-label="上个月"
+                    onClick={() => setViewMonth(current => shiftedMonth(current.year, current.monthIndex, -1))}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    className="bitable-card-date-calendar__nav-btn"
+                    aria-label="下个月"
+                    onClick={() => setViewMonth(current => shiftedMonth(current.year, current.monthIndex, 1))}
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+              <div className="bitable-card-date-calendar__weekdays" aria-hidden>
+                {['一', '二', '三', '四', '五', '六', '日'].map(day => <span key={day}>{day}</span>)}
+              </div>
+              <div className="bitable-card-date-calendar__grid">
+                {days.map(day => (
+                  <button
+                    key={day.dateValue}
+                    type="button"
+                    className={[
+                      'bitable-card-date-calendar__day',
+                      day.isCurrentMonth ? '' : 'is-outside',
+                      day.isToday ? 'is-today' : '',
+                      day.isSelected ? 'is-selected' : '',
+                    ].filter(Boolean).join(' ')}
+                    onClick={() => {
+                      onChange(day.dateValue);
+                      setOpen(false);
+                    }}
+                  >
+                    {day.day}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div
+              className="bitable-card-date-reminder"
+              onMouseDown={event => event.stopPropagation()}
+            >
+              <span className="bitable-card-date-reminder__label">到期提醒</span>
+              <span className="bitable-card-date-reminder__help" aria-hidden>?</span>
+              <Switch
+                size="small"
+                disabled={disabled}
+                value={reminderEnabled}
+                onChange={setReminderEnabled}
+              />
+            </div>
+          </div>
+        )}
+        onVisibleChange={visible => {
+          if (disabled) return;
+          setOpen(visible);
+        }}
+      >
+        <div className="bitable-card-date-input-wrap">
+          <Input
+            className="bitable-card-tdesign-control"
+            borderless
+            readonly
+            value={displayValue}
+            disabled={disabled}
+            placeholder={fieldPlaceholder(field)}
+            suffixIcon={<CalendarIcon />}
+          />
+        </div>
+      </Popup>
+    </div>
+  );
+}
+
+function SelectFieldEditor({
+  field,
+  value,
+  disabled,
+  onChange,
+}: {
+  field: BaseField;
+  value: CellValue;
+  disabled?: boolean;
+  onChange: (value: CellValue) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [popupOpen, setPopupOpen] = useState(false);
+  const choices = field.options?.choices ?? [];
+  const isMultiple = field.type === 'multi_select';
+  const current = isMultiple
+    ? (Array.isArray(value) ? value : valueText(value) ? [valueText(value)] : [])
+    : valueText(value);
+
+  useCardModalOutsideDismiss(popupOpen, () => setPopupOpen(false), rootRef, isSelectDropdownTarget);
+
+  return (
+    <div ref={rootRef} className="bitable-card-field-value bitable-card-field-value--tdesign">
+      <Select
+        className="bitable-card-tdesign-control"
+        borderless
+        clearable
+        disabled={disabled}
+        multiple={isMultiple}
+        options={choices.map(choice => ({ label: choice.name, value: choice.name }))}
+        placeholder={fieldPlaceholder(field)}
+        popupProps={CARD_MODAL_POPUP_PROPS}
+        popupVisible={popupOpen}
+        value={current}
+        onChange={nextValue => onChange(isMultiple ? (Array.isArray(nextValue) ? nextValue.map(String) : []) : String(nextValue || ''))}
+        onPopupVisibleChange={visible => setPopupOpen(visible)}
       />
     </div>
   );
@@ -153,65 +584,49 @@ function CardFieldEditor({
   value,
   disabled,
   onChange,
+  onUploadAttachment,
 }: {
   field: BaseField;
   record: BaseRecord;
   value: CellValue;
   disabled?: boolean;
   onChange: (value: CellValue) => void;
+  onUploadAttachment?: (recordId: string, fieldId: string, files: File[]) => void;
 }) {
   if (field.type === 'checkbox') {
     return (
-      <div className="bitable-card-field-value">
-        <label className="bitable-card-field-checkbox">
-          <input
-            type="checkbox"
-            checked={Boolean(value)}
-            disabled={disabled}
-            onChange={event => onChange(event.target.checked)}
-          />
-          <span>{value ? '已完成' : '未完成'}</span>
-        </label>
+      <div className="bitable-card-field-value bitable-card-field-value--tdesign">
+        <Checkbox
+          className="bitable-card-checkbox"
+          checked={Boolean(value)}
+          disabled={disabled}
+          onChange={checked => onChange(Boolean(checked))}
+        >
+          {value ? '已完成' : '未完成'}
+        </Checkbox>
       </div>
     );
   }
 
-  if (field.type === 'single_select') {
-    const choices = field.options?.choices ?? [];
-    const current = valueText(value);
-    const choice = current ? findSelectChoice(field, current) : null;
+  if (field.type === 'single_select' || field.type === 'multi_select') {
     return (
-      <div className="bitable-card-field-value bitable-card-field-value--select">
-        <div className="bitable-card-select-display">
-          {current ? (
-            <SelectTag choice={choice} label={current} />
-          ) : (
-            <span className="bitable-card-field-placeholder">{fieldPlaceholder(field)}</span>
-          )}
-          <span className="bitable-card-field-suffix" aria-hidden><GlyphChevronDown /></span>
-        </div>
-        <select
-          className="bitable-card-select-native"
-          value={current}
-          disabled={disabled}
-          aria-label={field.name}
-          onChange={event => onChange(event.target.value)}
-        >
-          <option value="">{fieldPlaceholder(field)}</option>
-          {choices.map((item: SelectChoice) => (
-            <option key={item.id} value={item.name}>{item.name}</option>
-          ))}
-        </select>
-      </div>
+      <SelectFieldEditor
+        field={field}
+        value={value}
+        disabled={disabled}
+        onChange={onChange}
+      />
     );
   }
 
   if (field.type === 'attachment') {
-    const count = getAttachments(record, field.id).length;
     return (
-      <div className="bitable-card-field-value">
-        <div className="bitable-card-field-readonly">{count ? `${count} 个附件` : '暂无附件'}</div>
-      </div>
+      <AttachmentUploadPopover
+        field={field}
+        record={record}
+        disabled={disabled}
+        onUpload={onUploadAttachment}
+      />
     );
   }
 
@@ -228,15 +643,14 @@ function CardFieldEditor({
 
   const text = valueText(value);
   return (
-    <div className="bitable-card-field-value">
-      <input
-        className={`bitable-card-field-input${text ? '' : ' is-empty'}`}
-        type="text"
+    <div className="bitable-card-field-value bitable-card-field-value--tdesign">
+      <Input
+        className="bitable-card-tdesign-control"
+        borderless
         value={text}
         disabled={disabled}
         placeholder={fieldPlaceholder(field)}
-        aria-label={field.name}
-        onChange={event => onChange(event.target.value)}
+        onChange={nextValue => onChange(String(nextValue))}
       />
     </div>
   );
@@ -247,11 +661,13 @@ function CardFieldRow({
   record,
   locked,
   onChange,
+  onUploadAttachment,
 }: {
   field: BaseField;
   record: BaseRecord;
   locked?: boolean;
   onChange: (value: CellValue) => void;
+  onUploadAttachment?: (recordId: string, fieldId: string, files: File[]) => void;
 }) {
   return (
     <div className="base_record_card_field_editor_wrapper">
@@ -262,90 +678,252 @@ function CardFieldRow({
             <span className="bitable-field-name">{field.name}</span>
           </div>
         </span>
-        <CardFieldEditor
-          field={field}
-          record={record}
-          value={record.fields[field.id]}
-          disabled={locked}
-          onChange={onChange}
-        />
+        <span className="b-field-label__editor">
+          <CardFieldEditor
+            field={field}
+            record={record}
+            value={record.fields[field.id]}
+            disabled={locked}
+            onChange={onChange}
+            onUploadAttachment={onUploadAttachment}
+          />
+        </span>
       </label>
     </div>
   );
 }
 
-function HistoryValue({ field, value }: { field: BaseField | undefined; value: CellValue }) {
-  const text = formatHistoryCellValue(value);
-  if (text === '-') return <span className="bitable-card-history-value is-empty">-</span>;
-  if (field?.type === 'single_select') {
-    const choice = findSelectChoice(field, text);
-    return <SelectTag choice={choice} label={text} />;
-  }
-  return <span className="bitable-card-history-value">{text}</span>;
+const GlyphChangeArrow = () => (
+  <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path d="M21.707 11.293a1 1 0 0 1 0 1.414l-7 7a1 1 0 0 1-1.414-1.414L18.586 13H2a1 1 0 1 1 0-2h16.586l-5.293-5.293a1 1 0 0 1 1.414-1.414l7 7Z" fill="currentColor" />
+  </svg>
+);
+
+function HistoryFieldContent({ children }: { children: ReactNode }) {
+  return (
+    <div className="bitable-records-history-table__cell__field-content">
+      {children}
+    </div>
+  );
 }
 
-function CardHistoryTable({
-  history,
-  fields,
-}: {
-  history: RecordHistoryEntry[];
-  fields: BaseField[];
-}) {
-  const fieldMap = useMemo(() => new Map(fields.map(field => [field.id, field])), [fields]);
+function resolveHistoryAttachment(
+  attachment: AttachmentValue,
+  currentAttachments: AttachmentValue[],
+): AttachmentValue {
+  const live = currentAttachments.find(item => item.id === attachment.id);
+  if (!live) return attachment;
+  return {
+    ...attachment,
+    mimeType: live.mimeType || attachment.mimeType,
+    url: live.url || attachment.url,
+    thumbnailUrl: live.thumbnailUrl || live.url || attachment.thumbnailUrl || attachment.url,
+    previewUrl: live.previewUrl || attachment.previewUrl,
+  };
+}
 
-  if (!history.length) {
+function HistoryAttachmentThumb({ attachment }: { attachment: AttachmentValue }) {
+  const [hasImageError, setHasImageError] = useState(false);
+  const previewUrl = getAttachmentPreviewUrl(attachment);
+  const kind = attachment.mimeType.startsWith('video/') ? 'VIDEO' : (attachment.extension || 'file').slice(0, 3).toUpperCase();
+
+  if (!previewUrl || hasImageError) {
     return (
-      <div className="bitable-card-history-empty">
-        <p>暂无历史记录</p>
-        <p className="bitable-card-history-end">已经到底了</p>
+      <div className="bitable-attachment-item bitable-rh-attachment-cell__file" title={attachment.name}>
+        {kind}
       </div>
     );
   }
 
   return (
-    <div className="bitable-card-history">
-      <table className="bitable-card-history-table">
-        <thead>
-          <tr>
-            <th>时间</th>
-            <th>操作人</th>
-            <th>字段</th>
-            <th>变更前</th>
-            <th aria-hidden />
-            <th>变更后</th>
-          </tr>
-        </thead>
-        <tbody>
-          {history.map(entry => {
-            const field = fieldMap.get(entry.fieldId);
-            return (
-              <tr key={entry.id}>
-                <td className="bitable-card-history-time">{formatHistoryTime(entry.time)}</td>
-                <td className="bitable-card-history-operator">
-                  <span className="bitable-card-history-avatar" aria-hidden>
-                    {(entry.operatorName || DEFAULT_RECORD_OPERATOR).slice(0, 1)}
-                  </span>
-                  <span>{entry.operatorName || DEFAULT_RECORD_OPERATOR}</span>
-                </td>
-                <td className="bitable-card-history-field">
-                  <span className="bitable-card-history-field-icon" aria-hidden>
-                    {fieldTypeGlyph(field?.type ?? 'text', 14)}
-                  </span>
-                  <span>{entry.fieldName || field?.name || '字段'}</span>
-                </td>
-                <td className="bitable-card-history-before">
-                  <HistoryValue field={field} value={entry.before} />
-                </td>
-                <td className="bitable-card-history-arrow" aria-hidden>→</td>
-                <td className="bitable-card-history-after">
-                  <HistoryValue field={field} value={entry.after} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <p className="bitable-card-history-end">已经到底了</p>
+    <div className="bitable-attachment-item bitable-rh-attachment-cell__image" title={attachment.name}>
+      <img
+        src={previewUrl}
+        alt={attachment.name}
+        className="bitable-attachment-item__image"
+        onError={() => setHasImageError(true)}
+      />
+    </div>
+  );
+}
+
+function HistoryAttachmentValue({
+  value,
+  fieldId,
+  record,
+}: {
+  value: CellValue;
+  fieldId: string;
+  record: BaseRecord;
+}) {
+  const list = Array.isArray(value) && value.length && typeof value[0] === 'object'
+    ? (value as AttachmentValue[])
+    : [];
+  const currentAttachments = getAttachments(record, fieldId);
+
+  if (!list.length) {
+    return (
+      <HistoryFieldContent>
+        <span className="bitable-records-history-table__cell__empty">-</span>
+      </HistoryFieldContent>
+    );
+  }
+
+  return (
+    <HistoryFieldContent>
+      <div className="bitable-rh-tags-cell bitable-rh-attachment-cell">
+        {list.map(attachment => (
+          <HistoryAttachmentThumb
+            key={attachment.id}
+            attachment={resolveHistoryAttachment(attachment, currentAttachments)}
+          />
+        ))}
+      </div>
+    </HistoryFieldContent>
+  );
+}
+
+function HistoryValue({
+  field,
+  value,
+  record,
+}: {
+  field: BaseField | undefined;
+  value: CellValue;
+  record: BaseRecord;
+}) {
+  if (field?.type === 'attachment') {
+    return <HistoryAttachmentValue value={value} fieldId={field.id} record={record} />;
+  }
+
+  if (field?.type === 'date') {
+    const formatted = formatCardDateValue(value);
+    if (!formatted) {
+      return (
+        <HistoryFieldContent>
+          <span className="bitable-records-history-table__cell__empty">-</span>
+        </HistoryFieldContent>
+      );
+    }
+    return (
+      <HistoryFieldContent>
+        <div className="bitable-rh-text bitable-rh-text__multi-line">{formatted}</div>
+      </HistoryFieldContent>
+    );
+  }
+
+  const text = formatHistoryCellValue(value);
+  if (text === '-') {
+    return (
+      <HistoryFieldContent>
+        <span className="bitable-records-history-table__cell__empty">-</span>
+      </HistoryFieldContent>
+    );
+  }
+
+  if (field?.type === 'single_select') {
+    const choice = findSelectChoice(field, text);
+    return (
+      <HistoryFieldContent>
+        <SelectTag choice={choice} label={choice?.name || text} />
+      </HistoryFieldContent>
+    );
+  }
+
+  return (
+    <HistoryFieldContent>
+      <div className="bitable-rh-text bitable-rh-text__multi-line bitable-rh-segment-cell">
+        <span className="bitable-rh-segment-cell__seg">{text}</span>
+      </div>
+    </HistoryFieldContent>
+  );
+}
+
+function CardHistoryTable({
+  history,
+  fields,
+  record,
+}: {
+  history: RecordHistoryEntry[];
+  fields: BaseField[];
+  record: BaseRecord;
+}) {
+  const fieldMap = useMemo(() => new Map(fields.map(field => [field.id, field])), [fields]);
+
+  if (!history.length) {
+    return (
+      <div className="bitable-records-history bitable-records-history--empty">
+        <p>暂无历史记录</p>
+        <div className="bitable-records-history-table__footer">
+          <span>已经到底了</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bitable-records-history">
+      <div className="bitable-records-history-table__container">
+        <table className="bitable-records-history-table">
+          <thead>
+            <tr>
+              <th className="history-date">时间</th>
+              <th className="history-operator">操作人</th>
+              <th>字段</th>
+              <th className="history-change-content">变更前</th>
+              <th aria-hidden />
+              <th className="history-change-content">变更后</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.map(entry => {
+              const field = fieldMap.get(entry.fieldId);
+              const operatorName = entry.operatorName || DEFAULT_RECORD_OPERATOR;
+              return (
+                <tr key={entry.id} className="bitable-records-history-table__row">
+                  <td className="history-date">
+                    <span className="bitable-records-history-table__cell__date">{formatHistoryTime(entry.time)}</span>
+                  </td>
+                  <td className="history-operator">
+                    <div className="b-user-tag bitable-records-history-table__cell__user">
+                      <div className="b-user-tag-container">
+                        <span className="b-user-tag-text">{operatorName}</span>
+                        <span className="b-user-tag-avatar bitable-records-history-table__cell__user-avatar" aria-hidden>
+                          {operatorName.slice(0, 1)}
+                        </span>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="bitable-records-history-table__cell__field">
+                      <span className="bitable-records-history-table__cell__field-icon" aria-hidden>
+                        {fieldTypeGlyph(field?.type ?? 'text', 14)}
+                      </span>
+                      <span className="bitable-records-history-table__cell__field-name">
+                        {entry.fieldName || field?.name || '字段'}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="history-change-content">
+                    <HistoryValue field={field} value={entry.before} record={record} />
+                  </td>
+                  <td className="bitable-records-history-table__cell-arrow">
+                    <span className="bitable-records-history-table__cell__change-icon" aria-hidden>
+                      <GlyphChangeArrow />
+                    </span>
+                  </td>
+                  <td className="history-change-content">
+                    <HistoryValue field={field} value={entry.after} record={record} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div className="bitable-records-history-table__footer">
+          <span>已经到底了</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -361,6 +939,7 @@ export function BitableRecordCardModal({
   onNavigate,
   onDelete,
   onAddField,
+  onUploadAttachment,
 }: BitableRecordCardModalProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -554,6 +1133,7 @@ export function BitableRecordCardModal({
                             record={record}
                             locked={locked}
                             onChange={value => onChange(record.id, field.id, value)}
+                            onUploadAttachment={onUploadAttachment}
                           />
                         ))}
                       </div>
@@ -577,6 +1157,7 @@ export function BitableRecordCardModal({
                                   record={record}
                                   locked={locked}
                                   onChange={value => onChange(record.id, field.id, value)}
+                                  onUploadAttachment={onUploadAttachment}
                                 />
                               ))}
                             </div>
@@ -601,7 +1182,7 @@ export function BitableRecordCardModal({
               ) : (
                 <div className="bitable-card-detail bitable-card-detail--history">
                   <div className="J-card-edit-modal-body J-card-edit-modal-body--padding-standard">
-                    <CardHistoryTable history={history} fields={table.fields} />
+                    <CardHistoryTable history={history} fields={table.fields} record={record} />
                   </div>
                 </div>
               )}

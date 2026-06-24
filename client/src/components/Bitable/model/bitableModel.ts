@@ -503,6 +503,22 @@ export function createGalleryConfig(fields: BaseField[], primaryFieldId: string)
   };
 }
 
+export function resolveGalleryVisibleFieldIds(
+  fields: BaseField[],
+  primaryFieldId: FieldId,
+  config: GalleryViewConfig,
+): FieldId[] {
+  const defaults = createGalleryConfig(fields, primaryFieldId);
+  const visible = (config.visibleFieldIds || []).filter(id => fields.some(field => field.id === id));
+  const fieldIds = visible.length ? visible : defaults.visibleFieldIds;
+  const reserved = new Set<FieldId>([
+    config.titleFieldId || primaryFieldId,
+    config.coverFieldId,
+    config.groupByFieldId,
+  ].filter((id): id is FieldId => Boolean(id)));
+  return fieldIds.filter(fieldId => !reserved.has(fieldId));
+}
+
 export function createGanttConfig(fields: BaseField[], primaryFieldId: string): GanttViewConfig {
   const dateFields = fields.filter(field => field.type === 'date');
   return {
@@ -573,6 +589,16 @@ export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' | 'kan
     records.forEach((record, index) => {
       record.fields[titleId] = `任务 ${index + 1}`;
       record.fields[statusId] = '未开始';
+    });
+  }
+  if (initialView === 'gallery') {
+    const statuses = ['未开始', '进行中', '已完成'];
+    const starts = ['2026-06-01', '2026-06-03', '2026-06-05'];
+    const ends = ['2026-06-09', '2026-06-11', '2026-06-13'];
+    records.forEach((record, index) => {
+      record.fields[statusId] = statuses[index] || '';
+      record.fields[startDateId] = starts[index] || '';
+      record.fields[endDateId] = ends[index] || '';
     });
   }
   const gridView: BaseView = { id: uid('view_grid'), tableId, name: '表格', type: 'grid', config: {}, sorts: [], filters: [] };
@@ -713,7 +739,10 @@ function normalizeTable(raw: BaseTable): BaseTable {
         ...config,
         coverFieldId: validCover ? config.coverFieldId : fields.find(field => field.type === 'attachment')?.id,
         titleFieldId: fields.some(field => field.id === config.titleFieldId) ? config.titleFieldId : primaryFieldId,
-        visibleFieldIds: (config.visibleFieldIds || []).filter(id => fields.some(field => field.id === id)),
+        visibleFieldIds: resolveGalleryVisibleFieldIds(fields, primaryFieldId, {
+          ...createGalleryConfig(fields, primaryFieldId),
+          ...config,
+        } as GalleryViewConfig),
       },
     };
   });
@@ -805,10 +834,17 @@ export function getActiveView(table: BaseTable) {
 }
 
 export function getGalleryConfig(table: BaseTable, view: BaseView): GalleryViewConfig {
-  const config = view.type === 'gallery'
-    ? view.config as GalleryViewConfig
-    : createGalleryConfig(table.fields, table.primaryFieldId);
-  return { ...config, showRecordActions: false };
+  const defaults = createGalleryConfig(table.fields, table.primaryFieldId);
+  const raw = view.type === 'gallery' ? (view.config as GalleryViewConfig) : defaults;
+  const merged: GalleryViewConfig = { ...defaults, ...raw };
+  const validCover = table.fields.some(field => field.id === merged.coverFieldId && field.type === 'attachment');
+  return {
+    ...merged,
+    coverFieldId: validCover ? merged.coverFieldId : table.fields.find(field => field.type === 'attachment')?.id,
+    titleFieldId: table.fields.some(field => field.id === merged.titleFieldId) ? merged.titleFieldId : table.primaryFieldId,
+    visibleFieldIds: resolveGalleryVisibleFieldIds(table.fields, table.primaryFieldId, merged),
+    showRecordActions: false,
+  };
 }
 
 export function getGanttConfig(table: BaseTable, view: BaseView): GanttViewConfig {
@@ -1028,6 +1064,17 @@ export function valueText(value: CellValue): string {
   }
   if (typeof value === 'boolean') return value ? '是' : '否';
   return value == null ? '' : String(value);
+}
+
+/** 单元格展示文案：单选/多选解析选项名，日期保留 ISO 格式供上层格式化。 */
+export function fieldCellDisplayText(field: BaseField, value: CellValue): string {
+  if (field.type === 'single_select') {
+    const choice = findSelectChoice(field, valueText(value));
+    return choice?.name || valueText(value);
+  }
+  if (field.type === 'multi_select') return multiSelectDisplayText(field, value);
+  if (field.type === 'checkbox') return value ? '已完成' : '未完成';
+  return valueText(value);
 }
 
 function compareRecordsBySorts(a: BaseRecord, b: BaseRecord, sorts: SortRule[]): number {
