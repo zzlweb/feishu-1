@@ -46,7 +46,7 @@ import { copyCurrentBlockLink, scrollToBlockFromHash } from './blocks/blockLink'
 import { resolveListItemHighlightRect } from './blocks/blockDom';
 import { normalizeHorizontalRulesOutOfLists } from './blocks/blockOperations';
 import { resolveInlineBlockElementFromEditor, syncEditorSelectionToAnchoredBlock } from './blocks/blockAnchorSelection';
-import { moveDraggableBlock, resolveDraggableBlockPos } from './blocks/feishuBlockDrag';
+import { moveDraggableBlock, resolveBlockDomAtPoint, resolveDraggableBlockPos } from './blocks/feishuBlockDrag';
 import { FeishuBlockBackspace } from './blocks/feishuBlockBackspace';
 import { FeishuBoxSelectionKeyboard } from './blocks/feishuBoxSelectionKeyboard';
 import {
@@ -2040,7 +2040,45 @@ function getBlockToolsAnchorLeft(blockEl: HTMLElement, areaRectLeft: number, col
 }
 
 const TEXT_BLOCK_HIGHLIGHT_TAGS = /^(p|h[1-6]|li|blockquote)$/;
-const TEXT_BLOCK_HIGHLIGHT_HEIGHT = 30;
+function resolveBlockRowHighlightRect(
+  _editorInstance: {
+    view: {
+      posAtDOM: (node: Node, offset: number) => number;
+      coordsAtPos: (pos: number) => { top: number; bottom: number };
+    };
+  } | null | undefined,
+  blockEl: HTMLElement,
+  areaRect: DOMRect,
+  columnContent: HTMLElement | null,
+): { top: number; left: number; width: number; height: number } {
+  const contentRight = columnContent?.isConnected
+    ? columnContent.getBoundingClientRect().right
+    : areaRect.right;
+
+  if (blockEl.tagName.toLowerCase() === 'li') {
+    const listRect = resolveListItemHighlightRect(blockEl, contentRight);
+    return {
+      top: listRect.top - areaRect.top,
+      left: listRect.left - areaRect.left,
+      width: listRect.width,
+      height: listRect.height,
+    };
+  }
+
+  const width = columnContent?.isConnected
+    ? columnContent.getBoundingClientRect().width
+    : areaRect.width;
+  const left = columnContent?.isConnected
+    ? columnContent.getBoundingClientRect().left - areaRect.left
+    : 0;
+  const blockRect = blockEl.getBoundingClientRect();
+  return {
+    top: blockRect.top - areaRect.top,
+    left,
+    width,
+    height: blockRect.height,
+  };
+}
 
 function measureTextBlockVerticalSpan(
   editorInstance: {
@@ -2068,62 +2106,6 @@ function measureTextBlockVerticalSpan(
   } catch {
     return null;
   }
-}
-
-function resolveBlockRowHighlightRect(
-  editorInstance: {
-    view: {
-      posAtDOM: (node: Node, offset: number) => number;
-      coordsAtPos: (pos: number) => { top: number; bottom: number };
-    };
-  } | null | undefined,
-  blockEl: HTMLElement,
-  areaRect: DOMRect,
-  columnContent: HTMLElement | null,
-): { top: number; left: number; width: number; height: number } {
-  const contentRight = columnContent?.isConnected
-    ? columnContent.getBoundingClientRect().right
-    : areaRect.right;
-
-  if (blockEl.tagName.toLowerCase() === 'li') {
-    const listRect = resolveListItemHighlightRect(blockEl, contentRight);
-    const textSpan = editorInstance ? measureTextBlockVerticalSpan(editorInstance, blockEl) : null;
-    const baseTop = textSpan?.top ?? listRect.top;
-    const baseBottom = textSpan?.bottom ?? listRect.bottom;
-    const center = (baseTop + baseBottom) / 2;
-    return {
-      top: center - TEXT_BLOCK_HIGHLIGHT_HEIGHT / 2 - areaRect.top,
-      left: listRect.left - areaRect.left,
-      width: listRect.width,
-      height: TEXT_BLOCK_HIGHLIGHT_HEIGHT,
-    };
-  }
-
-  const width = columnContent?.isConnected
-    ? columnContent.getBoundingClientRect().width
-    : areaRect.width;
-  const left = columnContent?.isConnected
-    ? columnContent.getBoundingClientRect().left - areaRect.left
-    : 0;
-  const textSpan = editorInstance ? measureTextBlockVerticalSpan(editorInstance, blockEl) : null;
-  if (textSpan) {
-    const center = (textSpan.top + textSpan.bottom) / 2;
-    return {
-      top: center - TEXT_BLOCK_HIGHLIGHT_HEIGHT / 2 - areaRect.top,
-      left,
-      width,
-      height: TEXT_BLOCK_HIGHLIGHT_HEIGHT,
-    };
-  }
-  const highlightRect = columnContent?.isConnected
-    ? columnContent.getBoundingClientRect()
-    : blockEl.getBoundingClientRect();
-  return {
-    top: highlightRect.top - areaRect.top,
-    left,
-    width,
-    height: highlightRect.height,
-  };
 }
 
 function computePlusMenuPosition(
@@ -2462,7 +2444,7 @@ export default function Editor({
 
     if (!row?.isConnected) {
       row = selectedRow;
-      if (!row?.isConnected || !selectedIsEmptyParagraph) return;
+      if (!row?.isConnected) return;
       activeBlockElRef.current = row;
     }
 
@@ -2610,6 +2592,7 @@ export default function Editor({
       if (readOnly || !editorAreaRef.current || !editorInstance) return;
       const areaRect = editorAreaRef.current.getBoundingClientRect();
       activeBlockElRef.current = info.element;
+      setBlockGutterHoveredState(false);
       if (info.type === 'table') {
         setActiveTableHost(info.element);
       } else {
@@ -2628,16 +2611,22 @@ export default function Editor({
       const centerY = getBlockToolsAnchorTop(editorInstance, info.element, areaRect.top);
       const columnContent = getColumnContentFromBlock(info.element);
       const left = getBlockToolsAnchorLeft(info.element, areaRect.left, columnContent);
+      const selectedRow = getBlockDomFromEditor(editorInstance);
+      const blockType = info.element.classList.contains('feishu-bitable-block')
+        ? bitableToolTypeFromElement(info.element)
+        : selectedRow && (selectedRow === info.element || info.element.contains(selectedRow))
+          ? getCurrentBlockType(editorInstance)
+          : info.type;
       setBlockTools({
         visible: true,
         top: centerY,
         left,
-        type: info.type,
+        type: blockType,
         isEmpty: info.isEmpty,
         isInColumns: Boolean(columnContent),
       });
     },
-    [getColumnContentFromBlock, readOnly],
+    [getColumnContentFromBlock, getCurrentBlockType, readOnly, setBlockGutterHoveredState],
   );
 
   /** 指针离开面板关闭菜单时，若未悬停在正文区则一并收起块柄 */
@@ -2852,17 +2841,13 @@ export default function Editor({
 
   editorRefForCatalogue.current = editor;
 
-  /** 浅蓝行背景：hover 块柄/菜单时用 overlay 高亮（ProseMirror 会清掉直接加在块节点上的 class） */
-  const shouldShowRowHighlight =
-    !readOnly &&
-    blockTools.visible &&
-    (blockGutterHovered || plusHovered || Boolean(contextMenu) || (slashMenuVisible && slashMenuFromPlus));
+  /** 浅蓝行背景：仅 hover 块柄按钮区时显示（见 syncRowHighlightBand） */
 
   const syncRowHighlightBand = useCallback(() => {
     const show =
       !readOnly &&
       blockTools.visible &&
-      (blockGutterHovered || plusHovered || Boolean(contextMenu) || (slashMenuVisible && slashMenuFromPlus));
+      blockGutterHovered;
     if (!show) {
       setRowHighlightBand(null);
       return;
@@ -2894,10 +2879,6 @@ export default function Editor({
     readOnly,
     blockTools.visible,
     blockGutterHovered,
-    plusHovered,
-    contextMenu,
-    slashMenuVisible,
-    slashMenuFromPlus,
     getColumnContentFromBlock,
   ]);
 
@@ -3024,16 +3005,14 @@ export default function Editor({
       const dragState = blockDragStateRef.current;
       const area = editorAreaRef.current;
       if (!dragState || !area) return;
-      const resolved = document.elementsFromPoint(clientX, clientY)
-        .map(hit => resolveHoveredBlockInfo(hit))
-        .find(candidate => candidate && candidate !== 'keep') ?? null;
-      if (!resolved || resolved === 'keep') {
-        dragState.dropTarget = null;
-        setBlockDragIndicator(null);
-        return;
-      }
-      const target = resolved.element;
-      if (target === dragState.source || !resolveDraggableBlockPos(editor, target)) {
+
+      const hitInfo = document.elementsFromPoint(clientX, clientY)
+        .map(hit => resolveHoveredBlockInfo(hit, clientX, clientY))
+        .find((candidate): candidate is NonNullable<ReturnType<typeof getElementBlockInfo>> =>
+          Boolean(candidate && candidate !== 'keep'));
+
+      const target = hitInfo?.element ?? resolveBlockDomAtPoint(editor, clientX, clientY);
+      if (!target || target === dragState.source || !resolveDraggableBlockPos(editor, target)) {
         dragState.dropTarget = null;
         setBlockDragIndicator(null);
         return;
@@ -3103,6 +3082,9 @@ export default function Editor({
     (e: React.MouseEvent<HTMLDivElement>) => {
       const next = getRelatedNode(e.relatedTarget);
       if (next && e.currentTarget.contains(next)) return;
+
+      setBlockGutterHoveredState(false);
+
       if (isPointerInContextMenuShell(next)) return;
       if (next instanceof Element && next.closest('.slash-menu')) return;
 
@@ -3120,7 +3102,7 @@ export default function Editor({
       setPlusHoveredState(false);
       blockHoverFloatingGroup.scheduleClose(next);
     },
-    [blockHoverFloatingGroup, resolveHoveredBlockInfo, scheduleContextMenuClose, schedulePlusMenuClose, setPlusHoveredState, slashMenuFromPlus],
+    [blockHoverFloatingGroup, resolveHoveredBlockInfo, scheduleContextMenuClose, schedulePlusMenuClose, setBlockGutterHoveredState, setPlusHoveredState, slashMenuFromPlus],
   );
 
   const handleEditorBlankClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -3557,17 +3539,13 @@ export default function Editor({
     blockTools.type,
     blockTools.visible,
     blockGutterHovered,
-    plusHovered,
-    contextMenu,
-    slashMenuVisible,
-    slashMenuFromPlus,
   ]);
 
   useEffect(() => {
     const show =
       !readOnly &&
       blockTools.visible &&
-      (blockGutterHovered || plusHovered || Boolean(contextMenu) || (slashMenuVisible && slashMenuFromPlus));
+      blockGutterHovered;
     if (!show) return;
     const handle = () => syncRowHighlightBandRef.current();
     window.addEventListener('resize', handle);
@@ -3580,10 +3558,6 @@ export default function Editor({
     readOnly,
     blockTools.visible,
     blockGutterHovered,
-    plusHovered,
-    contextMenu,
-    slashMenuVisible,
-    slashMenuFromPlus,
   ]);
 
   useEffect(() => {
@@ -3629,7 +3603,7 @@ export default function Editor({
     const highlighted =
       !readOnly &&
       blockTools.visible &&
-      (blockGutterHovered || plusHovered || Boolean(contextMenu) || (slashMenuVisible && slashMenuFromPlus));
+      blockGutterHovered;
     block.classList.toggle('is-block-gutter-active', highlighted);
     return () => {
       block.classList.remove('is-block-gutter-active');
@@ -3638,10 +3612,6 @@ export default function Editor({
     readOnly,
     blockTools.visible,
     blockGutterHovered,
-    plusHovered,
-    contextMenu,
-    slashMenuVisible,
-    slashMenuFromPlus,
   ]);
 
   useEffect(() => {
@@ -4054,7 +4024,7 @@ export default function Editor({
                         </span>
                       </div>
                       <span className="drag-handle" aria-hidden>
-                        <IconDragOutlined size={16} color="#8f959e" />
+                        <IconDragOutlined size={16} color="currentColor" />
                       </span>
                     </div>
                   </button>

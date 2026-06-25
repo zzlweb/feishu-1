@@ -288,6 +288,15 @@ export default function ContextMenu({
       '.slash-columns-count-flyout',
     ]);
 
+  const isFlyoutAnchorTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest('.context-menu-item.has-submenu, .context-submenu-flyout, .context-add-below-flyout'));
+  };
+
+  const closeActiveFlyout = () => {
+    setActiveFlyout(null);
+  };
+
   const handleShellMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
     hoverGroup.scheduleClose(e.relatedTarget);
@@ -361,13 +370,23 @@ export default function ContextMenu({
   }, [activeFlyout?.kind, finalPos.x, finalPos.y, posVisible]);
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
-    if (pointerStillInShell(e.relatedTarget)) return;
+    if (pointerStillInShell(e.relatedTarget)) {
+      if (!isFlyoutAnchorTarget(e.relatedTarget)) {
+        closeActiveFlyout();
+      }
+      return;
+    }
     hoverGroup.scheduleClose(e.relatedTarget);
   };
 
   const keepHoverAlive = () => {
     hoverGroup.cancelClose();
     onMouseEnterCancel?.();
+  };
+
+  const handlePlainMenuZoneEnter = () => {
+    keepHoverAlive();
+    closeActiveFlyout();
   };
 
   const setHeading = (level: number) => {
@@ -710,7 +729,10 @@ export default function ContextMenu({
       onScroll={hideGridTooltip}
     >
         <div className="context-menu-scroll">
-          <div className="context-menu-section context-menu-section--grid">
+          <div
+            className="context-menu-section context-menu-section--grid"
+            onPointerEnter={handlePlainMenuZoneEnter}
+          >
             <div className="context-block-types context-block-types--icon-grid">
               {BLOCK_TYPE_ICON_GRID.map(item => {
                 const active = isGridActive(editor, item);
@@ -741,6 +763,11 @@ export default function ContextMenu({
               keepHoverAlive();
               openFlyout('align', e.currentTarget);
             }}
+            onPointerLeave={e => {
+              if (!isFlyoutAnchorTarget(e.relatedTarget)) {
+                closeActiveFlyout();
+              }
+            }}
           >
             <span className="context-menu-icon"><ContextGlyphTypography size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>缩进和对齐</span>
@@ -754,6 +781,11 @@ export default function ContextMenu({
               keepHoverAlive();
               openFlyout('color', e.currentTarget);
             }}
+            onPointerLeave={e => {
+              if (!isFlyoutAnchorTarget(e.relatedTarget)) {
+                closeActiveFlyout();
+              }
+            }}
           >
             <span className="context-menu-icon"><ContextGlyphStyleColor size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>颜色</span>
@@ -762,21 +794,21 @@ export default function ContextMenu({
 
           <div className="context-menu-divider" />
 
-          <button type="button" className="context-menu-item" onClick={handleCut}>
+          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleCut}>
             <span className="context-menu-icon"><ContextGlyphCut size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>剪切</span>
             <span className="context-menu-shortcut">Ctrl+X</span>
           </button>
-          <button type="button" className="context-menu-item" onClick={handleCopy}>
+          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleCopy}>
             <span className="context-menu-icon"><ContextGlyphCopy size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>复制</span>
             <span className="context-menu-shortcut">Ctrl+C</span>
           </button>
-          <button type="button" className="context-menu-item" onClick={() => void handleTranslate()}>
+          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleTranslate()}>
             <span className="context-menu-icon"><ContextGlyphTranslate size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>翻译</span>
           </button>
-          <button type="button" className="context-menu-item context-menu-item--danger" onClick={handleDelete}>
+          <button type="button" className="context-menu-item context-menu-item--danger" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleDelete}>
             <span className="context-menu-icon"><ContextGlyphDelete size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>删除</span>
             <span className="context-menu-shortcut">Del</span>
@@ -784,19 +816,19 @@ export default function ContextMenu({
 
           <div className="context-menu-divider" />
 
-          <button type="button" className="context-menu-item" onClick={() => void handleShare()}>
+          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleShare()}>
             <span className="context-menu-icon"><ContextGlyphShare size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>分享</span>
           </button>
-          <button type="button" className="context-menu-item" onClick={() => void handleConvertToChild()}>
+          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleConvertToChild()}>
             <span className="context-menu-icon context-menu-icon--subdoc"><SlashGlyphSubDoc size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>转换为子文档</span>
           </button>
-          <button type="button" className="context-menu-item" onClick={() => void handleSaveTemplate()}>
+          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleSaveTemplate()}>
             <span className="context-menu-icon"><ContextGlyphTemplate size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>保存为模板</span>
           </button>
-          <button type="button" className="context-menu-item" onClick={() => void handleCopyBlockLink()}>
+          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleCopyBlockLink()}>
             <span className="context-menu-icon"><ContextGlyphBlockLink size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>复制链接</span>
           </button>
@@ -809,6 +841,11 @@ export default function ContextMenu({
             onPointerEnter={e => {
               keepHoverAlive();
               openFlyout('below', e.currentTarget);
+            }}
+            onPointerLeave={e => {
+              if (!isFlyoutAnchorTarget(e.relatedTarget)) {
+                closeActiveFlyout();
+              }
             }}
           >
             <span className="context-menu-icon"><ContextGlyphAddBelow size={18} fill={ICON_MUTED} /></span>

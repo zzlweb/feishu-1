@@ -715,3 +715,41 @@ export function measureUnitBand(
     height: r.height,
   };
 }
+
+/** 相邻框选高亮条之间至少保留的空隙（px） */
+const SELECTION_BAND_MIN_GAP = 8;
+
+export interface SelectionBandLayout {
+  id: string;
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+export function layoutSelectionBands(
+  units: SelectableUnit[],
+  areaRect: DOMRect,
+): SelectionBandLayout[] {
+  const bands = units.map(unit => ({
+    id: unit.id,
+    ...measureUnitBand(unit, areaRect),
+  }));
+  if (bands.length < 2) return bands;
+
+  const sorted = [...bands].sort((a, b) => a.top - b.top || a.left - b.left);
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const curr = sorted[i];
+    const prevBottom = prev.top + prev.height;
+    const deficit = prevBottom + SELECTION_BAND_MIN_GAP - curr.top;
+    if (deficit <= 0) continue;
+
+    const shrinkPrev = Math.min(Math.ceil(deficit / 2), Math.max(0, prev.height - 8));
+    const shrinkCurr = Math.min(deficit - shrinkPrev, Math.max(0, curr.height - 8));
+    prev.height -= shrinkPrev;
+    curr.top += shrinkPrev;
+    curr.height -= shrinkCurr;
+  }
+  return sorted;
+}

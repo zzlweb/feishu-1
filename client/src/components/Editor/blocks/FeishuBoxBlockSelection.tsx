@@ -18,7 +18,7 @@ import {
   isListItemTextArea,
   isListSelectableUnit,
   isListTextPoint,
-  measureUnitBand,
+  layoutSelectionBands,
   normalizeClientRect,
   normalizeSelectedUnits,
   setBoxSelectionStore,
@@ -129,10 +129,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, editorCo
       return;
     }
     const areaRect = area.getBoundingClientRect();
-    setSelectionBands(units.map(unit => ({
-      id: unit.id,
-      ...measureUnitBand(unit, areaRect),
-    })));
+    setSelectionBands(layoutSelectionBands(units, areaRect));
   }, [editorAreaRef]);
 
   const selectUnits = useCallback((units: SelectableUnit[]) => {

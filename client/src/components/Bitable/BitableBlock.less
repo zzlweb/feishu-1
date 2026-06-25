@@ -3643,6 +3643,7 @@
   max-width: 100%;
   transform: none;
 
+  .base-viewbar.bitable-toolbar-doc,
   .base-viewbar {
     border-bottom: 1px solid #eff0f1;
   }
@@ -6031,7 +6032,6 @@
     height: 52px;
     min-height: 52px;
     padding: 4px 0 0;
-    border-bottom: 0;
     background: transparent;
   }
 
@@ -6044,6 +6044,20 @@
 
   .base-view-sidebar {
     top: 35px;
+  }
+}
+
+.feishu-base-block[data-base-view-type="grid"] {
+  .base-viewbar {
+    border-bottom: 0;
+  }
+}
+
+.feishu-base-block[data-base-view-type="gallery"],
+.feishu-base-block[data-base-view-type="kanban"] {
+  .base-viewbar.bitable-toolbar-doc,
+  .base-viewbar {
+    border-bottom: 1px solid #eff0f1;
   }
 }
 
