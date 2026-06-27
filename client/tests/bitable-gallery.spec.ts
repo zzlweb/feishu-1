@@ -295,69 +295,47 @@ test('keeps the global block control aligned with the bitable header across view
   await assertBlockControlAligned();
   await block.locator('.base-viewbar__current').click();
   await block.locator('.base-view-sidebar__new').hover();
-  await block.locator('.base-view-sidebar__create-list').getByRole('button', { name: /甘特视图/ }).click();
-  await expect(block).toHaveAttribute('data-base-view-type', 'gantt');
+  await block.locator('.base-view-sidebar__create-list').getByRole('button', { name: /看板视图/ }).click();
+  await expect(block).toHaveAttribute('data-base-view-type', 'kanban');
   await assertBlockControlAligned();
 
-  const [ganttBox, scrollBox] = await Promise.all([
+  const [kanbanBox, scrollBox] = await Promise.all([
     block.boundingBox(),
     page.locator('.editor-scroll').boundingBox(),
   ]);
-  expect(ganttBox).not.toBeNull();
+  expect(kanbanBox).not.toBeNull();
   expect(scrollBox).not.toBeNull();
-  expect(ganttBox!.x).toBeGreaterThanOrEqual(scrollBox!.x + 40);
-  expect(ganttBox!.x + ganttBox!.width).toBeLessThanOrEqual(scrollBox!.x + scrollBox!.width - 40);
+  expect(kanbanBox!.x).toBeGreaterThanOrEqual(scrollBox!.x + 40);
+  expect(kanbanBox!.x + kanbanBox!.width).toBeLessThanOrEqual(scrollBox!.x + scrollBox!.width - 40);
 
   const beforeBox = await page.locator('.ProseMirror p', { hasText: 'before' }).boundingBox();
   expect(beforeBox).not.toBeNull();
-  const startX = ganttBox!.x + ganttBox!.width / 2;
-  const startY = (beforeBox!.y + beforeBox!.height + ganttBox!.y) / 2;
+  const startX = kanbanBox!.x + kanbanBox!.width / 2;
+  const startY = (beforeBox!.y + beforeBox!.height + kanbanBox!.y) / 2;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(startX, ganttBox!.y + ganttBox!.height - 12, { steps: 8 });
+  await page.mouse.move(startX, kanbanBox!.y + kanbanBox!.height - 12, { steps: 8 });
   await page.mouse.up();
 
   const selectionBox = await page.locator('.feishu-box-selection-band').boundingBox();
   expect(selectionBox).not.toBeNull();
-  expect(Math.abs(selectionBox!.x - ganttBox!.x)).toBeLessThanOrEqual(1);
-  expect(Math.abs(selectionBox!.width - ganttBox!.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(selectionBox!.x - kanbanBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(selectionBox!.width - kanbanBox!.width)).toBeLessThanOrEqual(1);
 });
 
-test('shows the active gallery icon and creates a gantt view over shared records', async ({ page }) => {
+test('shows the active gallery icon and creates a kanban view over shared records', async ({ page }) => {
   await openGallery(page);
   await expect(page.locator('.base-viewbar__current [data-view-icon="gallery"]')).toBeVisible();
 
   await page.locator('.base-viewbar__current').click();
   await page.locator('.base-view-sidebar__new').hover();
-  await page.locator('.base-view-sidebar__create-list').getByRole('button', { name: /甘特视图/ }).click();
+  await page.locator('.base-view-sidebar__create-list').getByRole('button', { name: /看板视图/ }).click();
 
   const block = page.locator('.feishu-base-block').first();
-  await expect(block).toHaveAttribute('data-base-view-type', 'gantt');
-  await expect(block.locator('.base-viewbar__current [data-view-icon="gantt"]')).toBeVisible();
-  await expect(block.locator('.base-gantt__row')).toHaveCount(3);
-  await expect(block.locator('.base-gantt__record-column')).toContainText('任务名');
-
-  await block.locator('.base-gantt__scale').getByRole('button', { name: '月' }).click();
-  await expect(block.locator('.base-gantt__scale').getByRole('button', { name: '月' })).toHaveClass(/is-active/);
-  await block.getByRole('button', { name: '甘特设置' }).click();
-  await expect(page.locator('.base-settings').getByLabel('时间刻度')).toHaveValue('40');
-  await page.locator('.base-settings header button').click();
-
-  await block.locator('.base-gantt__schedule').first().click();
-  const bar = block.locator('.base-gantt__bar').first();
-  await expect(bar).toBeVisible();
-  await block.locator('.base-gantt__lane.is-unscheduled').first().click({ position: { x: 8, y: 18 } });
-  await expect(block.locator('.base-gantt__bar')).toHaveCount(2);
-  const bounds = await bar.boundingBox();
-  expect(bounds).not.toBeNull();
-  const beforeX = bounds!.x;
-  await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(bounds!.x + bounds!.width / 2 + 60, bounds!.y + bounds!.height / 2, { steps: 5 });
-  await page.mouse.up();
-  const afterBounds = await bar.boundingBox();
-  expect(afterBounds).not.toBeNull();
-  expect(afterBounds!.x).not.toBe(beforeX);
+  await expect(block).toHaveAttribute('data-base-view-type', 'kanban');
+  await expect(block.locator('.base-viewbar__current [data-view-icon="kanban"]')).toBeVisible();
+  await expect(block.locator('.base-kanban__column')).toHaveCount(3);
+  await expect(block.locator('.base-kanban__card')).toHaveCount(3);
 
   await block.locator('.base-viewbar__current').click();
   await block.locator('.base-view-sidebar__name', { hasText: '画册' }).click();

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import {
   getAllDocuments,
@@ -12,9 +13,16 @@ import {
   deleteCommentRecord,
   getAllTemplates,
   createTemplateRecord,
+  deleteTemplateById,
 } from '../database';
+import { importDocumentFile } from '../documentImporter';
+import { importFeishuPublicUrl } from '../feishuPublicImporter';
 
 const router = Router();
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 },
+});
 
 // GET /api/documents - 获取文档列表
 router.get('/', (_req: Request, res: Response) => {
@@ -55,6 +63,92 @@ router.post('/templates', (req: Request, res: Response) => {
 });
 
 // GET /api/documents/:id - 获取单个文档
+// POST /api/documents/import-url - import a public Feishu wiki URL as an editable document.
+router.post('/import-url', async (req: Request, res: Response) => {
+  try {
+    const { url, author, save_as_template: saveAsTemplate } = req.body ?? {};
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ code: -1, message: '请输入飞书文档链接' });
+    }
+
+    const imported = await importFeishuPublicUrl(url.trim());
+    const doc = createDocumentRecord({
+      id: uuidv4(),
+      title: imported.title,
+      content: imported.content,
+      author: String(author || '导入用户'),
+      icon: '📄',
+    });
+
+    let template = null;
+    if (saveAsTemplate) {
+      template = createTemplateRecord({
+        id: uuidv4(),
+        title: imported.title,
+        content: imported.content,
+        author: String(author || '导入用户'),
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    res.status(201).json({
+      code: 0,
+      data: {
+        document: doc,
+        template,
+        source_name: imported.sourceName,
+        source_url: imported.sourceUrl,
+        asset_count: imported.assetCount,
+        warnings: imported.warnings,
+      },
+    });
+  } catch (err: any) {
+    const message = err instanceof Error ? err.message : '导入失败';
+    res.status(400).json({ code: -1, message });
+  }
+});
+
+// POST /api/documents/import - import Feishu-exported HTML/Markdown/TXT/ZIP as an editable document.
+router.post('/import', importUpload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ code: -1, message: '未选择文件' });
+    }
+    const imported = await importDocumentFile(req.file);
+    const doc = createDocumentRecord({
+      id: uuidv4(),
+      title: imported.title,
+      content: imported.content,
+      author: String(req.body.author || '导入用户'),
+      icon: '📄',
+    });
+    res.status(201).json({
+      code: 0,
+      data: {
+        document: doc,
+        source_name: imported.sourceName,
+        asset_count: imported.assetCount,
+      },
+    });
+  } catch (err: any) {
+    const message = err instanceof Error ? err.message : '导入失败';
+    res.status(400).json({ code: -1, message });
+  }
+});
+
+// DELETE /api/documents/templates/:templateId - delete a saved template
+router.delete('/templates/:templateId', (req: Request, res: Response) => {
+  try {
+    const success = deleteTemplateById(req.params.templateId);
+    if (!success) {
+      return res.status(404).json({ code: -1, message: '模板不存在' });
+    }
+    res.json({ code: 0, message: '删除成功' });
+  } catch (err: any) {
+    res.status(500).json({ code: -1, message: err.message });
+  }
+});
+
 router.get('/:id', (req: Request, res: Response) => {
   try {
     const doc = getDocumentById(req.params.id);

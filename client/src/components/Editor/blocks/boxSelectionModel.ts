@@ -62,7 +62,7 @@ const INTERACTIVE_CONTROL_SELECTOR =
   'button, input, textarea, select, option, a, label, [role="button"]';
 
 const WIDGET_BLOCK_SELECTOR =
-  '[data-local-block], [contenteditable="false"], img, video, audio, iframe, .feishu-image-block, .feishu-local-card, .feishu-button-block, .feishu-formula-editor, .feishu-bitable-block, .feishu-sync-block, .feishu-media-preview, .feishu-file-actions, .feishu-divider, .feishu-code-block__toolbar, .feishu-highlight-block-wrap';
+  '[data-local-block], [contenteditable="false"], img, video, audio, iframe, .feishu-image-block, .feishu-local-card, .feishu-button-block, .feishu-formula-editor, .feishu-bitable-block, .feishu-dashboard-chart-block, .feishu-sync-block, .feishu-media-preview, .feishu-file-actions, .feishu-divider, .feishu-code-block__toolbar, .feishu-highlight-block-wrap';
 
 const BITABLE_VIEW_INTERACTION_SELECTOR =
   '.base-grid-wrap, .base-grid-shell, .base-grid-canvas-scroll, .base-grid-canvas, .base-gantt-shell, .base-toolbar-panel, .base-settings, .base-field-edit-popover-portal, .base-delete-view-overlay, .bitable-record-card-mask, .base-kanban__card, .base-gallery-card, .base-gallery-add-record';
@@ -263,6 +263,7 @@ function resolveBlockRange(editor: Editor, dom: HTMLElement): { from: number; to
       dom.closest('.feishu-table-host, .tableWrapper') ? 'table'
       : dom.closest('.feishu-sync-block') ? 'localSyncBlock'
       : dom.closest('.feishu-bitable-block') ? 'localBitableBlock'
+      : dom.closest('.feishu-dashboard-chart-block') ? 'localDashboardChartBlock'
       : dom.closest('.feishu-div-table') ? 'localDivTableBlock'
       : dom.closest('.feishu-button-block') ? 'localButtonBlock'
       : dom.closest('.feishu-formula-editor') ? 'localFormulaBlock'

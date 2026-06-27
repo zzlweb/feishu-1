@@ -170,7 +170,7 @@ function HighlightBlockView({ editor, node, updateAttributes }: NodeViewProps) {
       ),
     ),
     h('div', { className: 'feishu-highlight-block' },
-      h('span', { className: 'feishu-highlight-icon', contentEditable: false }, '🔒'),
+      h('span', { className: 'feishu-highlight-icon', contentEditable: false }, '📍'),
       h(NodeViewContent, { className: 'feishu-highlight-content' }),
     ),
   );

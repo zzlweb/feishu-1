@@ -955,6 +955,10 @@
     aspect-ratio: 16 / 9;
   }
 
+  .base-gallery-card__cover.ratio-4-3 {
+    aspect-ratio: 4 / 3;
+  }
+
   .base-gallery-card__cover.ratio-auto {
     min-height: 120px;
     aspect-ratio: auto;
@@ -1056,6 +1060,20 @@
     font-weight: 400;
   }
 
+  .base-gallery-card.is-compact .base-gallery-card__body {
+    padding: 10px 12px 12px;
+  }
+
+  .base-gallery-card.is-compact .base-gallery-card__title {
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .base-gallery-card.is-compact .base-gallery-card__field {
+    margin-top: 4px;
+    font-size: 12px;
+  }
+
   .base-gallery-card__field {
     display: flex;
     gap: 8px;
@@ -1070,6 +1088,20 @@
   .base-gallery-card__field label {
     flex-shrink: 0;
     color: #8f959e;
+  }
+
+  .base-gallery-card__field label::after,
+  .base-kanban__card-field label::after {
+    content: ':';
+  }
+
+  .base-card-field-icon {
+    flex: 0 0 auto;
+    min-width: 16px;
+    color: #8f959e;
+    font-size: 12px;
+    line-height: 18px;
+    text-align: center;
   }
 
   .base-gallery-card__empty-value {
@@ -1094,6 +1126,66 @@
     background: #e8f0ff;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .base-cell-tag.is-colored {
+    font-weight: 500;
+  }
+
+  .base-checkbox-value {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    box-sizing: border-box;
+    border: 1px solid #bbbfc4;
+    border-radius: 3px;
+    background: #fff;
+
+    &.is-checked {
+      border-color: #34c759;
+      background: #34c759;
+
+      &::after {
+        content: '✓';
+        color: #fff;
+        font-size: 11px;
+        line-height: 1;
+      }
+    }
+  }
+
+  .base-field-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .base-field-progress__track {
+    flex: 1;
+    height: 6px;
+    border-radius: 999px;
+    background: #eff0f1;
+    overflow: hidden;
+  }
+
+  .base-field-progress__fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #3370ff, #14c0ff);
+  }
+
+  .base-field-progress__label {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 600;
+    color: #646a73;
+  }
+
+  .base-kanban__card-field .base-field-progress {
+    margin-top: 2px;
   }
 
   .base-gallery-card__delete {
@@ -3395,6 +3487,7 @@
     border-radius: 6px;
     padding: 9px 12px 8px;
     cursor: pointer;
+    overflow: hidden;
     box-shadow: 0 1px 1px rgba(31, 35, 41, .02);
     transition: box-shadow .15s ease, border-color .15s ease, transform .15s ease, opacity .15s ease;
 
@@ -3412,6 +3505,28 @@
   .base-kanban__card.is-dragging {
     opacity: .58;
     transform: rotate(1deg);
+  }
+
+  .base-kanban__card-cover {
+    margin: -9px -12px 8px;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+    background: #f5f6f7;
+
+    img {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  }
+
+  .base-kanban__card-cover-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #a8abb2;
+    font-size: 18px;
   }
 
   .base-kanban__card-title {
@@ -4218,6 +4333,63 @@
     width: 100%;
     max-width: 100%;
   }
+
+  .base-gallery-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    padding: 12px 0 0;
+  }
+
+  .base-gallery-card {
+    border-color: #dee0e3;
+    border-radius: 8px;
+    box-shadow: none;
+    min-height: 444px;
+
+    &:hover {
+      border-color: #c9cdd4;
+      box-shadow: 0 2px 8px rgba(31, 35, 41, .06);
+      transform: none;
+    }
+  }
+
+  .base-gallery-group__header {
+    margin-bottom: 8px;
+    padding: 0 2px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #646a73;
+  }
+
+  .base-gallery-card__body {
+    padding: 15px 16px 18px;
+  }
+
+  .base-gallery-card__title {
+    margin-bottom: 12px;
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .base-gallery-card__field {
+    margin-top: 10px;
+    font-size: 14px;
+    color: #34383f;
+  }
+
+  .base-gallery-card__field label {
+    color: #1f2329;
+  }
+
+  .base-gallery-add-record {
+    display: none;
+  }
+
+  .base-viewbar.bitable-toolbar-doc,
+  .base-viewbar {
+    min-height: 36px;
+    height: 36px;
+  }
 }
 
 .feishu-base-block[data-base-view-type="kanban"] {
@@ -4286,6 +4458,90 @@
     overflow-x: clip;
     overflow-y: visible;
     width: 100%;
+  }
+
+  .base-kanban__column {
+    border-color: #dee0e3;
+    border-radius: 8px;
+    padding: 8px;
+    background: #fafbfc;
+    max-height: 760px;
+    overflow-y: auto;
+  }
+
+  .base-kanban__column-title {
+    border-radius: 4px;
+    color: #1f2329;
+    font-size: 14px;
+  }
+
+  .base-kanban__card {
+    border-radius: 8px;
+    box-shadow: none;
+    padding: 10px 12px 12px;
+  }
+
+  .base-kanban__card-title {
+    position: relative;
+    padding-left: 22px;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: normal;
+  }
+
+  .base-kanban__card-title::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 3px;
+    width: 14px;
+    height: 14px;
+    box-sizing: border-box;
+    border: 1.5px solid #8f959e;
+    border-radius: 999px;
+    background: #fff;
+  }
+
+  .base-kanban__card-time {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0 10px;
+    padding-left: 1px;
+    color: #1f2329;
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .base-kanban__card-time span:first-child {
+    color: #8f959e;
+    font-size: 12px;
+  }
+
+  .base-kanban__card-field {
+    align-items: center;
+    min-height: 22px;
+    margin-top: 6px;
+    color: #646a73;
+    font-size: 13px;
+  }
+
+  .base-kanban__card-field label {
+    flex: 0 0 64px;
+    overflow: hidden;
+    color: #646a73;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .base-kanban__create-group {
+    display: none;
+  }
+
+  .base-viewbar.bitable-toolbar-doc,
+  .base-viewbar {
+    min-height: 36px;
+    height: 36px;
   }
 }
 

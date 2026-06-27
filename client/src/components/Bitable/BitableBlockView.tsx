@@ -2,7 +2,7 @@ import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
-import { SlashGlyphBitableGrid, SlashGlyphGallery, SlashGlyphGantt } from '../../icons/slashMenuGlyphs';
+import { SlashGlyphBitableGrid, SlashGlyphGallery, SlashGlyphGantt, SlashGlyphKanban } from '../../icons/slashMenuGlyphs';
 import { BitableAddFieldPopover, BitableEditFieldPopover, buildNewFieldPayload, emptyDefaultValue, type CreateFieldInput, type UpdateFieldInput } from './fields/BitableAddFieldPopover';
 import { FieldLockGlyph, fieldTypeGlyph } from './fields/bitableFieldTypeIcons';
 import { BitableTooltip, useBitablePanelHoverHandlers } from './shared/BitableViewShared';
@@ -82,6 +82,7 @@ import {
   dispatchBitableCommentToggleSidebar,
 } from '../Layout/commentSidebarBridge';
 import { BITABLE_BLOCK_EXPAND_ALL, BITABLE_BLOCK_OPEN_COMMENT } from './BitableContextMenu';
+import { dispatchBitableModelUpdated } from './dashboard/chartFromTable';
 import './BitableBlock.less';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -115,7 +116,7 @@ function formatMonth(date: Date) {
 function ViewIcon({ type, size = 16, fill = '#646a73' }: { type: BaseView['type']; size?: number; fill?: string }) {
   if (type === 'gallery') return <SlashGlyphGallery size={size} fill={fill} />;
   if (type === 'gantt') return <SlashGlyphGantt size={size} fill={fill} />;
-  if (type === 'kanban') return <SlashGlyphBitableGrid size={size} fill={fill} />;
+  if (type === 'kanban') return <SlashGlyphKanban size={size} fill={fill} />;
   return <SlashGlyphBitableGrid size={size} fill={fill} />;
 }
 
@@ -792,6 +793,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       title: next.name,
       view: view.type === 'gallery' || view.type === 'gantt' || view.type === 'kanban' ? view.type : 'grid',
     });
+    dispatchBitableModelUpdated({
+      tableId: next.id,
+      blockId: typeof node.attrs.blockId === 'string' ? node.attrs.blockId : undefined,
+    });
   };
 
   const mutate = (operation: (current: BaseTable) => BaseTable) => commit(operation(tableRef.current));
@@ -980,7 +985,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     setDraggingViewIndex(visibleIndex);
     setDragOverIndex(null);
     event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', String(index));
+    event.dataTransfer.setData('text/plain', String(visibleIndex));
     if (!dragGhostRef.current) {
       const ghost = document.createElement('div');
       ghost.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
@@ -2386,6 +2391,37 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 </BitableTooltip>
                 {activeToolbarPanel === 'group' && (
                   <KanbanGroupMenuPanel
+                    panelRef={toolbarPanelRef}
+                    table={table}
+                    view={activeView}
+                    config={galleryConfig}
+                    onTable={mutate}
+                  />
+                )}
+              </div>
+            </div>
+            )}
+            {activeView.type === 'gallery' && (
+            <div className="bitable-float-toolbar-kanban-group-btn">
+              <div
+                className={`bitable-float-toolbar-btn-wrapper${activeToolbarPanel === 'group' ? ' is-panel-open' : ''}`}
+                {...groupPanelHover}
+              >
+                <BitableTooltip tip="分组" placement="bottom">
+                  <button
+                    type="button"
+                    className={`bitable-float-toolbar-btn editable${galleryConfig.groupByFieldId ? ' selected' : ''}`}
+                    aria-label="分组"
+                    onClick={() => openToolbarPanel('group')}
+                  >
+                    <div className="bitable-float-toolbar-btn-background" />
+                    <span className="universe-icon bitable-float-toolbar-btn-icon bitable-float-toolbar-btn-icon-kanban-group">
+                      <ToolGlyphKanbanGroup />
+                    </span>
+                  </button>
+                </BitableTooltip>
+                {activeToolbarPanel === 'group' && (
+                  <ViewGroupMenuPanel
                     panelRef={toolbarPanelRef}
                     table={table}
                     view={activeView}
@@ -4198,7 +4234,7 @@ function GridGroupConfigPanel({
   );
 }
 
-function KanbanGroupMenuPanel({
+function ViewGroupMenuPanel({
   panelRef,
   table,
   view,
@@ -4211,7 +4247,11 @@ function KanbanGroupMenuPanel({
   config: GalleryViewConfig;
   onTable: (update: (table: BaseTable) => BaseTable) => void;
 }) {
-  const groupFields = table.fields.filter(field => field.type === 'single_select');
+  const groupFields = table.fields.filter(field => {
+    if (field.id === table.primaryFieldId) return false;
+    if (view.type === 'kanban') return field.type === 'single_select';
+    return field.type === 'text' || field.type === 'single_select' || field.type === 'number';
+  });
   const defaultFieldId = groupFields[0]?.id || '';
   const activeFieldId = config.groupByFieldId || defaultFieldId;
 
@@ -4263,6 +4303,16 @@ function KanbanGroupMenuPanel({
       </ul>
     </div>
   );
+}
+
+function KanbanGroupMenuPanel(props: {
+  panelRef: RefObject<HTMLDivElement>;
+  table: BaseTable;
+  view: BaseView;
+  config: GalleryViewConfig;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+}) {
+  return <ViewGroupMenuPanel {...props} />;
 }
 
 function SortConfigPanel({

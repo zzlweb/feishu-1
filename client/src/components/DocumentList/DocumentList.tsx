@@ -4,6 +4,7 @@ import { Button, Dialog, Input, Loading, MessagePlugin } from 'tdesign-react';
 import {
   AppIcon,
   ComponentGridIcon,
+  DeleteIcon,
   EllipsisIcon,
   FileAddIcon,
   FilterIcon,
@@ -17,16 +18,18 @@ import {
 import {
   createDocument,
   deleteDocument,
+  deleteTemplate,
   duplicateDocument,
   getDocuments,
   getTemplates,
+  importDocumentFile,
 } from '../../api/documents';
 import type { Document, Template } from '../../types';
 import './DocumentList.less';
 
 const TABS = ['最近访问', '归我所有', '与我共享', '收藏'];
 const CURRENT_USER = '张正人';
-const SUPPORTED_IMPORT_EXTENSIONS = new Set(['txt', 'md', 'csv', 'log']);
+const SUPPORTED_IMPORT_EXTENSIONS = new Set(['zip', 'html', 'htm', 'md', 'markdown', 'txt', 'csv', 'log']);
 
 type ViewMode = 'list' | 'grid';
 type SortKey = 'updated_at' | 'created_at' | 'title';
@@ -169,21 +172,17 @@ export default function DocumentList() {
   const importFile = useCallback(async (file: File) => {
     const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
     if (!SUPPORTED_IMPORT_EXTENSIONS.has(extension)) {
-      void MessagePlugin.warning('暂只支持导入 txt、md、csv、log 文本文件');
+      void MessagePlugin.warning('暂只支持导入 zip、html、htm、md、markdown、txt、csv、log 文件');
       return;
     }
 
     setIsImportingFile(true);
     try {
-      const text = await file.text();
-      const res = await createDocument({
-        title: file.name.replace(/\.[^.]+$/, ''),
-        content: buildPlainTextDocument(text),
-        author: CURRENT_USER,
-      });
-      if (res.code === 0 && res.data) {
-        void MessagePlugin.success('已导入为新文档');
-        navigate(`/doc/${res.data.id}`);
+      const res = await importDocumentFile(file, CURRENT_USER);
+      if (res.code === 0 && res.data?.document) {
+        const assetText = res.data.asset_count ? `，已还原 ${res.data.asset_count} 个资源` : '';
+        void MessagePlugin.success(`已导入为新文档${assetText}`);
+        navigate(`/doc/${res.data.document.id}`);
       } else {
         void MessagePlugin.error(res.message || '导入失败');
       }
@@ -295,6 +294,19 @@ export default function DocumentList() {
     }
   };
 
+  const handleDeleteTemplate = async (template: Template) => {
+    const confirmed = window.confirm(`删除模板“${template.title || '未命名模板'}”？`);
+    if (!confirmed) return;
+    const res = await deleteTemplate(template.id);
+    if (res.code === 0) {
+      void MessagePlugin.success('模板已删除');
+      const templateRes = await getTemplates();
+      if (templateRes.code === 0 && templateRes.data) setTemplates(templateRes.data);
+    } else {
+      void MessagePlugin.error(res.message || '删除模板失败');
+    }
+  };
+
   const activeRowDoc = rowMenu ? documents.find(doc => doc.id === rowMenu.docId) : null;
 
   return (
@@ -368,7 +380,7 @@ export default function DocumentList() {
               <span className="action-card-desc">从保存的模板创建文档</span>
             </span>
           </button>
-          <input ref={fileInputRef} type="file" accept=".txt,.md,.csv,.log" hidden onChange={handleImportFile} />
+          <input ref={fileInputRef} type="file" accept=".zip,.html,.htm,.md,.markdown,.txt,.csv,.log" hidden onChange={handleImportFile} />
         </section>
 
         <div className="tabs-bar">
@@ -557,10 +569,10 @@ export default function DocumentList() {
         ) : (
           <div className="template-list">
             {templates.map(template => (
+              <div key={template.id} className="template-list-item">
               <button
-                key={template.id}
                 type="button"
-                className="template-list-item"
+                className="template-list-item__main"
                 onClick={() => {
                   setTemplateDialogVisible(false);
                   void handleCreate(template);
@@ -572,6 +584,19 @@ export default function DocumentList() {
                   <em>{formatDate(template.created_at)}</em>
                 </span>
               </button>
+              <button
+                type="button"
+                className="template-list-item__delete"
+                title="删除模板"
+                aria-label="删除模板"
+                onClick={event => {
+                  event.stopPropagation();
+                  void handleDeleteTemplate(template);
+                }}
+              >
+                <DeleteIcon size="16px" />
+              </button>
+              </div>
             ))}
           </div>
         )}

@@ -171,6 +171,7 @@
 
           &.icon-create { background: #e8f0fe; color: @primary; }
           &.icon-upload { background: #fff3e0; color: #f57c00; }
+          &.icon-feishu { background: #e8f3ff; color: #245bdb; font-size: 14px; font-weight: 700; }
           &.icon-template { background: #fce4ec; color: #e91e63; }
         }
 
@@ -728,6 +729,32 @@
   margin: 0 0 24px;
 }
 
+.feishu-import-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  &__hint {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: @text-secondary;
+  }
+
+  &__option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: @text-primary;
+    cursor: pointer;
+
+    input {
+      margin: 0;
+    }
+  }
+}
+
 .template-empty {
   color: @text-secondary;
   font-size: 14px;
@@ -746,21 +773,54 @@
   min-height: 56px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
   border: 1px solid @border-light;
   border-radius: 6px;
   background: @bg-white;
   text-align: left;
-  cursor: pointer;
 
   &:hover {
     border-color: @primary;
     background: #f7faff;
   }
 
+  .template-list-item__main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 0;
+    border: none;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    font-family: @font;
+  }
+
+  .template-list-item__delete {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: @text-secondary;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &:hover {
+      background: #fff1f0;
+      color: #d83931;
+    }
+  }
+
   .template-list-item__icon {
     font-size: 20px;
+    flex-shrink: 0;
   }
 
   strong,

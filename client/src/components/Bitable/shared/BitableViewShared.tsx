@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import * as React from 'react';
 import { SelGlyphChevronDown } from '../../../icons/selectionToolbarGlyphs';
 import { FieldLockGlyph, fieldTypeGlyph } from '../fields/bitableFieldTypeIcons';
-import { getAttachments, valueText, type AttachmentValue, type BaseField, type BaseRecord, type CellValue } from '../model/bitableModel';
+import { getAttachments, valueText, findSelectChoice, formatCardDateValue, textColorForBackground, type AttachmentValue, type BaseField, type BaseRecord, type CellValue } from '../model/bitableModel';
 
 export { FieldLockGlyph, fieldTypeGlyph };
 
@@ -86,11 +86,54 @@ export function GridFieldMenuIcon({ name }: { name: keyof typeof GRID_FIELD_MENU
 
 export function FieldDisplay({ field, value }: { field: BaseField; value: CellValue }) {
   const text = valueText(value);
+  if (field.type === 'checkbox') {
+    return <span className={`base-checkbox-value${value ? ' is-checked' : ''}`} aria-label={value ? '已勾选' : '未勾选'} />;
+  }
+  if (field.name === '进度' || (field.type === 'text' && /^\d+(\.\d+)?%$/.test(text))) {
+    const percent = Math.min(100, Math.max(0, Number.parseFloat(text.replace('%', '')) || 0));
+    return (
+      <div className="base-field-progress">
+        <div className="base-field-progress__track">
+          <div className="base-field-progress__fill" style={{ width: `${percent}%` }} />
+        </div>
+        <span className="base-field-progress__label">{text}</span>
+      </div>
+    );
+  }
+  if (field.type === 'single_select') {
+    if (!text) return null;
+    const choice = findSelectChoice(field, text);
+    if (!choice) return <span className="base-cell-tag">{text}</span>;
+    const color = choice.color || '#e8f0ff';
+    return (
+      <span
+        className="base-cell-tag is-colored"
+        style={{ backgroundColor: color, color: textColorForBackground(color) }}
+      >
+        {choice.name}
+      </span>
+    );
+  }
+  if (field.type === 'date') {
+    const formatted = formatCardDateValue(value);
+    if (!formatted) return null;
+    return <span>{formatted}</span>;
+  }
+  if (field.type === 'number' && typeof value === 'number') {
+    return <span>{value.toLocaleString('zh-CN')}</span>;
+  }
   if (!text) return null;
-  if (field.type === 'single_select') return <span className="base-cell-tag">{text}</span>;
-  if (field.type === 'checkbox') return <span>{value ? '已完成' : '未完成'}</span>;
   if (field.type === 'attachment') return <span>{(value as AttachmentValue[]).length} 个附件</span>;
   return <span>{text}</span>;
+}
+
+export function fieldCardIcon(field: BaseField): string {
+  if (field.type === 'checkbox') return '☑';
+  if (field.type === 'date') return '▣';
+  if (field.type === 'number') return '#';
+  if (field.type === 'formula') return 'ƒx';
+  if (field.type === 'single_select') return '⊙';
+  return 'A=';
 }
 
 export function isPreviewImage(attachment: AttachmentValue | undefined) {
@@ -316,7 +359,7 @@ export function useBitablePanelHoverHandlers(onClose: () => void, enabled = true
     if (!enabled) return;
     cancelClose();
     timerRef.current = window.setTimeout(() => {
-      const related = event?.relatedTarget;
+      const related = event?.relatedTarget ?? null;
       if (isBitablePanelPortalTarget(related)) return;
       onClose();
     }, 120);

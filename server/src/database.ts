@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { getBusinessReportTemplateRecord } from './fixtures/businessReportTemplate';
 
 export interface DocumentRecord {
   id: string;
@@ -98,7 +99,8 @@ function getDefaultTemplates(): TemplateRecord[] {
       author: '系统',
       created_at: t(4),
       content: `<h1>📅 会议记录</h1><p>高效记录会议基本信息、核心议程、结论及后续待办事项。</p><div class="feishu-columns-node" data-local-block="columns"><div class="feishu-columns-block__col-wrap" data-width-ratio="50" data-local-column="true"><div class="feishu-columns-block__col"><p><strong>会议时间：</strong>2026-05-24</p><p><strong>参会人员：</strong>张正亮、李四、王五</p></div></div><div class="feishu-columns-block__col-wrap" data-width-ratio="50" data-local-column="true"><div class="feishu-columns-block__col"><p><strong>会议主题：</strong>核心项目进度沟通</p><p><strong>会议主持人：</strong>张正亮</p></div></div></div><h3>🎯 核心议题与讨论要点</h3><ul><li><strong>议题一：</strong>项目第一阶段的交付时间对齐。</li><li><strong>议题二：</strong>解决当前联调测试中的接口协议问题。</li></ul><h3>✅ 会议结论与决议</h3><blockquote>各方达成一致，将接口联调截止日期延长 2 天，发布时间维持原计划不变。</blockquote><h3>📝 任务指派与跟踪</h3><ul data-type="taskList"><li data-block-id="task-meeting-1" id="task-meeting-1" data-type="taskItem" data-checked="false"><label><input type="checkbox"><span></span></label><div><p><strong>@李四</strong> 重新设计接口协议并完成代码生成</p></div></li><li data-block-id="task-meeting-2" id="task-meeting-2" data-type="taskItem" data-checked="false"><label><input type="checkbox"><span></span></label><div><p><strong>@王五</strong> 准备部署环境 and 数据库脚本</p></div></li></ul>`
-    }
+    },
+    getBusinessReportTemplateRecord(),
   ];
 }
 
@@ -275,4 +277,12 @@ export function createTemplateRecord(template: TemplateRecord): TemplateRecord {
   db.templates.push(template);
   saveDb(db);
   return template;
+}
+
+export function deleteTemplateById(id: string): boolean {
+  const db = loadDb();
+  const before = db.templates.length;
+  db.templates = db.templates.filter(template => template.id !== id);
+  saveDb(db);
+  return db.templates.length < before;
 }

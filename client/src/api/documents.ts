@@ -1,4 +1,4 @@
-import type { Document, ApiResponse, Comment, Template } from '../types';
+import type { Document, ApiResponse, Comment, ImportDocumentResult, Template } from '../types';
 import { readApiPayload } from './http';
 
 const BASE_URL = '/api';
@@ -48,6 +48,47 @@ export const createDocument = (data?: Partial<Document>) =>
     body: JSON.stringify(data || {}),
   });
 
+export async function importDocumentFile(file: File, author?: string): Promise<ApiResponse<ImportDocumentResult>> {
+  const form = new FormData();
+  form.append('file', file);
+  if (author) form.append('author', author);
+
+  try {
+    const res = await fetch(`${BASE_URL}/documents/import`, {
+      method: 'POST',
+      body: form,
+      headers: { Accept: 'application/json; charset=utf-8' },
+    });
+    const body = await readApiPayload<ImportDocumentResult>(res);
+    if (!res.ok) {
+      return {
+        code: body.code ?? res.status,
+        message: body.message || `导入失败 (${res.status})`,
+      };
+    }
+    return body as ApiResponse<ImportDocumentResult>;
+  } catch (error) {
+    return {
+      code: -1,
+      message: error instanceof Error ? error.message : '导入失败',
+    };
+  }
+}
+
+export async function importDocumentUrl(
+  url: string,
+  options?: { author?: string; saveAsTemplate?: boolean },
+): Promise<ApiResponse<ImportDocumentResult>> {
+  return request<ImportDocumentResult>('/documents/import-url', {
+    method: 'POST',
+    body: JSON.stringify({
+      url,
+      author: options?.author,
+      save_as_template: options?.saveAsTemplate ?? false,
+    }),
+  });
+}
+
 export const updateDocument = (id: string, data: Partial<Document>) =>
   request<Document>(`/documents/${id}`, {
     method: 'PUT',
@@ -82,6 +123,9 @@ export const createTemplate = (data: Pick<Template, 'title' | 'content'> & Parti
     method: 'POST',
     body: JSON.stringify(data),
   });
+
+export const deleteTemplate = (id: string) =>
+  request<void>(`/documents/templates/${id}`, { method: 'DELETE' });
 
 // Comments
 export const getComments = (docId: string, blockId?: string) =>

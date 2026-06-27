@@ -1,0 +1,15 @@
+﻿npx : file:///C:/Users/zzlwe/Desktop/fs/feishu-1/server/scripts/gen-business-report-template.mjs:2
+所在位置 C:\Users\zzlwe\AppData\Local\Temp\ps-script-fafb730f-e95f-4516-9594-ac0c201b7662.ps1:7 字符: 49
++ ... -1\server"; npx tsx scripts/gen-business-report-template.mjs 2>&1 | O ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (file:///C:/User...-template.mjs:2:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+import { BUSINESS_REPORT_FIXTURE_HTML } from '../src/fixtures/feishuBusinessReport.ts';
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '../src/fixtures/feishuBusinessReport.ts' does not provide an export named 'BUSINESS_
+REPORT_FIXTURE_HTML'
+    at ModuleJob._instantiate (node:internal/modules/esm/module_job:124:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:190:5)
+
+Node.js v18.16.1

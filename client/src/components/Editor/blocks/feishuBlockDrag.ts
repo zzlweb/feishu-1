@@ -20,6 +20,7 @@ const DRAGGABLE_BLOCK_TYPES = new Set([
   'localButtonBlock',
   'localFormulaBlock',
   'localBitableBlock',
+  'localDashboardChartBlock',
   'localEmbedBlock',
 ]);
 

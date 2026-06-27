@@ -41,6 +41,7 @@ import { IconAddOutlined, IconDragOutlined } from '../../icons/feishuDoc';
 import BlockGutterGlyph from './blocks/BlockGutterGlyph';
 import EmojiPicker from './panels/EmojiPicker';
 import { HighlightBlock } from './blocks/HighlightBlock';
+import { DashboardChartBlock } from './blocks/DashboardChartBlock';
 import { BlockIndent } from './blocks/blockIndent';
 import { copyCurrentBlockLink, scrollToBlockFromHash } from './blocks/blockLink';
 import { resolveListItemHighlightRect } from './blocks/blockDom';
@@ -1852,6 +1853,7 @@ const editorExtensions = [
   LocalButtonBlock,
   LocalFormulaBlock,
   LocalBitableBlock,
+  DashboardChartBlock,
   LocalEmbedBlock,
   Placeholder.configure({
     includeChildren: false,
@@ -2357,6 +2359,10 @@ export default function Editor({
     const bitableBlock = target.closest('.feishu-bitable-block') as HTMLElement | null;
     if (bitableBlock && editorAreaRef.current.contains(bitableBlock)) {
       return { element: bitableBlock, type: bitableToolTypeFromElement(bitableBlock), isEmpty: false };
+    }
+    const dashboardBlock = target.closest('.feishu-dashboard-chart-block') as HTMLElement | null;
+    if (dashboardBlock && editorAreaRef.current.contains(dashboardBlock)) {
+      return { element: dashboardBlock, type: 'dashboard', isEmpty: false };
     }
     const divTableBlock = target.closest('.feishu-div-table') as HTMLElement | null;
     if (divTableBlock && editorAreaRef.current.contains(divTableBlock)) {

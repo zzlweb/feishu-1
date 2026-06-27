@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import JSZip from 'jszip';
 import appModule from '../src/app';
 
 process.env.NODE_ENV = 'test';
@@ -110,7 +111,14 @@ test('document lifecycle APIs create, update, list, duplicate, template and dele
 
     const templates = await api<any>('/api/documents/templates/list');
     assert.equal(templates.status, 200);
-    assert.equal(templates.body.data.length, 7);
+    assert.equal(templates.body.data.length, 8);
+
+    const deletedTemplate = await api<any>(`/api/documents/templates/${blockTemplate.body.data.id}`, { method: 'DELETE' });
+    assert.equal(deletedTemplate.status, 200);
+
+    const templatesAfterDelete = await api<any>('/api/documents/templates/list');
+    assert.equal(templatesAfterDelete.status, 200);
+    assert.equal(templatesAfterDelete.body.data.some((item: any) => item.id === blockTemplate.body.data.id), false);
 
     const removed = await api<any>(`/api/documents/${id}`, { method: 'DELETE' });
     assert.equal(removed.status, 200);
@@ -125,5 +133,80 @@ test('health API returns ok', async () => {
     const health = await api<any>('/api/health');
     assert.equal(health.status, 200);
     assert.equal(health.body.status, 'ok');
+  });
+});
+
+test('document import API restores zip html content and bundled assets', async () => {
+  await withApi(async (api) => {
+    const zip = new JSZip();
+    zip.file('assets/chart.png', Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    zip.file('index.html', [
+      '<!doctype html><html><head><title>飞书导出文档</title><script>bad()</script></head><body>',
+      '<h1>业务经营周报</h1>',
+      '<p onclick="bad()">门店销售概况</p>',
+      '<img src="./assets/chart.png">',
+      '<table><tr><th>门店</th><th>销售额</th></tr><tr><td>A</td><td>75640</td></tr></table>',
+      '</body></html>',
+    ].join(''));
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+    const form = new FormData();
+    form.append('author', '测试员');
+    form.append('file', new Blob([buffer], { type: 'application/zip' }), 'feishu-export.zip');
+
+    const imported = await api<any>('/api/documents/import', {
+      method: 'POST',
+      headers: {},
+      body: form as any,
+    });
+
+    assert.equal(imported.status, 201);
+    assert.equal(imported.body.code, 0);
+    assert.equal(imported.body.data.document.title, '业务经营周报');
+    assert.equal(imported.body.data.asset_count, 1);
+    assert.match(imported.body.data.document.content, /<img[^>]+\/static\/uploads\//);
+    assert.match(imported.body.data.document.content, /class="feishu-table/);
+    assert.doesNotMatch(imported.body.data.document.content, /onclick|script/);
+
+    const uploaded = imported.body.data.document.content.match(/\/static\/uploads\/([^"']+)/)?.[1];
+    if (uploaded) {
+      fs.rmSync(path.resolve(__dirname, '..', 'public', 'uploads', uploaded), { force: true });
+    }
+  });
+});
+
+test('document import-url API rejects invalid domains', async () => {
+  await withApi(async (api) => {
+    const invalid = await api<any>('/api/documents/import-url', {
+      method: 'POST',
+      body: JSON.stringify({ url: 'https://example.com/wiki/test' }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.match(invalid.body.message, /feishu\.cn|larksuite\.com/);
+  });
+});
+
+test('document import-url API imports public feishu wiki and optional template', async () => {
+  await withApi(async (api) => {
+    const imported = await api<any>('/api/documents/import-url', {
+      method: 'POST',
+      body: JSON.stringify({
+        url: 'https://qcntpn5n60jv.feishu.cn/wiki/H58uwRchYi7889k6dnJcVoMMnO5',
+        author: '测试员',
+        save_as_template: true,
+      }),
+    });
+
+    assert.equal(imported.status, 201);
+    assert.equal(imported.body.code, 0);
+    assert.equal(imported.body.data.document.title, '业务经营周报');
+    assert.match(imported.body.data.document.content, /data-local-block="bitable"/);
+    assert.match(imported.body.data.document.content, /data-model="/);
+    assert.ok(Array.isArray(imported.body.data.warnings));
+    assert.ok(imported.body.data.template);
+    assert.equal(imported.body.data.template.title, '业务经营周报');
+
+    const templates = await api<any>('/api/documents/templates/list');
+    assert.equal(templates.status, 200);
+    assert.ok(templates.body.data.some((item: any) => item.id === imported.body.data.template.id));
   });
 });

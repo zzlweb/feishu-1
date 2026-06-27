@@ -835,7 +835,9 @@ export function getActiveView(table: BaseTable) {
 
 export function getGalleryConfig(table: BaseTable, view: BaseView): GalleryViewConfig {
   const defaults = createGalleryConfig(table.fields, table.primaryFieldId);
-  const raw = view.type === 'gallery' ? (view.config as GalleryViewConfig) : defaults;
+  const raw = view.type === 'gallery' || view.type === 'kanban'
+    ? (view.config as GalleryViewConfig)
+    : defaults;
   const merged: GalleryViewConfig = { ...defaults, ...raw };
   const validCover = table.fields.some(field => field.id === merged.coverFieldId && field.type === 'attachment');
   return {
@@ -843,7 +845,7 @@ export function getGalleryConfig(table: BaseTable, view: BaseView): GalleryViewC
     coverFieldId: validCover ? merged.coverFieldId : table.fields.find(field => field.type === 'attachment')?.id,
     titleFieldId: table.fields.some(field => field.id === merged.titleFieldId) ? merged.titleFieldId : table.primaryFieldId,
     visibleFieldIds: resolveGalleryVisibleFieldIds(table.fields, table.primaryFieldId, merged),
-    showRecordActions: false,
+    showRecordActions: merged.showRecordActions ?? false,
   };
 }
 

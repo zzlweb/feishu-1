@@ -53,6 +53,15 @@ export interface ApiResponse<T> {
   message?: string;
 }
 
+export interface ImportDocumentResult {
+  document: Document;
+  template?: Template;
+  source_name: string;
+  source_url?: string;
+  asset_count: number;
+  warnings?: string[];
+}
+
 export interface HeadingItem {
   level: number;
   text: string;

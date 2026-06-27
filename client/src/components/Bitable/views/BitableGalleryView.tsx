@@ -2,14 +2,16 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEve
 import { createPortal } from 'react-dom';
 import {
   getAttachments,
+  resolveGalleryVisibleFieldIds,
   selectCoverAttachment,
   valueText,
   type BaseRecord,
   type BaseTable,
+  type CellValue,
   type GalleryViewConfig,
 } from '../model/bitableModel';
 import { BitableGalleryRecordContextMenu } from '../records/BitableGalleryRecordContextMenu';
-import { FileBadge, isPreviewImage } from '../shared/BitableViewShared';
+import { FieldDisplay, FileBadge, fieldCardIcon, isPreviewImage } from '../shared/BitableViewShared';
 
 export interface BitableGalleryGroup {
   key: string;
@@ -53,9 +55,10 @@ function syncGalleryBleed(block: HTMLElement) {
 
 function coverRatioClass(ratio: GalleryViewConfig['cardAspectRatio']) {
   if (ratio === '1:1') return 'ratio-1-1';
+  if (ratio === '4:3') return 'ratio-4-3';
   if (ratio === '16:9') return 'ratio-16-9';
   if (ratio === 'auto') return 'ratio-auto';
-  return '';
+  return 'ratio-4-3';
 }
 
 function gridSizeClass(cardSize: GalleryViewConfig['cardSize']) {
@@ -134,10 +137,12 @@ function GalleryCard({
   const rawTitle = valueText(record.fields[titleFieldId]);
   const title = rawTitle || '未命名记录';
   const hideCover = config.emptyCoverMode === 'hide-cover';
+  const visibleFieldIds = resolveGalleryVisibleFieldIds(table.fields, table.primaryFieldId, config);
+  const isCompact = config.cardLayoutMode === 'compact';
 
   return (
     <article
-      className={`base-gallery-card${selected ? ' is-selected' : ''}`}
+      className={`base-gallery-card${selected ? ' is-selected' : ''}${isCompact ? ' is-compact' : ''}`}
       onMouseDown={stopPointer}
       onClick={event => {
         event.stopPropagation();
@@ -154,6 +159,22 @@ function GalleryCard({
       ) : null}
       <div className="base-gallery-card__body">
         <strong className={`base-gallery-card__title${rawTitle ? '' : ' is-placeholder'}`}>{title}</strong>
+        {visibleFieldIds.map(fieldId => {
+          const field = table.fields.find(item => item.id === fieldId);
+          if (!field) return null;
+          const value = record.fields[fieldId];
+          if (!config.showEmptyFields && !valueText(value)) return null;
+          return (
+            <div className="base-gallery-card__field" key={field.id}>
+              <span className="base-card-field-icon" aria-hidden>{fieldCardIcon(field)}</span>
+              {config.showFieldNames ? <label>{field.name}</label> : null}
+              <FieldDisplay field={field} value={value as CellValue} />
+              {config.showEmptyFields && !valueText(value) ? (
+                <span className="base-gallery-card__empty-value">空</span>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
       {showDelete ? (
         <button

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { valueText, type BaseField, type BaseRecord, type BaseTable, type CellValue, type GalleryViewConfig } from '../model/bitableModel';
-import { FieldDisplay, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
+import { valueText, getAttachments, selectCoverAttachment, type BaseField, type BaseRecord, type BaseTable, type CellValue, type GalleryViewConfig } from '../model/bitableModel';
+import { FieldDisplay, FileBadge, fieldCardIcon, isPreviewImage, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
 
 const KANBAN_DOC_WIDTH = 860;
-const KANBAN_COLUMN_WIDTH = 276;
+const KANBAN_COLUMN_WIDTH = 236;
 const KANBAN_COLUMN_GAP = 16;
-const KANBAN_CREATE_GROUP_WIDTH = 146;
+const KANBAN_CREATE_GROUP_WIDTH = 0;
 const KANBAN_EDGE_MARGIN = 72;
 
 export interface BitableKanbanViewProps {
@@ -66,6 +66,27 @@ function handleKanbanCardClick(
     return;
   }
   openRecord(recordId);
+}
+
+function KanbanCardCover({ record, config }: { record: BaseRecord; config: GalleryViewConfig }) {
+  const attachments = getAttachments(record, config.coverFieldId);
+  const cover = selectCoverAttachment(attachments);
+  if (isPreviewImage(cover)) {
+    return (
+      <img
+        loading="lazy"
+        src={cover!.thumbnailUrl || cover!.previewUrl || cover!.url}
+        alt=""
+        style={{ objectFit: config.coverFit, objectPosition: config.coverPosition || 'center' }}
+      />
+    );
+  }
+  if (cover) return <FileBadge attachment={cover} />;
+  return (
+    <div className="base-kanban__card-cover-empty" aria-hidden>
+      <span>▧</span>
+    </div>
+  );
 }
 
 export function BitableKanbanView({
@@ -485,6 +506,8 @@ export function BitableKanbanView({
                   {columnRecords.map(record => {
                     const rawTitle = valueText(record.fields[config.titleFieldId || table.primaryFieldId]);
                     const title = rawTitle || '未命名记录';
+                    const timeField = table.fields.find(field => field.name === '时间');
+                    const timeText = timeField ? valueText(record.fields[timeField.id]) : '';
                     return (
                       <article
                         className={`base-kanban__card${draggingRecordId === record.id ? ' is-dragging' : ''}${selectedRecordId === record.id ? ' is-selected' : ''}`}
@@ -511,14 +534,27 @@ export function BitableKanbanView({
                           setCardMenu({ recordId: record.id, left: event.clientX, top: event.clientY });
                         }}
                       >
+                        {config.coverFieldId ? (
+                          <div className="base-kanban__card-cover">
+                            <KanbanCardCover record={record} config={config} />
+                          </div>
+                        ) : null}
                         <strong className={`base-kanban__card-title${rawTitle ? '' : ' is-empty'}`}>{title}</strong>
+                        {timeText ? (
+                          <div className="base-kanban__card-time">
+                            <span aria-hidden>▣</span>
+                            <span>{timeText}</span>
+                          </div>
+                        ) : null}
                         {visibleFieldIds.map(fieldId => {
                           const field = table.fields.find(item => item.id === fieldId);
                           if (!field) return null;
+                          if (field.name === '时间') return null;
                           const value = record.fields[fieldId];
                           if (!config.showEmptyFields && !valueText(value)) return null;
                           return (
                             <div className="base-kanban__card-field" key={field.id}>
+                              <span className="base-card-field-icon" aria-hidden>{fieldCardIcon(field)}</span>
                               {config.showFieldNames && <label>{field.name}</label>}
                               <FieldDisplay field={field} value={value as CellValue} />
                               {config.showEmptyFields && !valueText(value) && <span className="base-kanban__empty-value">空</span>}

@@ -21,6 +21,7 @@ export const FEISHU_BLOCK_ID_TYPES = [
   'localButtonBlock',
   'localFormulaBlock',
   'localBitableBlock',
+  'localDashboardChartBlock',
   'localEmbedBlock',
 ];
 
