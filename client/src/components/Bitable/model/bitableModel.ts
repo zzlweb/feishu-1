@@ -134,6 +134,8 @@ export interface GalleryViewConfig {
   groupOrderIds?: string[];
   hiddenGroupIds?: string[];
   showEmptyGroups?: boolean;
+  /** 用户新建的空分组，在 showEmptyGroups 为 false 时仍展示 */
+  visibleEmptyGroupIds?: string[];
   showCreateGroup?: boolean;
   showNewRecordButton?: boolean;
   emptyCoverMode: 'placeholder' | 'hide-cover';
@@ -487,6 +489,30 @@ function parseArray<T>(value: unknown, fallback: T[]): T[] {
   } catch {
     return fallback;
   }
+}
+
+export function resolveKanbanGroupFieldId(fields: BaseField[]): FieldId | undefined {
+  const selectFields = fields.filter(field => field.type === 'single_select');
+  if (!selectFields.length) return undefined;
+  const preferred = selectFields.find(field => /阶段|phase|stage/i.test(field.name))
+    ?? selectFields.find(field => /状态|status/i.test(field.name))
+    ?? selectFields.find(field => /分组|group/i.test(field.name));
+  return (preferred ?? selectFields[0]).id;
+}
+
+export function createKanbanConfig(fields: BaseField[], primaryFieldId: string): GalleryViewConfig {
+  const groupByFieldId = resolveKanbanGroupFieldId(fields);
+  const reserved = new Set<FieldId>([primaryFieldId, groupByFieldId].filter((id): id is FieldId => Boolean(id)));
+  return {
+    ...createGalleryConfig(fields, primaryFieldId),
+    groupByFieldId,
+    showFieldNames: true,
+    showEmptyGroups: true,
+    visibleFieldIds: fields
+      .filter(field => !reserved.has(field.id) && field.type !== 'attachment')
+      .slice(0, 6)
+      .map(field => field.id),
+  };
 }
 
 export function createGalleryConfig(fields: BaseField[], primaryFieldId: string): GalleryViewConfig {
@@ -1373,7 +1399,7 @@ export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt' | '
       tableId: table.id,
       name: uniqueViewName(table.views, defaultViewName(type)),
       type,
-      config: createGalleryConfig(fields, table.primaryFieldId),
+      config: createKanbanConfig(fields, table.primaryFieldId),
       filters: [],
       sorts: [],
     };

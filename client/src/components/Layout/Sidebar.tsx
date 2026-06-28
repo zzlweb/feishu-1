@@ -19,20 +19,26 @@ interface SidebarProps {
   onToggleHeadingCollapse?: (headingId: string) => void;
 }
 
-/** 目录收起/展开图标（用户提供 data URI） */
-const CATALOGUE_TOGGLE_ICON_SRC =
-  'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTcuOTg3IDEzLjIyOEwzLjc2IDlsNC40NTctNC40NTguNjI3LS42M0EuNzUuNzUgMCAxMDcuNzggMi44NThsLS40OTguNUwyLjE3IDguNDdhLjc1Ljc1IDAgMDAwIDEuMDZsNC44NTQgNC44NTUuNzU5Ljc2YS43NS43NSAwIDAwMS4wNjItMS4wNTdsLS44NTctLjg2eiIgZmlsbD0iIzY0NkE3MyIvPjxwYXRoIGQ9Ik0xNC42NjggMTMuMjI4TDEwLjQ0IDlsNC40NTctNC40NTguNjI3LS42M2EuNzUuNzUgMCAxMC0xLjA2NC0xLjA1NmwtLjQ5OC41TDguODUgOC40N2EuNzUuNzUgMCAwMDAgMS4wNmw0Ljg1NCA0Ljg1NS43NTguNzZhLjc1Ljc1IDAgMDAxLjA2Mi0xLjA1N2wtLjg1Ni0uODZ6IiBmaWxsPSIjNjQ2QTczIi8+PC9zdmc+';
-
 function CatalogueToggleIcon({ mirrored }: { mirrored?: boolean }) {
   return (
-    <img
-      src={CATALOGUE_TOGGLE_ICON_SRC}
-      alt=""
+    <svg
       width={18}
       height={18}
-      draggable={false}
+      viewBox="0 0 18 18"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
       className={`catalogue-collapse-btn__icon${mirrored ? ' catalogue-collapse-btn__icon--mirrored' : ''}`}
-    />
+    >
+      <path
+        d="M7.987 13.228 3.76 9l4.457-4.458.627-.63A.75.75 0 1 0 7.78 2.858l-.498.5L2.17 8.47a.75.75 0 0 0 0 1.06l4.854 4.855.759.76a.75.75 0 0 0 1.062-1.057l-.857-.86Z"
+        fill="currentColor"
+      />
+      <path
+        d="M14.668 13.228 10.44 9l4.457-4.458.627-.63a.75.75 0 1 0-1.064-1.056l-.498.5L8.85 8.47a.75.75 0 0 0 0 1.06l4.854 4.855.758.76a.75.75 0 0 0 1.062-1.057l-.856-.86Z"
+        fill="currentColor"
+      />
+    </svg>
   );
 }
 

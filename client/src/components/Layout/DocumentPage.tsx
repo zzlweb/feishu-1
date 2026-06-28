@@ -25,7 +25,7 @@ import { resolveBlockElement } from '../Editor/blocks/blockDom';
 import './Layout.less';
 
 const EDITOR_PAGE_MIN_WIDTH = 860;
-const CATALOGUE_RAIL_WIDTH = 128;
+const CATALOGUE_RAIL_WIDTH = 232;
 const DOC_MAIN_MIN_GUTTER = 24;
 const COMMENT_SIDEBAR_WIDTH = 280;
 
@@ -549,7 +549,10 @@ export default function DocumentPage() {
           <CommentSidebarTrackContext.Provider value={commentTrackHost}>
           <div className="doc-page-workspace-inner">
             <main className="doc-page-main" ref={pageMainRef}>
-              <div className="doc-page-catalogue-rail" aria-hidden={!showOutlineSidebar}>
+              <div
+                className={`doc-page-catalogue-rail${sidebarCollapsed ? ' doc-page-catalogue-rail--collapsed' : ''}`}
+                aria-hidden={!showOutlineSidebar}
+              >
                 {showOutlineSidebar && (
                   <Sidebar
                     ref={sidebarRef}

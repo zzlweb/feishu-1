@@ -124,6 +124,18 @@ function normalizeStringArray(value: unknown): string[] {
   return values.map(normalizeDisplayText).filter(Boolean);
 }
 
+function inferMimeTypeFromName(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'svg') return 'image/svg+xml';
+  if (ext === 'mp4') return 'video/mp4';
+  if (ext === 'pdf') return 'application/pdf';
+  return '';
+}
+
 function normalizeCellValue(value: unknown, type: BaseFieldType): CellValue {
   if (value == null) return type === 'multi_select' || type === 'attachment' ? [] : '';
   if (type === 'checkbox') return Boolean(value);
@@ -142,11 +154,14 @@ function normalizeCellValue(value: unknown, type: BaseFieldType): CellValue {
       const attachment = item as Record<string, unknown>;
       const name = String(attachment.name || attachment.file_name || attachment.fileName || `附件 ${index + 1}`);
       const url = String(attachment.url || attachment.tmp_url || attachment.preview_url || '');
+      const mimeType = String(
+        attachment.mime_type || attachment.type || inferMimeTypeFromName(name) || 'application/octet-stream',
+      );
       return {
         id: String(attachment.id || attachment.file_token || `att_${index}`),
         fileId: String(attachment.file_token || attachment.id || `file_${index}`),
         name,
-        mimeType: String(attachment.mime_type || 'application/octet-stream'),
+        mimeType,
         extension: name.split('.').pop() || '',
         size: Number(attachment.size || 0),
         url,

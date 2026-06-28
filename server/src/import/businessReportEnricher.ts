@@ -2,6 +2,7 @@ import {
   createNewBusinessTable,
   createStoreSalesTable,
 } from '../bitableModelFactory';
+import type { BaseTableModel } from '../bitableModelFactory';
 import type { ImportedBlock } from './types';
 
 export const BUSINESS_REPORT_WIKI_TOKEN = 'H58uwRchYi7889k6dnJcVoMMnO5';
@@ -14,8 +15,7 @@ function isOpaque999Column(column: ImportedBlock[]): boolean {
   return column.length > 0 && column.every(isOpaque999Block);
 }
 
-function buildStoreSalesDashboardBlock(): ImportedBlock {
-  const storeTable = createStoreSalesTable();
+function buildStoreSalesDashboardBlock(storeTable: BaseTableModel): ImportedBlock {
   return {
     type: 'dashboard',
     payload: {
@@ -71,14 +71,10 @@ export function enrichBusinessReportBlocks(blocks: ImportedBlock[]): ImportedBlo
 
     if (normalized.type === 'columns' && normalized.columns.every(isOpaque999Column)) {
       const storeTable = createStoreSalesTable();
-      result.push({
-        type: 'columns',
-        ratios: normalized.ratios,
-        columns: [
-          [{ type: 'bitable', payload: { table: storeTable, defaultView: 'grid' } }],
-          [buildStoreSalesDashboardBlock()],
-        ],
-      });
+      result.push(
+        buildStoreSalesDashboardBlock(storeTable),
+        { type: 'bitable', payload: { table: storeTable, defaultView: 'grid' } },
+      );
       continue;
     }
 

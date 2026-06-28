@@ -4687,6 +4687,10 @@
     padding: 4px 0 8px;
   }
 
+  .base-kanban__board {
+    align-items: flex-start;
+  }
+
   .base-kanban__column {
     border-color: #dee0e3;
     border-radius: 8px;
@@ -4701,7 +4705,7 @@
   }
 
   .base-kanban__column-cards {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
@@ -4762,7 +4766,7 @@
 
   .base-kanban__card-field,
   .base-card-field--kanban {
-    align-items: center;
+    align-items: flex-start;
     min-height: 22px;
     margin-top: 6px;
     color: #646a73;
@@ -4776,6 +4780,22 @@
     color: #646a73;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .base-card-field--kanban .base-card-field__value {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+
+    .base-cell-tag,
+    .base-cell-tag-list {
+      max-width: 100%;
+    }
+
+    .base-cell-tag {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   }
 
   .base-kanban__create-group {

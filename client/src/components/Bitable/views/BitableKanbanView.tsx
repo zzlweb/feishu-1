@@ -203,14 +203,19 @@ export function BitableKanbanView({
   const visibleChoices = useMemo(
     () => orderedChoices.filter(choice => (
       !(config.hiddenGroupIds || []).includes(choice.id)
-      && (config.showEmptyGroups !== false || (recordsByStatus.get(choice.name)?.length ?? 0) > 0)
+      && (
+        config.showEmptyGroups !== false
+        || (recordsByStatus.get(choice.name)?.length ?? 0) > 0
+        || (config.visibleEmptyGroupIds || []).includes(choice.id)
+      )
     )),
-    [config.hiddenGroupIds, config.showEmptyGroups, orderedChoices, recordsByStatus],
+    [config.hiddenGroupIds, config.showEmptyGroups, config.visibleEmptyGroupIds, orderedChoices, recordsByStatus],
   );
   const shouldShowCreateGroup = config.showCreateGroup !== false;
   const shouldShowNewRecordButton = config.showNewRecordButton !== false;
   const boardContentWidth = useMemo(
-    () => resolveKanbanContentWidth(visibleChoices.length) + (shouldShowCreateGroup ? KANBAN_CREATE_GROUP_WIDTH : 0),
+    () => resolveKanbanContentWidth(visibleChoices.length)
+      + (shouldShowCreateGroup ? KANBAN_COLUMN_GAP + KANBAN_CREATE_GROUP_WIDTH : 0),
     [shouldShowCreateGroup, visibleChoices.length],
   );
   const boardWidth = Math.max(KANBAN_DOC_WIDTH, boardContentWidth, viewportWidth);

@@ -15,6 +15,7 @@ import {
   stripBusinessReportOpaqueWarnings,
 } from './businessReportEnricher';
 import { mapFeishuBitableToBaseTable } from './bitableMapper';
+import { mirrorBitableTableAttachments, type BitableAttachmentMirrorContext } from './bitableAttachmentMirror';
 import { emitLocalHtml } from './localHtmlEmitter';
 import type { EmittedImportPayload, ImportedBlock, ImportedDocument, ImportedInline, ImportWarning } from './types';
 import type { ImportedAsset } from './types';
@@ -292,6 +293,7 @@ async function fetchBitableTableFromApi(
   bitable: NonNullable<FeishuBlock['bitable']>,
   blockId: string | undefined,
   preferredViewId?: string,
+  mirrorContext?: BitableAttachmentMirrorContext,
 ) {
   let appToken = bitable.app_token?.trim() || '';
   let tableId = bitable.table_id?.trim();
@@ -336,6 +338,9 @@ async function fetchBitableTableFromApi(
     records,
     views,
   });
+  if (mirrorContext) {
+    await mirrorBitableTableAttachments(table, mirrorContext);
+  }
   if (preferredViewId && table.views.some(view => view.id === preferredViewId)) {
     table.activeViewId = preferredViewId;
   }
@@ -358,6 +363,7 @@ async function convertReferenceBaseBlock(
   block: FeishuBlock,
   client: FeishuApiClient,
   warnings: ImportWarning[],
+  mirrorContext?: BitableAttachmentMirrorContext,
 ): Promise<ImportedBlock | null> {
   const reference = block.reference_base;
   const rawToken = reference?.token?.trim();
@@ -370,6 +376,7 @@ async function convertReferenceBaseBlock(
       { app_token: appToken, table_id: tableId, token: rawToken },
       block.block_id,
       reference?.view_id?.trim(),
+      mirrorContext,
     );
     if (!table) return null;
     const preferredView = reference?.view_id
@@ -737,11 +744,17 @@ async function convertFeishuBlock(
   }
 
   if (block.reference_base?.token) {
-    const converted = await convertReferenceBaseBlock(block, client, warnings);
+    const converted = await convertReferenceBaseBlock(
+      block,
+      client,
+      warnings,
+      { apiBaseUrl, assetHeaders, warnings, assets },
+    );
     if (converted) return converted;
   }
 
   if (block.bitable) {
+    const mirrorContext: BitableAttachmentMirrorContext = { apiBaseUrl, assetHeaders, warnings, assets };
     if (block.bitable.fields?.length && block.bitable.records) {
       const table = mapFeishuBitableToBaseTable({
         tableId: block.bitable.table_id || block.block_id || uuidv4(),
@@ -750,10 +763,11 @@ async function convertFeishuBlock(
         records: block.bitable.records,
         views: block.bitable.views,
       });
+      await mirrorBitableTableAttachments(table, mirrorContext);
       return { type: 'bitable', payload: { table, defaultView: table.views[0]?.type || 'grid' } };
     }
     try {
-      const table = await fetchBitableTableFromApi(client, block.bitable, block.block_id);
+      const table = await fetchBitableTableFromApi(client, block.bitable, block.block_id, undefined, mirrorContext);
       if (table) {
         return { type: 'bitable', payload: { table, defaultView: table.views[0]?.type || 'grid' } };
       }
@@ -1077,6 +1091,16 @@ async function importStandaloneBitableApp(
     : tables;
 
   const blocks: ImportedBlock[] = [];
+  const assets: ImportedAsset[] = [];
+  const token = await client.getTenantAccessToken();
+  const apiBaseUrl = getFeishuApiConfigFromEnv()?.baseUrl || 'https://open.feishu.cn';
+  const mirrorContext: BitableAttachmentMirrorContext = {
+    apiBaseUrl,
+    assetHeaders: { Authorization: `Bearer ${token}` },
+    warnings,
+    assets,
+  };
+
   for (const tableMeta of orderedTables) {
     const tableId = tableMeta.table_id?.trim();
     if (!tableId) continue;
@@ -1095,6 +1119,7 @@ async function importStandaloneBitableApp(
         records,
         views,
       });
+      await mirrorBitableTableAttachments(table, mirrorContext);
       if (orderedTables.length > 1) {
         blocks.push({ type: 'heading', level: 2, inlines: [{ text: tableMeta.name || '数据表' }] });
       }
@@ -1117,7 +1142,7 @@ async function importStandaloneBitableApp(
     sourceUrl,
     sourceName: sourceNameFromUrl(sourceUrl),
     blocks,
-    assets: [],
+    assets,
     warnings,
     importQuality: partial ? 'partial' : 'full',
     importMetadata: {

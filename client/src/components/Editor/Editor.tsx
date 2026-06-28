@@ -2037,8 +2037,29 @@ function isEditorTypingFocused(editorInstance: {
   return Boolean(ae && view.dom.contains(ae));
 }
 
+const CATALOGUE_IGNORED_HEADING_ANCESTORS = new Set([
+  'blockquote',
+  'highlightBlock',
+  'listItem',
+  'taskItem',
+  'tableCell',
+  'localColumnBlock',
+]);
+
+function isCatalogueHeading(state: any, pos: number, node: any): boolean {
+  if (node.type.name !== 'heading') return false;
+  const text = String(node.textContent ?? '').trim();
+  if (!text) return false;
+  const $pos = state.doc.resolve(pos);
+  for (let depth = $pos.depth; depth > 0; depth -= 1) {
+    const ancestorName = $pos.node(depth).type.name;
+    if (CATALOGUE_IGNORED_HEADING_ANCESTORS.has(ancestorName)) return false;
+  }
+  return true;
+}
+
 /** 侧栏块柄纵轴：标题与首行文字中线对齐，其它块用块级盒子垂直中心 */
-/** 与 extractHeadings 一致：仅非空标题进目录；光标在标题内或所属正文上方最近一节 */
+/** 与 extractHeadings 一致：仅正文主线非空标题进目录；光标在标题内或所属正文上方最近一节 */
 function resolveCatalogueActiveId(editorInstance: any): string | null {
   if (!editorInstance?.state) return null;
   const { state } = editorInstance;
@@ -2047,18 +2068,14 @@ function resolveCatalogueActiveId(editorInstance: any): string | null {
 
   for (let d = $from.depth; d > 0; d--) {
     const node = $from.node(d);
-    if (node.type.name !== 'heading') continue;
-    const text = String(node.textContent ?? '').trim();
-    if (!text) continue;
+    if (!isCatalogueHeading(state, $from.before(d), node)) continue;
     return readHeadingId(node.attrs) ?? null;
   }
 
   let lastId: string | null = null;
   state.doc.descendants((node: any, pos: number) => {
     if (pos >= from) return false;
-    if (node.type.name !== 'heading') return;
-    const text = String(node.textContent ?? '').trim();
-    if (!text) return;
+    if (!isCatalogueHeading(state, pos, node)) return;
     lastId = readHeadingId(node.attrs);
   });
   return lastId;
@@ -3332,9 +3349,8 @@ export default function Editor({
     if (!onHeadingsChange || !editorInstance) return;
     const headings: HeadingItem[] = [];
     editorInstance.state.doc.descendants((node: any, pos: number) => {
-      if (node.type.name !== 'heading') return;
+      if (!isCatalogueHeading(editorInstance.state, pos, node)) return;
       const text = String(node.textContent ?? '').trim();
-      if (!text) return;
       headings.push({
         level: node.attrs.level,
         text,

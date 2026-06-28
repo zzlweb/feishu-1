@@ -1117,6 +1117,33 @@ export function BitableGridView({
       setViewportWidth(shell?.clientWidth ?? 0);
       return;
     }
+    const columnHost = block.closest<HTMLElement>('.feishu-columns-block__col');
+    if (columnHost) {
+      const blockLeftNow = block.getBoundingClientRect().left;
+      const anchorWidth = Math.max(
+        BITABLE_GRID_MIN_WIDTH,
+        columnHost.clientWidth || block.clientWidth || shell.clientWidth,
+      );
+      anchorWidthRef.current = anchorWidth;
+      layoutOriginRef.current = { blockLeft: blockLeftNow, bleedLeft: blockLeftNow };
+      block.style.setProperty('--bitable-bleed-left', `${blockLeftNow}px`);
+      block.style.setProperty('--bitable-block-left', `${blockLeftNow}px`);
+      block.style.setProperty('--bitable-anchor-width', `${anchorWidth}px`);
+      block.style.setProperty('--bitable-anchor-scroll-width', `${anchorWidth}px`);
+      block.classList.remove('is-grid-hscroll-active');
+      setLayoutCaps({
+        anchor: anchorWidth,
+        maxBleedWidth: anchorWidth,
+        trackWidth: anchorWidth,
+        shiftMax: 0,
+        widthExpandMax: 0,
+        expandScrollMax: 0,
+        panScrollMax: 0,
+        bleedLeft: blockLeftNow,
+      });
+      setViewportWidth(Math.max(INDEX_WIDTH + ADD_FIELD_WIDTH, anchorWidth));
+      return;
+    }
     const blockLeftNow = block.getBoundingClientRect().left;
     const bleedHost = block.closest<HTMLElement>('.doc-page-workspace')
       ?? block.closest<HTMLElement>('.editor-container')

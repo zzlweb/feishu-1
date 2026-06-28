@@ -77,7 +77,7 @@ router.post('/import-url', async (req: Request, res: Response) => {
       title: imported.title,
       content: imported.content,
       author: String(author || '导入用户'),
-      icon: imported.coverUrl ? '📘' : '📄',
+      icon: '',
       cover_url: imported.coverUrl || '',
       read_only: 0,
       import_metadata: imported.importMetadata ? JSON.stringify(imported.importMetadata) : '',

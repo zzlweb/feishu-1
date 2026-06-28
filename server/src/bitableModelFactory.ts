@@ -554,7 +554,6 @@ export function createNewBusinessTable(): BaseTableModel {
       visibleFieldIds: [timeField.id, contentField.id, phaseField.id, statusField.id, shopField.id, durationField.id, startField.id, followField.id],
       cardLayoutMode: 'compact',
       showEmptyGroups: false,
-      showCreateGroup: false,
       showNewRecordButton: true,
     },
   });

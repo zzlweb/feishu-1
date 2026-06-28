@@ -2022,11 +2022,26 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           name,
           color: colors[choices.length % colors.length],
         };
+        const currentOrder = galleryConfig.groupOrderIds?.length
+          ? galleryConfig.groupOrderIds
+          : choices.map(choice => choice.id);
         return {
           ...current,
           fields: current.fields.map(item => item.id === field.id
             ? { ...item, options: { ...item.options, choices: [...choices, nextChoice] } }
             : item),
+          views: current.views.map(view => {
+            if (view.id !== activeView.id || view.type !== 'kanban') return view;
+            const config = view.config as GalleryViewConfig;
+            return {
+              ...view,
+              config: {
+                ...config,
+                groupOrderIds: [...currentOrder, nextChoice.id],
+                visibleEmptyGroupIds: Array.from(new Set([...(config.visibleEmptyGroupIds || []), nextChoice.id])),
+              },
+            };
+          }),
         };
       });
     };
