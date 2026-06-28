@@ -7,11 +7,11 @@ import {
   valueText,
   type BaseRecord,
   type BaseTable,
-  type CellValue,
   type GalleryViewConfig,
 } from '../model/bitableModel';
 import { BitableGalleryRecordContextMenu } from '../records/BitableGalleryRecordContextMenu';
-import { FieldDisplay, FileBadge, fieldCardIcon, isPreviewImage } from '../shared/BitableViewShared';
+import { BitableCardField } from '../shared/BitableCardField';
+import { FileBadge, isPreviewImage } from '../shared/BitableViewShared';
 
 export interface BitableGalleryGroup {
   key: string;
@@ -136,7 +136,8 @@ function GalleryCard({
   const titleFieldId = config.titleFieldId || table.primaryFieldId;
   const rawTitle = valueText(record.fields[titleFieldId]);
   const title = rawTitle || '未命名记录';
-  const hideCover = config.emptyCoverMode === 'hide-cover';
+  const hasCover = getAttachments(record, config.coverFieldId).length > 0;
+  const hideCover = config.emptyCoverMode === 'hide-cover' && !hasCover;
   const visibleFieldIds = resolveGalleryVisibleFieldIds(table.fields, table.primaryFieldId, config);
   const isCompact = config.cardLayoutMode === 'compact';
 
@@ -163,16 +164,15 @@ function GalleryCard({
           const field = table.fields.find(item => item.id === fieldId);
           if (!field) return null;
           const value = record.fields[fieldId];
-          if (!config.showEmptyFields && !valueText(value)) return null;
           return (
-            <div className="base-gallery-card__field" key={field.id}>
-              <span className="base-card-field-icon" aria-hidden>{fieldCardIcon(field)}</span>
-              {config.showFieldNames ? <label>{field.name}</label> : null}
-              <FieldDisplay field={field} value={value as CellValue} />
-              {config.showEmptyFields && !valueText(value) ? (
-                <span className="base-gallery-card__empty-value">空</span>
-              ) : null}
-            </div>
+            <BitableCardField
+              key={field.id}
+              field={field}
+              value={value}
+              showFieldName={config.showFieldNames}
+              showEmptyValue={config.showEmptyFields}
+              variant="gallery"
+            />
           );
         })}
       </div>

@@ -3,7 +3,12 @@ import https from 'https';
 import { parse, HTMLElement } from 'node-html-parser';
 import { extractHtmlBody } from './documentImporter';
 import { BUSINESS_REPORT_FIXTURE_HTML } from './fixtures/feishuBusinessReport';
+import { findFeishuPublicSample } from './fixtures/feishuPublicSamples';
 import { buildBusinessReportDocumentContent } from './fixtures/businessReportTemplate';
+import { importFeishuDocumentFromApi } from './import/feishuExtractor';
+import { emitLocalHtml } from './import/localHtmlEmitter';
+import { parsePublicFeishuHtmlToDocument } from './import/publicHtmlIr';
+import type { ImportMetadata, ImportQuality } from './import/types';
 
 const ALLOWED_HOST_PATTERNS = [
   /^[\w-]+\.feishu\.cn$/,
@@ -20,6 +25,10 @@ export interface ImportedFeishuUrlPayload {
   sourceUrl: string;
   assetCount: number;
   warnings: string[];
+  importQuality: ImportQuality;
+  unsupportedBlocks?: Array<{ type: string; reason: string }>;
+  coverUrl?: string;
+  importMetadata?: ImportMetadata;
 }
 
 export function isAllowedFeishuPublicUrl(urlString: string): boolean {
@@ -98,37 +107,76 @@ function buildBusinessReportDocument(sourceUrl: string, title: string, _lines: s
   }
 
   const content = buildBusinessReportDocumentContent();
-  const sourceBlock = `<blockquote><p>来源：<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(sourceUrl)}</a></p></blockquote>`;
-  const finalContent = content.includes('<blockquote>') ? content : `${sourceBlock}${content}`;
 
   return {
     title: title || '业务经营周报',
-    content: finalContent,
-    sourceName: new URL(sourceUrl).pathname.split('/').pop() || 'feishu-wiki',
-    sourceUrl,
-    assetCount: 0,
-    warnings,
-  };
-}
-
-function buildGenericDocument(sourceUrl: string, rawHtml: string): ImportedFeishuUrlPayload {
-  const parsed = extractHtmlBody(rawHtml, sourceUrl);
-  const warnings = [
-    '未能识别飞书文档中的多维表格结构，已导入页面 HTML 正文。',
-    '如需完整多维表格，请确认文档为公开访问且包含可识别结构，或使用飞书导出 ZIP/HTML。',
-  ];
-  const sourceBlock = `<blockquote><p>来源：<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(sourceUrl)}</a></p></blockquote>`;
-  const content = parsed.content.includes('<blockquote>')
-    ? parsed.content
-    : `${sourceBlock}${parsed.content}`;
-
-  return {
-    title: parsed.title,
     content,
     sourceName: new URL(sourceUrl).pathname.split('/').pop() || 'feishu-wiki',
     sourceUrl,
     assetCount: 0,
     warnings,
+    importQuality: 'partial',
+    unsupportedBlocks: [
+      {
+        type: 'bitable',
+        reason: '公开页面未暴露飞书后端多维表格原始数据，使用本地业务周报模型补齐。',
+      },
+    ],
+    importMetadata: {
+      permission: 'unknown',
+      readonly: true,
+      comments: 'not_supported',
+      notes: ['公开页面未提供飞书权限与评论数据，已按公开只读来源导入本地副本。'],
+    },
+  };
+}
+
+function buildGenericDocument(sourceUrl: string, rawHtml: string): ImportedFeishuUrlPayload {
+  const emitted = emitLocalHtml(parsePublicFeishuHtmlToDocument(rawHtml, sourceUrl));
+  if (emitted.content.replace(/<[^>]+>/g, '').trim()) {
+    return {
+      title: emitted.title,
+      content: emitted.content,
+      sourceName: emitted.sourceName,
+      sourceUrl: emitted.sourceUrl || sourceUrl,
+      assetCount: emitted.assetCount,
+      warnings: emitted.warnings,
+      importQuality: emitted.importQuality,
+      unsupportedBlocks: emitted.unsupportedBlocks,
+      coverUrl: emitted.coverUrl,
+      importMetadata: emitted.importMetadata || {
+        permission: 'unknown',
+        readonly: true,
+        comments: 'not_supported',
+        notes: ['公开 HTML 导入无法读取飞书权限与评论线程。'],
+      },
+    };
+  }
+
+  const parsed = extractHtmlBody(rawHtml, sourceUrl);
+  return {
+    title: parsed.title,
+    content: parsed.content,
+    sourceName: new URL(sourceUrl).pathname.split('/').pop() || 'feishu-wiki',
+    sourceUrl,
+    assetCount: 0,
+    warnings: [
+      '未能识别飞书文档中的多维表格结构，已导入页面 HTML 正文。',
+      '如需完整多维表格，请确认文档为公开访问且包含可识别结构，或使用飞书导出 ZIP/HTML。',
+    ],
+    importQuality: 'fallback',
+    unsupportedBlocks: [
+      {
+        type: 'feishu-structured-blocks',
+        reason: '公开 HTML 中没有可识别的飞书结构化 block 数据。',
+      },
+    ],
+    importMetadata: {
+      permission: 'unknown',
+      readonly: true,
+      comments: 'not_supported',
+      notes: ['HTML fallback 无法读取飞书权限与评论线程。'],
+    },
   };
 }
 
@@ -149,6 +197,10 @@ export function importFeishuPublicHtml(rawHtml: string, sourceUrl: string): Impo
 }
 
 async function fetchWithNode(urlString: string): Promise<string> {
+  if (process.env.NODE_ENV === 'test') {
+    const sample = findFeishuPublicSample(urlString);
+    if (sample) return sample.rawHtml;
+  }
   if (process.env.NODE_ENV === 'test' && /H58uwRchYi7889k6dnJcVoMMnO5/.test(urlString)) {
     return BUSINESS_REPORT_FIXTURE_HTML;
   }
@@ -216,7 +268,37 @@ export async function importFeishuPublicUrl(
     throw new Error('仅支持导入 feishu.cn 或 larksuite.com 公开文档链接');
   }
 
-  const html = await fetchHtml(trimmed);
-  if (!html.trim()) throw new Error('飞书页面内容为空，可能文档未公开或需要登录');
-  return importFeishuPublicHtml(html, trimmed);
+  const apiImported = await importFeishuDocumentFromApi(trimmed);
+  if (apiImported) {
+    return {
+      title: apiImported.title,
+      content: apiImported.content,
+      sourceName: apiImported.sourceName,
+      sourceUrl: apiImported.sourceUrl || trimmed,
+      assetCount: apiImported.assetCount,
+      warnings: apiImported.warnings,
+      importQuality: apiImported.importQuality,
+      unsupportedBlocks: apiImported.unsupportedBlocks,
+      coverUrl: apiImported.coverUrl,
+      importMetadata: apiImported.importMetadata,
+    };
+  }
+
+  try {
+    const html = await fetchHtml(trimmed);
+    if (!html.trim()) throw new Error('飞书页面内容为空，可能文档未公开或需要登录');
+    return importFeishuPublicHtml(html, trimmed);
+  } catch (error) {
+    const imported = importFeishuPublicHtml('', trimmed);
+    if (imported.content.replace(/<[^>]+>/g, '').trim() && imported.title !== '飞书文档') {
+      return {
+        ...imported,
+        warnings: [
+          `飞书页面实时抓取失败，已使用本地渲染快照导入：${error instanceof Error ? error.message : '未知错误'}`,
+          ...imported.warnings,
+        ],
+      };
+    }
+    throw error;
+  }
 }

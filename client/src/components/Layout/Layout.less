@@ -28,7 +28,11 @@
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: @bg-white;
+  background-color: @bg-white;
+  background-image:
+    radial-gradient(circle at 14px 12px, rgba(31, 35, 41, 0.025) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 34px 32px, rgba(51, 112, 255, 0.018) 0 1px, transparent 1.6px);
+  background-size: 48px 48px;
   font-family: @font;
   --comment-rail-width: 0px;
 
@@ -503,11 +507,35 @@
   .doc-page-main {
     display: flex;
     flex-direction: row;
-    align-items: flex-start;
+    align-items: stretch;
     flex: 1;
     min-width: 0;
+    min-height: 100%;
     background: @bg-white;
     position: relative;
+  }
+
+  .doc-page-workspace:has(.editor-wrap--feishu-quickstart),
+  .doc-page-main:has(.editor-wrap--feishu-quickstart) {
+    background:
+      radial-gradient(circle at 18px 18px, rgba(51, 112, 255, 0.035) 0 1px, transparent 1px 54px),
+      #ffffff;
+  }
+
+  .doc-page-workspace:has(.editor-wrap--feishu-quickstart) {
+    .doc-cover-strip {
+      background: transparent;
+    }
+
+    .doc-cover-wrapper {
+      height: 150px;
+      background: linear-gradient(90deg, #fff4fb 0%, #f1f5ff 54%, #eff7ff 100%);
+
+      .doc-cover-img {
+        height: 150px;
+        object-fit: cover;
+      }
+    }
   }
 
   .doc-page-catalogue-rail {
@@ -516,6 +544,8 @@
     min-width: @catalogue-rail-width;
     flex-shrink: 0;
     position: relative;
+    align-self: stretch;
+    min-height: 100%;
   }
 
   .doc-page-main {
@@ -1251,6 +1281,7 @@
   flex-shrink: 0;
   background-color: initial;
   z-index: 2;
+  max-height: 100vh;
 
 
   &.docx-width-mode {
@@ -1263,12 +1294,13 @@
     max-width: 100%;
     flex: 1;
     padding: 12px 10px 16px 16px;
-    inset: 0;
     padding-top: 54px;
-    height: fit-content;
+    max-height: 100vh;
     overflow-x: hidden;
     overflow-y: visible;
-    position: absolute;
+    position: relative;
+    display: flex;
+    flex-direction: column;
   }
 
   &.catalogue-aside--collapsed {
@@ -1319,6 +1351,7 @@
 
   .catalogue__scroller {
     min-height: 0;
+    max-height: calc(100vh - 82px);
     overflow-y: auto;
     overflow-x: hidden;
     outline: none;

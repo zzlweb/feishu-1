@@ -14,6 +14,8 @@ export interface DocumentRecord {
   cover_url: string;
   icon: string;
   collapsed_heading_ids: string[];
+  read_only?: number;
+  import_metadata?: string;
 }
 
 export interface CommentRecord {
@@ -173,6 +175,8 @@ export function createDocumentRecord(doc: Partial<DocumentRecord> & { id: string
     cover_url: doc.cover_url || '',
     icon: doc.icon || '',
     collapsed_heading_ids: normalizeStringList(doc.collapsed_heading_ids),
+    read_only: doc.read_only ? 1 : 0,
+    import_metadata: doc.import_metadata || '',
   };
   db.documents.push(newDoc);
   saveDb(db);
@@ -188,6 +192,8 @@ export function updateDocumentRecord(id: string, updates: Partial<DocumentRecord
   if (updates.content !== undefined) doc.content = updates.content;
   if (updates.icon !== undefined) doc.icon = updates.icon;
   if (updates.cover_url !== undefined) doc.cover_url = updates.cover_url;
+  if (updates.read_only !== undefined) doc.read_only = updates.read_only ? 1 : 0;
+  if (updates.import_metadata !== undefined) doc.import_metadata = updates.import_metadata;
   if (updates.parent_id !== undefined) doc.parent_id = updates.parent_id;
   if (updates.collapsed_heading_ids !== undefined) {
     doc.collapsed_heading_ids = normalizeStringList(updates.collapsed_heading_ids);

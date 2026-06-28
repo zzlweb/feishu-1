@@ -7,6 +7,17 @@ export interface FloatingPanelPosition {
 
 export type FloatingPanelPlacement = 'bottom-start' | 'top-start' | 'right-start' | 'left-start';
 
+export const FLOATING_Z_INDEX = {
+  stickyHeader: 100,
+  docFloating: 1000,
+  docMenu: 10050,
+  docSubmenu: 10051,
+  bitablePanel: 10060,
+  bitableModal: 10070,
+  bitableMenu: 10080,
+  notification: 10090,
+} as const;
+
 export interface FloatingPanelRect {
   top: number;
   right: number;

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import * as React from 'react';
 import { SelGlyphChevronDown } from '../../../icons/selectionToolbarGlyphs';
 import { FieldLockGlyph, fieldTypeGlyph } from '../fields/bitableFieldTypeIcons';
-import { getAttachments, valueText, findSelectChoice, formatCardDateValue, textColorForBackground, type AttachmentValue, type BaseField, type BaseRecord, type CellValue } from '../model/bitableModel';
+import { getAttachments, getMultiSelectChoices, valueText, findSelectChoice, formatCardDateValue, textColorForBackground, type AttachmentValue, type BaseField, type BaseRecord, type CellValue } from '../model/bitableModel';
 
 export { FieldLockGlyph, fieldTypeGlyph };
 
@@ -114,6 +114,26 @@ export function FieldDisplay({ field, value }: { field: BaseField; value: CellVa
       </span>
     );
   }
+  if (field.type === 'multi_select') {
+    const choices = getMultiSelectChoices(field, value);
+    if (!choices.length) return null;
+    return (
+      <span className="base-cell-tag-list">
+        {choices.map(choice => {
+          const color = choice.color || '#e8f0ff';
+          return (
+            <span
+              key={choice.id}
+              className="base-cell-tag is-colored"
+              style={{ backgroundColor: color, color: textColorForBackground(color) }}
+            >
+              {choice.name}
+            </span>
+          );
+        })}
+      </span>
+    );
+  }
   if (field.type === 'date') {
     const formatted = formatCardDateValue(value);
     if (!formatted) return null;
@@ -124,6 +144,24 @@ export function FieldDisplay({ field, value }: { field: BaseField; value: CellVa
   }
   if (!text) return null;
   if (field.type === 'attachment') return <span>{(value as AttachmentValue[]).length} 个附件</span>;
+  if (field.type === 'url') {
+    const href = /^https?:\/\//i.test(text) ? text : `https://${text}`;
+    return <a className="base-field-link" href={href} target="_blank" rel="noopener noreferrer">{text}</a>;
+  }
+  if (field.type === 'email') return <a className="base-field-link" href={`mailto:${text}`}>{text}</a>;
+  if (field.type === 'phone') return <a className="base-field-link" href={`tel:${text}`}>{text}</a>;
+  if (field.type === 'user' || field.type === 'created_by' || field.type === 'updated_by') {
+    return (
+      <span className="base-field-user">
+        <span className="base-field-user__avatar" aria-hidden>{text.charAt(0)}</span>
+        <span>{text}</span>
+      </span>
+    );
+  }
+  if (field.type === 'created_time' || field.type === 'updated_time') {
+    const formatted = formatCardDateValue(value);
+    return formatted ? <span>{formatted}</span> : null;
+  }
   return <span>{text}</span>;
 }
 
@@ -133,6 +171,12 @@ export function fieldCardIcon(field: BaseField): string {
   if (field.type === 'number') return '#';
   if (field.type === 'formula') return 'ƒx';
   if (field.type === 'single_select') return '⊙';
+  if (field.type === 'multi_select') return '☷';
+  if (field.type === 'attachment') return '▧';
+  if (field.type === 'user' || field.type === 'created_by' || field.type === 'updated_by') return '👤';
+  if (field.type === 'url') return '↗';
+  if (field.type === 'phone') return '☎';
+  if (field.type === 'email') return '@';
   return 'A=';
 }
 

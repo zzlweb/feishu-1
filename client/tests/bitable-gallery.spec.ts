@@ -65,6 +65,168 @@ const noAttachmentModel = {
   ],
 };
 
+const businessReportParityModel = {
+  id: 'tbl_business_parity',
+  name: '业务经营周报校验',
+  primaryFieldId: 'title',
+  activeViewId: 'view_gallery',
+  fields: [
+    { id: 'title', name: '商品', type: 'text' },
+    { id: 'cover', name: '附件', type: 'attachment' },
+    { id: 'main', name: '是否当前主推', type: 'checkbox' },
+    { id: 'phase', name: '项目阶段', type: 'single_select', options: { choices: [
+      { id: 'early', name: '前期', color: '#ffd59e' },
+      { id: 'middle', name: '中期', color: '#f1ddff' },
+      { id: 'late', name: '后期', color: '#4e83fd' },
+      { id: 'empty', name: '空分组', color: '#dee0e3' },
+    ] } },
+  ],
+  records: [
+    {
+      id: 'rec_cover',
+      tableId: 'tbl_business_parity',
+      fields: {
+        title: '冰淇淋',
+        cover: [{ id: 'att_1', fileId: 'file_1', name: 'ice.svg', mimeType: 'image/svg+xml', extension: 'svg', size: 1, url: '/static/gallery/ice-cream.svg', thumbnailUrl: '/static/gallery/ice-cream.svg', previewUrl: '/static/gallery/ice-cream.svg', uploadStatus: 'success' }],
+        main: true,
+        phase: '前期',
+      },
+      createdAt: '2026-05-26T00:00:00.000Z',
+      updatedAt: '2026-05-26T00:00:00.000Z',
+      createdBy: 'E2E',
+    },
+    {
+      id: 'rec_no_cover',
+      tableId: 'tbl_business_parity',
+      fields: { title: '马卡龙', cover: [], main: false, phase: '中期' },
+      createdAt: '2026-05-26T00:00:00.000Z',
+      updatedAt: '2026-05-26T00:00:00.000Z',
+      createdBy: 'E2E',
+    },
+  ],
+  views: [
+    {
+      id: 'view_gallery',
+      tableId: 'tbl_business_parity',
+      name: '画册视图',
+      type: 'gallery',
+      config: {
+        coverFieldId: 'cover',
+        titleFieldId: 'title',
+        visibleFieldIds: ['main'],
+        coverFit: 'cover',
+        cardSize: 'medium',
+        cardAspectRatio: '16:9',
+        showFieldNames: true,
+        showEmptyFields: false,
+        showAttachmentCount: true,
+        showRecordActions: false,
+        emptyCoverMode: 'hide-cover',
+      },
+      sorts: [],
+      filters: [],
+    },
+    {
+      id: 'view_kanban',
+      tableId: 'tbl_business_parity',
+      name: '看板',
+      type: 'kanban',
+      config: {
+        titleFieldId: 'title',
+        visibleFieldIds: ['main', 'phase'],
+        groupByFieldId: 'phase',
+        coverFit: 'cover',
+        cardSize: 'medium',
+        cardAspectRatio: '4:3',
+        showFieldNames: true,
+        showEmptyFields: false,
+        showAttachmentCount: true,
+        showRecordActions: false,
+        showEmptyGroups: false,
+        showCreateGroup: false,
+        showNewRecordButton: false,
+        emptyCoverMode: 'placeholder',
+      },
+      sorts: [],
+      filters: [],
+    },
+  ],
+};
+
+const visibleViewScopeModel = {
+  id: 'tbl_visible_scope',
+  name: 'Visible View Scope',
+  primaryFieldId: 'title',
+  activeViewId: 'view_calendar',
+  fields: [
+    { id: 'title', name: 'Name', type: 'text' },
+    { id: 'status', name: 'Status', type: 'single_select', options: { choices: [
+      { id: 'todo', name: 'Todo', color: '#dee8ff' },
+      { id: 'done', name: 'Done', color: '#c7effb' },
+    ] } },
+  ],
+  records: [
+    {
+      id: 'rec_1',
+      tableId: 'tbl_visible_scope',
+      fields: { title: 'Record 1', status: 'Todo' },
+      createdAt: '2026-05-26T00:00:00.000Z',
+      updatedAt: '2026-05-26T00:00:00.000Z',
+      createdBy: 'E2E',
+    },
+  ],
+  views: [
+    { id: 'view_grid', tableId: 'tbl_visible_scope', name: 'Table View', type: 'grid', config: {}, sorts: [], filters: [] },
+    {
+      id: 'view_kanban',
+      tableId: 'tbl_visible_scope',
+      name: 'Kanban View',
+      type: 'kanban',
+      config: {
+        titleFieldId: 'title',
+        visibleFieldIds: ['status'],
+        groupByFieldId: 'status',
+        coverFit: 'cover',
+        cardSize: 'medium',
+        cardAspectRatio: '4:3',
+        showFieldNames: true,
+        showEmptyFields: false,
+        showAttachmentCount: true,
+        showRecordActions: false,
+        showEmptyGroups: false,
+        showCreateGroup: false,
+        showNewRecordButton: true,
+        emptyCoverMode: 'placeholder',
+      },
+      sorts: [],
+      filters: [],
+    },
+    {
+      id: 'view_gallery',
+      tableId: 'tbl_visible_scope',
+      name: 'Gallery View',
+      type: 'gallery',
+      config: {
+        titleFieldId: 'title',
+        visibleFieldIds: ['status'],
+        coverFit: 'cover',
+        cardSize: 'medium',
+        cardAspectRatio: '4:3',
+        showFieldNames: true,
+        showEmptyFields: false,
+        showAttachmentCount: true,
+        showRecordActions: false,
+        emptyCoverMode: 'placeholder',
+      },
+      sorts: [],
+      filters: [],
+    },
+    { id: 'view_calendar', tableId: 'tbl_visible_scope', name: 'Calendar View', type: 'calendar', config: {}, sorts: [], filters: [] },
+    { id: 'view_form', tableId: 'tbl_visible_scope', name: 'Form View', type: 'form', config: {}, sorts: [], filters: [] },
+    { id: 'view_gantt', tableId: 'tbl_visible_scope', name: 'Gantt View', type: 'gantt', config: { dayWidth: 40 }, sorts: [], filters: [] },
+  ],
+};
+
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/documents/bitable-gallery-e2e/comments', route =>
     route.fulfill({ json: { code: 0, data: [] } }),
@@ -118,6 +280,20 @@ test('migrates legacy cards and shares records through the view dropdown', async
   await page.locator('.base-viewbar__current').click();
   await page.locator('.base-view-sidebar__name', { hasText: '画册' }).click();
   await expect(page.locator('.base-gallery-card__title').first()).toHaveText('更新后的产品');
+});
+
+test('opens grid cell editor on double click', async ({ page }) => {
+  await openGallery(page);
+
+  await createGridViewFromGallery(page);
+  await page.locator('.base-grid-canvas').dblclick({ position: { x: 120, y: 48 } });
+  const editor = page.locator('.base-grid-cell-editor');
+  await expect(editor).toBeVisible();
+  await editor.fill('双击编辑产品');
+  await editor.press('Enter');
+  await page.locator('.base-viewbar__current').click();
+  await page.locator('.base-view-sidebar__name', { hasText: '画册' }).click();
+  await expect(page.locator('.base-gallery-card__title').first()).toHaveText('双击编辑产品');
 });
 
 test('uses an attachment field as gallery cover and updates it by dropping on a card', async ({ page }) => {
@@ -221,6 +397,60 @@ test('keeps gallery usable without an attachment field and can add one from sett
   await expect(page.locator('.base-settings__hint')).toContainText('当前没有附件字段');
   await page.getByRole('button', { name: '创建附件字段' }).click();
   await expect(page.locator('.base-settings').getByLabel('封面字段')).toHaveValue(/fld_attachment_/);
+});
+
+test('renders business report gallery and kanban parity config', async ({ page }) => {
+  const document = {
+    ...legacyGalleryDocument,
+    content: `<div data-local-block="bitable" data-model='${JSON.stringify(businessReportParityModel)}'></div>`,
+  };
+  await page.unroute('**/api/documents/bitable-gallery-e2e');
+  await page.route('**/api/documents/bitable-gallery-e2e', route =>
+    route.fulfill({ json: { code: 0, data: document } }),
+  );
+
+  await page.goto('/doc/bitable-gallery-e2e');
+  const block = page.locator('.feishu-base-block').first();
+  await expect(block).toHaveAttribute('data-base-view-type', 'gallery');
+  await expect(block.locator('.base-gallery-card')).toHaveCount(2);
+  await expect(block.locator('.base-gallery-card__cover')).toHaveCount(1);
+  await expect(block.locator('.base-checkbox-value.is-checked')).toHaveCount(1);
+
+  await block.locator('.base-viewbar__current').click();
+  await block.locator('.base-view-sidebar__name', { hasText: '看板' }).click();
+  await expect(block).toHaveAttribute('data-base-view-type', 'kanban');
+  await expect(block.locator('.base-kanban__column')).toHaveCount(2);
+  await expect(block.locator('.base-kanban__column', { hasText: '空分组' })).toHaveCount(0);
+  await expect(block.locator('.base-kanban__create-group')).toHaveCount(0);
+  await expect(block.locator('.base-kanban__column-add')).toHaveCount(0);
+});
+
+test('limits imported bitable view switcher to table kanban and gallery', async ({ page }) => {
+  const document = {
+    ...legacyGalleryDocument,
+    content: `<div data-local-block="bitable" data-model='${JSON.stringify(visibleViewScopeModel)}'></div>`,
+  };
+  await page.unroute('**/api/documents/bitable-gallery-e2e');
+  await page.route('**/api/documents/bitable-gallery-e2e', route =>
+    route.fulfill({ json: { code: 0, data: document } }),
+  );
+
+  await page.goto('/doc/bitable-gallery-e2e');
+  const block = page.locator('.feishu-base-block').first();
+  await expect(block).toHaveAttribute('data-base-view-type', 'grid');
+  await block.locator('.base-viewbar__current').click();
+
+  const sidebar = block.locator('.base-view-sidebar');
+  await expect(sidebar.locator('.base-view-sidebar__item')).toHaveCount(3);
+  await expect(sidebar).toContainText('Table View');
+  await expect(sidebar).toContainText('Kanban View');
+  await expect(sidebar).toContainText('Gallery View');
+  await expect(sidebar).not.toContainText('Calendar View');
+  await expect(sidebar).not.toContainText('Form View');
+  await expect(sidebar).not.toContainText('Gantt View');
+
+  await sidebar.locator('.base-view-sidebar__new').hover();
+  await expect(sidebar.locator('.base-view-sidebar__create-list button')).toHaveCount(3);
 });
 
 test('applies grouping and filtering as gallery view configuration only', async ({ page }) => {
@@ -341,4 +571,3 @@ test('shows the active gallery icon and creates a kanban view over shared record
   await block.locator('.base-view-sidebar__name', { hasText: '画册' }).click();
   await expect(block.locator('.base-gallery-card')).toHaveCount(3);
 });
-

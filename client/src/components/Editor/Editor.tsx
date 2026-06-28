@@ -1664,6 +1664,86 @@ const LocalBitableBlock = TiptapNode.create({
   },
 });
 
+interface DocNavLink {
+  label: string;
+  href?: string;
+}
+
+function readDocNavLinks(value: unknown): DocNavLink[] {
+  if (Array.isArray(value)) {
+    const links: DocNavLink[] = [];
+    value.forEach(item => {
+      if (!item || typeof item !== 'object') return;
+        const record = item as Record<string, unknown>;
+        const label = typeof record.label === 'string' ? record.label.trim() : '';
+        const href = typeof record.href === 'string' ? record.href.trim() : '';
+      if (label) links.push(href ? { label, href } : { label });
+    });
+    return links;
+  }
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    return readDocNavLinks(JSON.parse(value));
+  } catch {
+    return value
+      .split('|')
+      .map(label => label.trim())
+      .filter(Boolean)
+      .map(label => ({ label }));
+  }
+}
+
+function LocalDocNavBlockView({ node, selected }: NodeViewProps) {
+  const links = readDocNavLinks(node.attrs.links);
+  return (
+    <NodeViewWrapper
+      className={`feishu-doc-nav${selected ? ' is-selected' : ''}`}
+      data-local-block="doc-nav"
+      contentEditable={false}
+    >
+      <span className="feishu-doc-nav__anchor" aria-hidden>🔗</span>
+      <div className="feishu-doc-nav__links">
+        {links.map((link, index) => (
+          <span className="feishu-doc-nav__item" key={`${link.label}-${index}`}>
+            {index > 0 && <span className="feishu-doc-nav__separator">|</span>}
+            {link.href ? (
+              <a className="feishu-doc-nav__link" href={normalizeBlockUrl(link.href)} target="_blank" rel="noreferrer">
+                {link.label}
+              </a>
+            ) : (
+              <span className="feishu-doc-nav__link">{link.label}</span>
+            )}
+          </span>
+        ))}
+      </div>
+    </NodeViewWrapper>
+  );
+}
+
+const LocalDocNavBlock = TiptapNode.create({
+  name: 'localDocNavBlock',
+  group: 'block',
+  atom: true,
+  addAttributes() {
+    return {
+      links: {
+        default: [],
+        parseHTML: element => readDocNavLinks(element.getAttribute('data-links') || element.textContent || ''),
+        renderHTML: attributes => ({ 'data-links': JSON.stringify(readDocNavLinks(attributes.links)) }),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'div[data-local-block="doc-nav"]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['div', { ...HTMLAttributes, 'data-local-block': 'doc-nav', class: 'feishu-doc-nav' }];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(LocalDocNavBlockView);
+  },
+});
+
 const EMBED_KIND_META: Record<string, { icon: string; title: string; desc: string }> = {
   bitable: { icon: '▦', title: '多维表格', desc: '表格视图' },
   kanban: { icon: '▤', title: '看板', desc: '多维表格看板视图' },
@@ -1675,6 +1755,7 @@ const EMBED_KIND_META: Record<string, { icon: string; title: string; desc: strin
   uml: { icon: 'U', title: 'UML 图', desc: 'UML 图内容' },
   mention: { icon: '@', title: '人员', desc: '@成员' },
   template: { icon: '▣', title: '模板', desc: '模板内容' },
+  group: { icon: '💬', title: '社群', desc: '飞书群组' },
   subdoc: { icon: '↗', title: '子文档', desc: '页面链接' },
   image: { icon: '□', title: '图片', desc: '图片上传状态' },
   file: { icon: '⇩', title: '文件', desc: '文件上传状态' },
@@ -1688,6 +1769,8 @@ function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos 
   const desc = node.attrs.desc || meta.desc;
   const href = node.attrs.href || '';
   const normalizedHref = normalizeBlockUrl(href);
+  const isEditing = selected && editor.isEditable;
+  const actionText = kind === 'group' || kind === 'chat_card' ? '加入' : '打开';
   const selectThisBlock = (event: React.MouseEvent) => {
     if ((event.target as Element).closest('input, button, a')) return;
     const pos = typeof getPos === 'function' ? getPos() : null;
@@ -1706,20 +1789,29 @@ function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos 
     >
       <div className="feishu-local-card__icon">{meta.icon}</div>
       <div className="feishu-local-card__body">
-        <input
-          className="feishu-local-card__title-input"
-          value={title}
-          placeholder={meta.title}
-          onChange={e => updateAttributes({ title: e.target.value })}
-        />
-        <input
-          className="feishu-local-card__desc-input"
-          value={desc}
-          placeholder={meta.desc}
-          onChange={e => updateAttributes({ desc: e.target.value })}
-        />
+        {isEditing ? (
+          <>
+            <input
+              className="feishu-local-card__title-input"
+              value={title}
+              placeholder={meta.title}
+              onChange={e => updateAttributes({ title: e.target.value })}
+            />
+            <input
+              className="feishu-local-card__desc-input"
+              value={desc}
+              placeholder={meta.desc}
+              onChange={e => updateAttributes({ desc: e.target.value })}
+            />
+          </>
+        ) : (
+          <>
+            <div className="feishu-local-card__title" title={title}>{title}</div>
+            {desc && <div className="feishu-local-card__desc">{desc}</div>}
+          </>
+        )}
       </div>
-      {(kind === 'subdoc' || href) && (
+      {isEditing && (kind === 'subdoc' || href) && (
         <input
           className="feishu-local-card__href-input"
           value={href}
@@ -1729,7 +1821,7 @@ function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos 
       )}
       {normalizedHref && (
         <a className="feishu-local-card__action" href={normalizedHref} target="_blank" rel="noreferrer">
-          打开
+          {actionText}
         </a>
       )}
     </NodeViewWrapper>
@@ -1854,6 +1946,7 @@ const editorExtensions = [
   LocalFormulaBlock,
   LocalBitableBlock,
   DashboardChartBlock,
+  LocalDocNavBlock,
   LocalEmbedBlock,
   Placeholder.configure({
     includeChildren: false,
@@ -2035,8 +2128,15 @@ function readBitableHeaderFollowX(blockEl: HTMLElement) {
 function getBlockToolsAnchorLeft(blockEl: HTMLElement, areaRectLeft: number, columnContent: HTMLElement | null): number {
   if (columnContent) return columnContent.getBoundingClientRect().left - areaRectLeft;
   if (blockEl.classList.contains('feishu-bitable-block')) {
+    const viewType = blockEl.getAttribute('data-base-view-type');
+    const followX = readBitableHeaderFollowX(blockEl);
+    if (viewType === 'gallery' || viewType === 'kanban') {
+      const page = blockEl.querySelector('.base-viewbar__page') as HTMLElement | null;
+      const anchorRect = page?.getBoundingClientRect() ?? blockEl.getBoundingClientRect();
+      return anchorRect.left - areaRectLeft - followX;
+    }
     const blockRect = blockEl.getBoundingClientRect();
-    return blockRect.left - areaRectLeft - readBitableHeaderFollowX(blockEl);
+    return blockRect.left - areaRectLeft - followX;
   }
   return 0;
 }
@@ -3827,9 +3927,13 @@ export default function Editor({
   const isCurrentBlockCollapsed = Boolean(
     currentHeadingCatalogueId && collapsedHeadingIds?.has(currentHeadingCatalogueId),
   );
+  const isFeishuQuickstartPage = docTitle.includes('多维表格 快速入门指南');
 
   return (
-    <div className="editor-wrap" onMouseLeave={handleEditorWrapMouseLeave}>
+    <div
+      className={`editor-wrap${isFeishuQuickstartPage ? ' editor-wrap--feishu-quickstart' : ''}`}
+      onMouseLeave={handleEditorWrapMouseLeave}
+    >
       <div className="editor-scroll">
         <div className="editor-container" ref={editorContainerRef}>
           {/* Title area wrapper for hover detection */}

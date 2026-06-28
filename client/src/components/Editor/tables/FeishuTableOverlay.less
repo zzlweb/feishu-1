@@ -15,6 +15,12 @@
   pointer-events: none;
   overflow: visible;
 
+  &--visible,
+  .feishu-table-host--chrome-hot &,
+  .tableWrapper.feishu-table-host--chrome-hot & {
+    z-index: 300;
+  }
+
   &__handle {
     position: absolute;
     display: inline-flex;
@@ -191,10 +197,9 @@
     &[data-tooltip]::before,
     &[data-tooltip]::after {
       position: absolute;
-      left: 50%;
       pointer-events: none;
       opacity: 0;
-      transform: translateX(-50%) translateY(4px);
+      z-index: 40;
       transition:
         opacity 0.12s ease,
         transform 0.12s ease;
@@ -202,6 +207,7 @@
 
     &[data-tooltip]::before {
       content: attr(data-tooltip);
+      left: 50%;
       bottom: calc(100% + 12px);
       min-width: 54px;
       padding: 7px 10px;
@@ -213,15 +219,18 @@
       line-height: 20px;
       white-space: nowrap;
       box-shadow: 0 8px 24px rgba(31, 35, 41, 0.18);
+      transform: translateX(-50%) translateY(4px);
     }
 
     &[data-tooltip]::after {
       content: '';
+      left: 50%;
       bottom: calc(100% + 5px);
       width: 0;
       height: 0;
       border: 6px solid transparent;
       border-top-color: #1f2329;
+      transform: translateX(-50%) translateY(4px);
     }
 
     &:hover[data-tooltip]::before,
@@ -229,6 +238,47 @@
       opacity: 1;
       transform: translateX(-50%) translateY(0);
     }
+
+  }
+
+  &__rail-plus--col[data-tooltip]::before {
+    bottom: auto;
+    top: calc(100% + 8px);
+    transform: translateX(-50%) translateY(-4px);
+  }
+
+  &__rail-plus--col[data-tooltip]::after {
+    bottom: auto;
+    top: calc(100% + 2px);
+    border-top-color: transparent;
+    border-bottom-color: #1f2329;
+    transform: translateX(-50%) translateY(-4px);
+  }
+
+  &__rail-plus--col:hover[data-tooltip]::before,
+  &__rail-plus--col:hover[data-tooltip]::after {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  &__rail-plus--row[data-tooltip]::before {
+    bottom: auto;
+    top: 50%;
+    left: calc(100% + 12px);
+    transform: translateY(-50%) translateX(-4px);
+  }
+
+  &__rail-plus--row[data-tooltip]::after {
+    bottom: auto;
+    top: 50%;
+    left: calc(100% + 5px);
+    border-top-color: transparent;
+    border-right-color: #1f2329;
+    transform: translateY(-50%) translateX(-4px);
+  }
+
+  &__rail-plus--row:hover[data-tooltip]::before,
+  &__rail-plus--row:hover[data-tooltip]::after {
+    transform: translateY(-50%) translateX(0);
   }
 
   &__rail-plus-icon {

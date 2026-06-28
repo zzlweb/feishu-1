@@ -21,10 +21,10 @@ export type BaseFieldType =
 
 export type BaseViewType = 'grid' | 'kanban' | 'calendar' | 'gallery' | 'gantt' | 'form';
 
-export const HIDDEN_VIEW_TYPES: ReadonlySet<BaseViewType> = new Set(['gantt']);
+export const SUPPORTED_VISIBLE_VIEW_TYPES: ReadonlySet<BaseViewType> = new Set(['grid', 'kanban', 'gallery', 'gantt']);
 
 export function isViewTypeVisible(type: BaseViewType): boolean {
-  return !HIDDEN_VIEW_TYPES.has(type);
+  return SUPPORTED_VISIBLE_VIEW_TYPES.has(type);
 }
 
 export function getVisibleViews(table: BaseTable): BaseView[] {
@@ -131,6 +131,11 @@ export interface GalleryViewConfig {
   showAttachmentCount: boolean;
   showRecordActions: boolean;
   groupByFieldId?: FieldId;
+  groupOrderIds?: string[];
+  hiddenGroupIds?: string[];
+  showEmptyGroups?: boolean;
+  showCreateGroup?: boolean;
+  showNewRecordButton?: boolean;
   emptyCoverMode: 'placeholder' | 'hide-cover';
   search?: string;
 }
@@ -499,6 +504,9 @@ export function createGalleryConfig(fields: BaseField[], primaryFieldId: string)
     showEmptyFields: false,
     showAttachmentCount: true,
     showRecordActions: false,
+    showEmptyGroups: true,
+    showCreateGroup: true,
+    showNewRecordButton: true,
     emptyCoverMode: 'placeholder',
   };
 }

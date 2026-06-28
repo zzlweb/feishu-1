@@ -6,8 +6,6 @@ import {
   renderDashboardChartHtml,
 } from '../bitableModelFactory';
 
-const SOURCE_URL = 'https://qcntpn5n60jv.feishu.cn/wiki/H58uwRchYi7889k6dnJcVoMMnO5';
-
 function renderHighlightBlock(content: string, bg = '#e1eaff', border = '#82a7fc') {
   return [
     `<div data-type="highlight-block" data-bg-color="${bg}" data-border-color="${border}"`,
@@ -50,7 +48,6 @@ export function buildBusinessReportDocumentContent(): string {
 
   return [
     '<h1>业务经营周报</h1>',
-    `<blockquote><p>来源：<a href="${SOURCE_URL}" target="_blank" rel="noopener noreferrer">${SOURCE_URL}</a></p></blockquote>`,
     '<h2>一、门店销售概况</h2>',
     '<p>用 1-3 句话概括整体情况</p>',
     renderColumns([

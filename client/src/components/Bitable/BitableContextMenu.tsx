@@ -2,11 +2,12 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject 
 import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
 import { DOMSerializer } from '@tiptap/pm/model';
-import { NodeSelection } from '@tiptap/pm/state';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { MessagePlugin } from 'tdesign-react';
 import { IconChevronMenuEnd } from '../../icons/feishuDoc';
 import { syncEditorSelectionToAnchoredBlock } from '../Editor/blocks/blockAnchorSelection';
 import { copyCurrentBlockLink } from '../Editor/blocks/blockLink';
+import { resolveDraggableBlockPos } from '../Editor/blocks/feishuBlockDrag';
 import {
   ADD_BELOW_FLYOUT_MAX_HEIGHT,
   clampFlyoutHeight,
@@ -155,6 +156,29 @@ function getAnchoredBlockRange(editor: Editor) {
     }
   }
   return { from: selection.from, to: selection.to };
+}
+
+function getBitableBlockRangeFromAnchor(editor: Editor, blockEl: HTMLElement | null) {
+  const block = resolveDraggableBlockPos(editor, blockEl);
+  if (block?.node.type.name !== 'localBitableBlock') return null;
+  return { from: block.pos, to: block.pos + block.node.nodeSize };
+}
+
+function deleteAnchoredBlockRange(editor: Editor, range: { from: number; to: number }) {
+  const fallbackParagraph = editor.schema.nodes.paragraph?.createAndFill();
+  const isOnlyTopLevelBlock = editor.state.doc.childCount === 1 && range.from === 0;
+  let tr =
+    isOnlyTopLevelBlock && fallbackParagraph
+      ? editor.state.tr.replaceWith(range.from, range.to, fallbackParagraph)
+      : editor.state.tr.delete(range.from, range.to);
+
+  if (tr.doc.content.size > 0) {
+    const safePos = Math.max(1, Math.min(range.from, tr.doc.content.size - 1));
+    tr = tr.setSelection(TextSelection.near(tr.doc.resolve(safePos), -1));
+  }
+
+  editor.view.dispatch(tr.scrollIntoView());
+  editor.view.focus();
 }
 
 function serializeRangeToHtml(editor: Editor, from: number, to: number) {
@@ -346,8 +370,9 @@ export default function BitableContextMenu({
 
   const handleDelete = () => {
     alignSelectionToBlockAnchor();
-    const { from, to } = getAnchoredBlockRange(editor);
-    editor.chain().focus().deleteRange({ from, to }).run();
+    const range = getBitableBlockRangeFromAnchor(editor, blockAnchorRef?.current ?? null)
+      ?? getAnchoredBlockRange(editor);
+    deleteAnchoredBlockRange(editor, range);
     onClose();
   };
 

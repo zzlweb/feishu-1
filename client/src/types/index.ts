@@ -10,6 +10,8 @@ export interface Document {
   cover_url: string;
   icon: string;
   collapsed_heading_ids?: string[];
+  read_only?: number;
+  import_metadata?: string;
 }
 
 export interface Comment {
@@ -60,6 +62,14 @@ export interface ImportDocumentResult {
   source_url?: string;
   asset_count: number;
   warnings?: string[];
+  import_quality?: 'full' | 'partial' | 'fallback';
+  unsupported_blocks?: Array<{ type: string; reason: string }>;
+  import_metadata?: {
+    permission: 'unknown' | 'readable' | 'readonly' | 'editable';
+    readonly: boolean;
+    comments: 'not_requested' | 'not_supported' | 'partial' | 'imported';
+    notes: string[];
+  };
 }
 
 export interface HeadingItem {

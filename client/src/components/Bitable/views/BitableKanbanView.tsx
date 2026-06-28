@@ -1,13 +1,51 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { valueText, getAttachments, selectCoverAttachment, type BaseField, type BaseRecord, type BaseTable, type CellValue, type GalleryViewConfig } from '../model/bitableModel';
-import { FieldDisplay, FileBadge, fieldCardIcon, isPreviewImage, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
+import { valueText, getAttachments, selectCoverAttachment, type BaseField, type BaseRecord, type BaseTable, type GalleryViewConfig } from '../model/bitableModel';
+import { BitableCardField } from '../shared/BitableCardField';
+import { FileBadge, isPreviewImage, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
 
 const KANBAN_DOC_WIDTH = 860;
 const KANBAN_COLUMN_WIDTH = 236;
 const KANBAN_COLUMN_GAP = 16;
-const KANBAN_CREATE_GROUP_WIDTH = 0;
+const KANBAN_CREATE_GROUP_WIDTH = 146;
 const KANBAN_EDGE_MARGIN = 72;
+
+const KANBAN_COLUMN_MENU_WIDTH = 160;
+const KANBAN_COLUMN_MENU_HEIGHT = 184;
+const KANBAN_CARD_MENU_WIDTH = 160;
+const KANBAN_CARD_MENU_HEIGHT = 96;
+const KANBAN_MENU_VIEWPORT_MARGIN = 8;
+
+function clampKanbanColumnMenuPosition(trigger: DOMRect) {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  let left = trigger.right - KANBAN_COLUMN_MENU_WIDTH;
+  let top = trigger.bottom + 4;
+  left = Math.max(
+    KANBAN_MENU_VIEWPORT_MARGIN,
+    Math.min(left, viewportWidth - KANBAN_COLUMN_MENU_WIDTH - KANBAN_MENU_VIEWPORT_MARGIN),
+  );
+  top = Math.max(
+    KANBAN_MENU_VIEWPORT_MARGIN,
+    Math.min(top, viewportHeight - KANBAN_COLUMN_MENU_HEIGHT - KANBAN_MENU_VIEWPORT_MARGIN),
+  );
+  return { left, top };
+}
+
+function clampKanbanPointMenuPosition(left: number, top: number, width: number, height: number) {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  return {
+    left: Math.max(
+      KANBAN_MENU_VIEWPORT_MARGIN,
+      Math.min(left, viewportWidth - width - KANBAN_MENU_VIEWPORT_MARGIN),
+    ),
+    top: Math.max(
+      KANBAN_MENU_VIEWPORT_MARGIN,
+      Math.min(top, viewportHeight - height - KANBAN_MENU_VIEWPORT_MARGIN),
+    ),
+  };
+}
 
 export interface BitableKanbanViewProps {
   table: BaseTable;
@@ -19,6 +57,7 @@ export interface BitableKanbanViewProps {
   changeRecordStatus: (recordId: string, statusValue: string) => void;
   openRecord: (recordId: string) => void;
   removeRecords: (recordIds: string[], requireConfirm?: boolean) => boolean;
+  onConfig: (patch: Partial<GalleryViewConfig>) => void;
   addGroup: () => void;
   renameGroup: (choiceId: string, name: string) => void;
   deleteGroup: (choiceId: string) => void;
@@ -33,10 +72,9 @@ function getStatusField(table: BaseTable, config?: GalleryViewConfig): BaseField
 }
 
 function resolveKanbanContentWidth(columnCount: number): number {
-  if (columnCount <= 0) return KANBAN_CREATE_GROUP_WIDTH;
+  if (columnCount <= 0) return 0;
   return columnCount * KANBAN_COLUMN_WIDTH
-    + columnCount * KANBAN_COLUMN_GAP
-    + KANBAN_CREATE_GROUP_WIDTH;
+    + Math.max(0, columnCount - 1) * KANBAN_COLUMN_GAP;
 }
 
 function syncKanbanDocAlign(block: HTMLElement) {
@@ -99,6 +137,7 @@ export function BitableKanbanView({
   changeRecordStatus,
   openRecord,
   removeRecords,
+  onConfig,
   addGroup,
   renameGroup,
   deleteGroup,
@@ -106,11 +145,12 @@ export function BitableKanbanView({
   const dragMovedRef = useRef(false);
   const [draggingRecordId, setDraggingRecordId] = useState<string | null>(null);
   const [dropStatus, setDropStatus] = useState<string | null>(null);
-  const [menuChoiceId, setMenuChoiceId] = useState<string | null>(null);
+  const [columnMenu, setColumnMenu] = useState<{ choiceId: string; left: number; top: number } | null>(null);
   const [cardMenu, setCardMenu] = useState<{ recordId: string; left: number; top: number } | null>(null);
   const [renamingChoiceId, setRenamingChoiceId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const cardMenuRef = useRef<HTMLDivElement>(null);
+  const columnMenuRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const scrollLeftRef = useRef(0);
@@ -149,9 +189,29 @@ export function BitableKanbanView({
   }, [choices, records, statusField?.id]);
 
   const visibleFieldIds = config.visibleFieldIds.filter(fieldId => fieldId !== statusField?.id && fieldId !== table.primaryFieldId);
+  const orderedChoices = useMemo(() => {
+    const order = config.groupOrderIds || [];
+    if (!order.length) return choices;
+    return [...choices].sort((left, right) => {
+      const leftIndex = order.indexOf(left.id);
+      const rightIndex = order.indexOf(right.id);
+      const normalizedLeft = leftIndex >= 0 ? leftIndex : Number.MAX_SAFE_INTEGER;
+      const normalizedRight = rightIndex >= 0 ? rightIndex : Number.MAX_SAFE_INTEGER;
+      return normalizedLeft - normalizedRight;
+    });
+  }, [choices, config.groupOrderIds]);
+  const visibleChoices = useMemo(
+    () => orderedChoices.filter(choice => (
+      !(config.hiddenGroupIds || []).includes(choice.id)
+      && (config.showEmptyGroups !== false || (recordsByStatus.get(choice.name)?.length ?? 0) > 0)
+    )),
+    [config.hiddenGroupIds, config.showEmptyGroups, orderedChoices, recordsByStatus],
+  );
+  const shouldShowCreateGroup = config.showCreateGroup !== false;
+  const shouldShowNewRecordButton = config.showNewRecordButton !== false;
   const boardContentWidth = useMemo(
-    () => resolveKanbanContentWidth(choices.length),
-    [choices.length],
+    () => resolveKanbanContentWidth(visibleChoices.length) + (shouldShowCreateGroup ? KANBAN_CREATE_GROUP_WIDTH : 0),
+    [shouldShowCreateGroup, visibleChoices.length],
   );
   const boardWidth = Math.max(KANBAN_DOC_WIDTH, boardContentWidth, viewportWidth);
   const { anchor, maxBleedWidth, trackWidth, shiftMax, panScrollMax } = layoutCaps;
@@ -320,6 +380,25 @@ export function BitableKanbanView({
   }, [cardMenu]);
 
   useEffect(() => {
+    if (!columnMenu) return undefined;
+    const handlePointerDown = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && columnMenuRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest('.base-kanban__column-action')) return;
+      setColumnMenu(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setColumnMenu(null);
+    };
+    document.addEventListener('mousedown', handlePointerDown, true);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown, true);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [columnMenu]);
+
+  useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
     const onWheel = (event: WheelEvent) => {
@@ -379,7 +458,7 @@ export function BitableKanbanView({
   };
 
   const startRename = (choiceId: string, currentName: string) => {
-    setMenuChoiceId(null);
+    setColumnMenu(null);
     setRenamingChoiceId(choiceId);
     setRenameDraft(currentName);
   };
@@ -391,6 +470,37 @@ export function BitableKanbanView({
     setRenamingChoiceId(null);
     setRenameDraft('');
   };
+
+  const moveGroup = (choiceId: string, direction: -1 | 1) => {
+    if (locked) return;
+    const currentOrder = config.groupOrderIds?.length ? config.groupOrderIds : choices.map(choice => choice.id);
+    const nextOrder = [
+      ...currentOrder,
+      ...choices.map(choice => choice.id).filter(choiceIdInList => !currentOrder.includes(choiceIdInList)),
+    ];
+    const fromIndex = nextOrder.indexOf(choiceId);
+    const toIndex = fromIndex + direction;
+    if (fromIndex < 0 || toIndex < 0 || toIndex >= nextOrder.length) return;
+    const [moved] = nextOrder.splice(fromIndex, 1);
+    nextOrder.splice(toIndex, 0, moved);
+    onConfig({ groupOrderIds: nextOrder });
+  };
+
+  const hideGroup = (choiceId: string) => {
+    if (locked) return;
+    onConfig({ hiddenGroupIds: Array.from(new Set([...(config.hiddenGroupIds || []), choiceId])) });
+    setColumnMenu(null);
+  };
+
+  const openColumnMenu = (choiceId: string, trigger: HTMLElement) => {
+    const rect = trigger.getBoundingClientRect();
+    const { left, top } = clampKanbanColumnMenuPosition(rect);
+    setColumnMenu({ choiceId, left, top });
+  };
+
+  const columnMenuChoice = columnMenu
+    ? visibleChoices.find(choice => choice.id === columnMenu.choiceId) ?? null
+    : null;
 
   const onCardDrop = (event: DragEvent<HTMLElement>, statusValue: string) => {
     event.preventDefault();
@@ -432,10 +542,10 @@ export function BitableKanbanView({
             transform: panAmount > 0 ? `translate3d(${-panAmount}px, 0, 0)` : undefined,
           }}
         >
-          {choices.map(choice => {
+          {visibleChoices.map(choice => {
             const columnRecords = recordsByStatus.get(choice.name) ?? [];
-            const isMenuOpen = menuChoiceId === choice.id;
             const isRenaming = renamingChoiceId === choice.id;
+            const isColumnMenuOpen = columnMenu?.choiceId === choice.id;
 
             return (
               <section
@@ -475,30 +585,32 @@ export function BitableKanbanView({
                     <span className="base-kanban__column-count">{columnRecords.length}</span>
                   </div>
                   <div className="base-kanban__column-actions">
+                    {shouldShowNewRecordButton ? (
+                      <button
+                        type="button"
+                        className="base-kanban__column-action"
+                        aria-label={`在 ${choice.name} 下新建记录`}
+                        disabled={locked}
+                        onClick={() => addRecordToColumn(choice.name)}
+                      >
+                        +
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      className="base-kanban__column-action"
-                      aria-label={`在 ${choice.name} 下新建记录`}
-                      disabled={locked}
-                      onClick={() => addRecordToColumn(choice.name)}
-                    >
-                      +
-                    </button>
-                    <button
-                      type="button"
-                      className="base-kanban__column-action"
+                      className={`base-kanban__column-action${isColumnMenuOpen ? ' is-active' : ''}`}
                       aria-label={`${choice.name} 更多操作`}
-                      onClick={() => setMenuChoiceId(current => current === choice.id ? null : choice.id)}
+                      aria-expanded={isColumnMenuOpen}
+                      onClick={event => {
+                        if (isColumnMenuOpen) {
+                          setColumnMenu(null);
+                          return;
+                        }
+                        openColumnMenu(choice.id, event.currentTarget);
+                      }}
                     >
                       ...
                     </button>
-                    {isMenuOpen && (
-                      <div className="base-kanban__column-menu" onMouseDown={stop}>
-                        <button type="button" disabled={locked} onClick={() => startRename(choice.id, choice.name)}>重命名分组</button>
-                        <button type="button" disabled={locked} onClick={() => addRecordToColumn(choice.name)}>新建记录</button>
-                        <button type="button" className="is-danger" disabled={locked} onClick={() => deleteGroup(choice.id)}>删除分组</button>
-                      </div>
-                    )}
                   </div>
                 </header>
 
@@ -531,7 +643,13 @@ export function BitableKanbanView({
                         onContextMenu={event => {
                           event.preventDefault();
                           event.stopPropagation();
-                          setCardMenu({ recordId: record.id, left: event.clientX, top: event.clientY });
+                          const position = clampKanbanPointMenuPosition(
+                            event.clientX,
+                            event.clientY,
+                            KANBAN_CARD_MENU_WIDTH,
+                            KANBAN_CARD_MENU_HEIGHT,
+                          );
+                          setCardMenu({ recordId: record.id, ...position });
                         }}
                       >
                         {config.coverFieldId ? (
@@ -551,14 +669,15 @@ export function BitableKanbanView({
                           if (!field) return null;
                           if (field.name === '时间') return null;
                           const value = record.fields[fieldId];
-                          if (!config.showEmptyFields && !valueText(value)) return null;
                           return (
-                            <div className="base-kanban__card-field" key={field.id}>
-                              <span className="base-card-field-icon" aria-hidden>{fieldCardIcon(field)}</span>
-                              {config.showFieldNames && <label>{field.name}</label>}
-                              <FieldDisplay field={field} value={value as CellValue} />
-                              {config.showEmptyFields && !valueText(value) && <span className="base-kanban__empty-value">空</span>}
-                            </div>
+                            <BitableCardField
+                              key={field.id}
+                              field={field}
+                              value={value}
+                              showFieldName={config.showFieldNames}
+                              showEmptyValue={config.showEmptyFields}
+                              variant="kanban"
+                            />
                           );
                         })}
                       </article>
@@ -566,22 +685,24 @@ export function BitableKanbanView({
                   })}
                 </div>
 
-                <button
-                  type="button"
-                  className="base-kanban__column-add"
-                  aria-label={`在 ${choice.name} 下添加记录`}
-                  disabled={locked}
-                  onClick={() => addRecordToColumn(choice.name)}
-                >
-                  +
-                </button>
+                {shouldShowNewRecordButton ? (
+                  <button
+                    type="button"
+                    className="base-kanban__column-add"
+                    aria-label={`在 ${choice.name} 下添加记录`}
+                    disabled={locked}
+                    onClick={() => addRecordToColumn(choice.name)}
+                  >
+                    + 新建任务
+                  </button>
+                ) : null}
               </section>
             );
           })}
-          <button type="button" className="base-kanban__create-group" disabled={locked} onClick={addGroup}>
+          {shouldShowCreateGroup ? <button type="button" className="base-kanban__create-group" disabled={locked} onClick={addGroup}>
             <span>+</span>
             新建分组
-          </button>
+          </button> : null}
         </div>
       </div>
       <div className={`base-kanban-hscroll${maxScrollLeft > 0 ? ' is-active' : ''}`}>
@@ -606,10 +727,26 @@ export function BitableKanbanView({
           )}
         </div>
       </div>
+      {columnMenu && columnMenuChoice && createPortal(
+        <div
+          ref={columnMenuRef}
+          className="base-kanban__column-menu base-kanban__column-menu--portal"
+          style={{ left: columnMenu.left, top: columnMenu.top }}
+          onMouseDown={stop}
+        >
+          <button type="button" disabled={locked} onClick={() => startRename(columnMenuChoice.id, columnMenuChoice.name)}>重命名分组</button>
+          <button type="button" disabled={locked} onClick={() => { moveGroup(columnMenuChoice.id, -1); setColumnMenu(null); }}>左移分组</button>
+          <button type="button" disabled={locked} onClick={() => { moveGroup(columnMenuChoice.id, 1); setColumnMenu(null); }}>右移分组</button>
+          <button type="button" disabled={locked} onClick={() => hideGroup(columnMenuChoice.id)}>隐藏分组</button>
+          <button type="button" disabled={locked} onClick={() => { addRecordToColumn(columnMenuChoice.name); setColumnMenu(null); }}>新建记录</button>
+          <button type="button" className="is-danger" disabled={locked} onClick={() => { deleteGroup(columnMenuChoice.id); setColumnMenu(null); }}>删除分组</button>
+        </div>,
+        document.body,
+      )}
       {cardMenu && createPortal(
         <div
           ref={cardMenuRef}
-          className="base-kanban__card-menu"
+          className="base-kanban__card-menu base-kanban__card-menu--portal"
           style={{ left: cardMenu.left, top: cardMenu.top }}
           onMouseDown={stop}
         >

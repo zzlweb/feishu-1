@@ -143,6 +143,7 @@ export default function DocumentPage() {
       const res = await getDocument(id);
       if (res.code === 0 && res.data) {
         setDoc(res.data);
+        setReadOnly(Boolean(res.data.read_only));
       } else {
         navigate('/');
       }

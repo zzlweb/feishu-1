@@ -21,7 +21,7 @@
   width: min(236px, calc(100vw - 24px));
   min-width: 0;
   max-width: calc(100vw - 24px);
-  z-index: 10050;
+  z-index: var(--z-doc-menu, 10050);
   overflow: visible;
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -207,7 +207,7 @@
   box-shadow: var(--shadow-lg);
   padding: 6px;
   min-width: 168px;
-  z-index: 10051;
+  z-index: var(--z-doc-submenu, 10051);
 }
 
 .context-menu-feishu .context-submenu .context-menu-item {

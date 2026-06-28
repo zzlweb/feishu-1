@@ -165,14 +165,14 @@ export default function TableSelectionToolbar({ editor, pinnedRail, left, top }:
 
   const runWithCellSelection = useCallback((action: () => void) => {
     const saved = lastCellSelectionRef.current;
-    if (saved && !(editor.state.selection instanceof CellSelection)) {
+    editor.view.focus();
+    if (saved) {
       try {
         editor.view.dispatch(editor.state.tr.setSelection(saved));
       } catch {
         lastCellSelectionRef.current = null;
       }
     }
-    editor.view.focus();
     action();
   }, [editor]);
 

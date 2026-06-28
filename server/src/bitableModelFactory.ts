@@ -1,32 +1,71 @@
 import { v4 as uuidv4 } from 'uuid';
 
-type BaseFieldType = 'text' | 'number' | 'single_select' | 'date' | 'checkbox' | 'formula' | 'attachment';
-type BaseViewType = 'grid' | 'kanban' | 'gallery';
+export type BaseFieldType =
+  | 'text'
+  | 'rich_text'
+  | 'number'
+  | 'single_select'
+  | 'multi_select'
+  | 'date'
+  | 'checkbox'
+  | 'user'
+  | 'attachment'
+  | 'url'
+  | 'phone'
+  | 'email'
+  | 'formula'
+  | 'lookup'
+  | 'relation'
+  | 'created_time'
+  | 'updated_time'
+  | 'created_by'
+  | 'updated_by';
 
-interface SelectChoice {
+export type BaseViewType = 'grid' | 'kanban' | 'calendar' | 'gallery' | 'gantt' | 'form';
+
+export type CellValue = string | number | boolean | string[] | AttachmentValue[] | null;
+
+export interface SelectChoice {
   id: string;
   name: string;
   color: string;
 }
 
-interface BaseField {
+export interface AttachmentValue {
+  id: string;
+  fileId: string;
+  name: string;
+  mimeType: string;
+  extension: string;
+  size: number;
+  url?: string;
+  thumbnailUrl?: string;
+  previewUrl?: string;
+  uploadStatus?: 'uploading' | 'processing' | 'success' | 'failed';
+}
+
+export interface BaseField {
   id: string;
   name: string;
   type: BaseFieldType;
   options?: { choices?: SelectChoice[] };
+  hidden?: boolean;
   required?: boolean;
+  defaultValue?: CellValue;
 }
 
-interface BaseRecord {
+export interface BaseRecord {
   id: string;
   tableId: string;
-  fields: Record<string, string | number | boolean | string[] | unknown[] | null>;
+  fields: Record<string, CellValue>;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
+  updatedBy?: string;
+  parentId?: string;
 }
 
-interface GalleryViewConfig {
+export interface GalleryViewConfig {
   coverFieldId?: string;
   titleFieldId?: string;
   visibleFieldIds: string[];
@@ -39,15 +78,30 @@ interface GalleryViewConfig {
   showEmptyFields: boolean;
   showAttachmentCount: boolean;
   showRecordActions: boolean;
+  groupOrderIds?: string[];
+  hiddenGroupIds?: string[];
+  showEmptyGroups?: boolean;
+  showCreateGroup?: boolean;
+  showNewRecordButton?: boolean;
   emptyCoverMode: 'placeholder' | 'hide-cover';
+  search?: string;
 }
 
-interface BaseView {
+export interface GridViewConfig {
+  search?: string;
+  fieldWidths?: Record<string, number>;
+  rowHeight?: 'low' | 'medium' | 'high';
+  parentFieldId?: string;
+  groupByFieldIds?: string[];
+  groupSortDirections?: ('asc' | 'desc')[];
+}
+
+export interface BaseView {
   id: string;
   tableId: string;
   name: string;
   type: BaseViewType;
-  config: GalleryViewConfig | Record<string, unknown>;
+  config: GalleryViewConfig | GridViewConfig | Record<string, unknown>;
   sorts: unknown[];
   filters: unknown[];
 }
@@ -103,17 +157,22 @@ function createRecord(
   tableId: string,
   fields: BaseField[],
   primaryFieldId: string,
-  values: Record<string, string | number | boolean | null | unknown[]>,
+  values: Record<string, CellValue>,
 ): BaseRecord {
   const time = now();
-  const fieldValues: Record<string, string | number | boolean | string[] | null | unknown[]> = {};
+  const fieldValues: Record<string, CellValue> = {};
   fields.forEach(field => {
     if (field.type === 'attachment') {
       const raw = values[field.id];
-      fieldValues[field.id] = Array.isArray(raw) ? raw : [];
+      fieldValues[field.id] = Array.isArray(raw) ? raw as AttachmentValue[] : [];
       return;
     }
-    fieldValues[field.id] = (values[field.id] ?? '') as string | number | null;
+    if (field.type === 'multi_select') {
+      const raw = values[field.id];
+      fieldValues[field.id] = Array.isArray(raw) ? raw as string[] : [];
+      return;
+    }
+    fieldValues[field.id] = values[field.id] ?? field.defaultValue ?? '';
   });
   return {
     id: uid('rec'),
@@ -126,7 +185,7 @@ function createRecord(
 }
 
 
-function createSampleCover(label: string, assetName: string) {
+function createSampleCover(label: string, assetName: string): AttachmentValue[] {
   const url = `/static/gallery/${assetName}`;
   return [{
     id: uid('att'),
@@ -138,7 +197,7 @@ function createSampleCover(label: string, assetName: string) {
     url,
     thumbnailUrl: url,
     previewUrl: url,
-    uploadStatus: 'success',
+    uploadStatus: 'success' as const,
   }];
 }
 
@@ -494,6 +553,9 @@ export function createNewBusinessTable(): BaseTableModel {
       showFieldNames: true,
       visibleFieldIds: [timeField.id, contentField.id, phaseField.id, statusField.id, shopField.id, durationField.id, startField.id, followField.id],
       cardLayoutMode: 'compact',
+      showEmptyGroups: false,
+      showCreateGroup: false,
+      showNewRecordButton: true,
     },
   });
 }

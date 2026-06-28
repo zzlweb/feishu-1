@@ -23,8 +23,9 @@ import {
   getDocuments,
   getTemplates,
   importDocumentFile,
+  importDocumentUrl,
 } from '../../api/documents';
-import type { Document, Template } from '../../types';
+import type { Document, ImportDocumentResult, Template } from '../../types';
 import './DocumentList.less';
 
 const TABS = ['最近访问', '归我所有', '与我共享', '收藏'];
@@ -75,6 +76,116 @@ function buildPlainTextDocument(text: string) {
     .join('');
 }
 
+function compactImportMessages(messages: string[] = []) {
+  const counts = new Map<string, number>();
+  messages.forEach(message => counts.set(message, (counts.get(message) || 0) + 1));
+  return Array.from(counts.entries()).map(([message, count]) =>
+    count > 1 ? `${message}（共 ${count} 处）` : message,
+  );
+}
+
+function compactUnsupportedBlocks(blocks: ImportDocumentResult['unsupported_blocks'] = []) {
+  const grouped = new Map<string, { reason: string; count: number }>();
+  blocks.forEach(block => {
+    const current = grouped.get(block.type);
+    if (current) current.count += 1;
+    else grouped.set(block.type, { reason: block.reason, count: 1 });
+  });
+  return Array.from(grouped.entries()).map(([type, value]) => ({
+    type,
+    reason: value.count > 1 ? `${value.reason}（共 ${value.count} 处）` : value.reason,
+  }));
+}
+
+function ImportResultPanel({
+  result,
+  onReset,
+}: {
+  result: ImportDocumentResult;
+  onReset?: () => void;
+}) {
+  const warnings = compactImportMessages(result.warnings);
+  const unsupportedBlocks = compactUnsupportedBlocks(result.unsupported_blocks);
+
+  return (
+    <div className={`feishu-import-result feishu-import-result--${result.import_quality || 'fallback'}`}>
+      <div className="feishu-import-result__header">
+        <span className="feishu-import-result__badge">
+          {{
+            full: '完整导入',
+            partial: '部分导入',
+            fallback: '兜底导入',
+          }[result.import_quality || 'fallback']}
+        </span>
+        <strong>{result.document.title || '未命名文档'}</strong>
+      </div>
+      <div className="feishu-import-result__meta">
+        来源：{result.source_name || '导入文档'}
+        {result.asset_count ? ` · 资源 ${result.asset_count} 个` : ''}
+      </div>
+      {result.import_metadata ? (
+        <div className="feishu-import-result__metadata">
+          <div className="feishu-import-result__metadata-row">
+            <span>权限</span>
+            <strong>
+              {{
+                unknown: '未知',
+                readable: '可读取',
+                readonly: '只读',
+                editable: '可编辑',
+              }[result.import_metadata.permission]}
+              {result.import_metadata.readonly ? ' · 本地只读来源' : ' · 本地可编辑副本'}
+            </strong>
+          </div>
+          <div className="feishu-import-result__metadata-row">
+            <span>评论</span>
+            <strong>
+              {{
+                not_requested: '未请求',
+                not_supported: '暂未导入',
+                partial: '部分导入',
+                imported: '已导入',
+              }[result.import_metadata.comments]}
+            </strong>
+          </div>
+          {result.import_metadata.notes?.length ? (
+            <ul className="feishu-import-result__metadata-notes">
+              {result.import_metadata.notes.map((note, index) => (
+                <li key={`${note}-${index}`}>{note}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+      {warnings.length ? (
+        <ul className="feishu-import-result__list">
+          {warnings.map((warning, index) => (
+            <li key={`${warning}-${index}`}>{warning}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="feishu-import-result__ok">没有导入警告。</p>
+      )}
+      {unsupportedBlocks.length ? (
+        <div className="feishu-import-result__unsupported">
+          <strong>未完整支持的块</strong>
+          {unsupportedBlocks.map((block, index) => (
+            <div key={`${block.type}-${index}`} className="feishu-import-result__unsupported-item">
+              <span>{block.type}</span>
+              <em>{block.reason}</em>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {onReset && (
+        <button type="button" className="feishu-import-result__reset" onClick={onReset}>
+          重新输入链接
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function DocumentList() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -87,8 +198,14 @@ export default function DocumentList() {
   const [rowMenu, setRowMenu] = useState<RowMenu | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [templateDialogVisible, setTemplateDialogVisible] = useState(false);
+  const [feishuImportVisible, setFeishuImportVisible] = useState(false);
+  const [feishuImportUrl, setFeishuImportUrl] = useState('');
+  const [saveImportedAsTemplate, setSaveImportedAsTemplate] = useState(false);
+  const [feishuImportResult, setFeishuImportResult] = useState<ImportDocumentResult | null>(null);
+  const [fileImportResult, setFileImportResult] = useState<ImportDocumentResult | null>(null);
   const [isUploadDragging, setIsUploadDragging] = useState(false);
   const [isImportingFile, setIsImportingFile] = useState(false);
+  const [isImportingUrl, setIsImportingUrl] = useState(false);
   const rowMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadDragDepthRef = useRef(0);
@@ -180,9 +297,8 @@ export default function DocumentList() {
     try {
       const res = await importDocumentFile(file, CURRENT_USER);
       if (res.code === 0 && res.data?.document) {
-        const assetText = res.data.asset_count ? `，已还原 ${res.data.asset_count} 个资源` : '';
-        void MessagePlugin.success(`已导入为新文档${assetText}`);
-        navigate(`/doc/${res.data.document.id}`);
+        void MessagePlugin.success('已导入为新文档，请确认导入详情');
+        setFileImportResult(res.data);
       } else {
         void MessagePlugin.error(res.message || '导入失败');
       }
@@ -198,6 +314,63 @@ export default function DocumentList() {
     event.target.value = '';
     if (!file) return;
     await importFile(file);
+  };
+
+  const handleImportFeishuUrl = async () => {
+    if (feishuImportResult?.document) {
+      setFeishuImportVisible(false);
+      navigate(`/doc/${feishuImportResult.document.id}`);
+      setFeishuImportResult(null);
+      setFeishuImportUrl('');
+      setSaveImportedAsTemplate(false);
+      return;
+    }
+
+    const url = feishuImportUrl.trim();
+    if (!url) {
+      void MessagePlugin.warning('请输入飞书文档链接');
+      return;
+    }
+
+    setIsImportingUrl(true);
+    try {
+      const res = await importDocumentUrl(url, {
+        author: CURRENT_USER,
+        saveAsTemplate: saveImportedAsTemplate,
+      });
+      if (res.code === 0 && res.data?.document) {
+        const qualityText = {
+          full: '完整导入',
+          partial: '部分高保真导入',
+          fallback: '兜底导入',
+        }[res.data.import_quality || 'fallback'];
+        void MessagePlugin.success(`${qualityText}成功，请确认导入详情`);
+        setFeishuImportResult(res.data);
+      } else {
+        void MessagePlugin.error(res.message || '飞书导入失败');
+      }
+    } finally {
+      setIsImportingUrl(false);
+    }
+  };
+
+  const closeFeishuImportDialog = () => {
+    if (isImportingUrl) return;
+    setFeishuImportVisible(false);
+    setFeishuImportResult(null);
+    setFeishuImportUrl('');
+    setSaveImportedAsTemplate(false);
+  };
+
+  const resetFeishuImportInput = () => {
+    setFeishuImportResult(null);
+  };
+
+  const openFileImportResult = () => {
+    if (!fileImportResult?.document) return;
+    const targetId = fileImportResult.document.id;
+    setFileImportResult(null);
+    navigate(`/doc/${targetId}`);
   };
 
   const hasDraggedFiles = (event: React.DragEvent<HTMLElement>) =>
@@ -368,6 +541,14 @@ export default function DocumentList() {
             <span className="action-card-text">
               <span className="action-card-name">上传导入</span>
               <span className="action-card-desc">{isUploadDragging ? '松开以上传文件' : '本地文本快速转为文档'}</span>
+            </span>
+          </button>
+
+          <button type="button" className="action-card" onClick={() => setFeishuImportVisible(true)}>
+            <span className="action-card-icon icon-feishu">飞</span>
+            <span className="action-card-text">
+              <span className="action-card-name">飞书导入</span>
+              <span className="action-card-desc">通过链接/API 还原文档</span>
             </span>
           </button>
 
@@ -551,6 +732,61 @@ export default function DocumentList() {
           </button>
         </div>
       )}
+
+      <Dialog
+        visible={feishuImportVisible}
+        destroyOnClose
+        header="导入飞书文档"
+        width={520}
+        confirmBtn={{
+          content: feishuImportResult?.document ? '打开导入文档' : isImportingUrl ? '导入中...' : '开始导入',
+          loading: isImportingUrl,
+        }}
+        cancelBtn="取消"
+        onClose={closeFeishuImportDialog}
+        onCancel={closeFeishuImportDialog}
+        onConfirm={() => void handleImportFeishuUrl()}
+      >
+        <div className="feishu-import-dialog">
+          <p className="feishu-import-dialog__hint">
+            输入飞书 wiki/doc 链接。后端配置 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET` 时优先走 Open API；否则会返回 partial/fallback 导入结果。
+          </p>
+          <Input
+            value={feishuImportUrl}
+            placeholder="https://xxx.feishu.cn/wiki/..."
+            clearable
+            disabled={Boolean(feishuImportResult)}
+            onChange={value => setFeishuImportUrl(String(value))}
+            onEnter={() => void handleImportFeishuUrl()}
+          />
+          {feishuImportResult && (
+            <ImportResultPanel result={feishuImportResult} onReset={resetFeishuImportInput} />
+          )}
+          <label className="feishu-import-dialog__option">
+            <input
+              type="checkbox"
+              checked={saveImportedAsTemplate}
+              disabled={Boolean(feishuImportResult)}
+              onChange={event => setSaveImportedAsTemplate(event.target.checked)}
+            />
+            同时保存为模板
+          </label>
+        </div>
+      </Dialog>
+
+      <Dialog
+        visible={!!fileImportResult}
+        destroyOnClose
+        header="导入文件结果"
+        width={520}
+        confirmBtn="打开导入文档"
+        cancelBtn="关闭"
+        onClose={() => setFileImportResult(null)}
+        onCancel={() => setFileImportResult(null)}
+        onConfirm={openFileImportResult}
+      >
+        {fileImportResult && <ImportResultPanel result={fileImportResult} />}
+      </Dialog>
 
       <Dialog
         visible={templateDialogVisible}

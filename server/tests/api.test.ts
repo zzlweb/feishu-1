@@ -202,6 +202,8 @@ test('document import-url API imports public feishu wiki and optional template',
     assert.match(imported.body.data.document.content, /data-local-block="bitable"/);
     assert.match(imported.body.data.document.content, /data-model="/);
     assert.ok(Array.isArray(imported.body.data.warnings));
+    assert.equal(imported.body.data.import_quality, 'partial');
+    assert.ok(Array.isArray(imported.body.data.unsupported_blocks));
     assert.ok(imported.body.data.template);
     assert.equal(imported.body.data.template.title, '业务经营周报');
 

@@ -927,7 +927,6 @@ export function BitableGridView({
   const editingCellRef = useRef<EditingCell | null>(null);
   const selectedCellRef = useRef<SelectedCell | null>(null);
   const cellSelectDragRef = useRef<CellSelectDrag | null>(null);
-  const pointerDownSelectedRef = useRef<SelectedCell | null>(null);
   const [fieldMenu, setFieldMenu] = useState<{ fieldId: string; left: number; top: number; columnLeft: number } | null>(null);
   const [cellContextMenu, setCellContextMenu] = useState<{
     recordId: string;
@@ -1663,7 +1662,8 @@ export function BitableGridView({
     value?: string,
   ) => {
     if (activeView.locked || column.field.type === 'attachment' || isSelectField(column.field)) return;
-    const meta = treeMeta[rowIndex];
+    const recordIndex = displayRecords.findIndex(item => item.id === record.id);
+    const meta = recordIndex >= 0 ? treeMeta[recordIndex] : undefined;
     const isPrimaryField = column.field.id === table.primaryFieldId;
     const layout = getCellEditorLayout(column, meta, isPrimaryField);
     setEditingCell({
@@ -1990,7 +1990,6 @@ export function BitableGridView({
         setSelectEditor(null);
         return;
       }
-      pointerDownSelectedRef.current = null;
       cellSelectDragRef.current = {
         pointerId: event.pointerId,
         anchorRow: hit.rowIndex,
@@ -2053,7 +2052,6 @@ export function BitableGridView({
     }
     const { rowIndex: hitRowIndex, colIndex, record: hitRecord, column } = hit;
     if (!hitRecord) return;
-    pointerDownSelectedRef.current = selectedCellRef.current;
     cellSelectDragRef.current = {
       pointerId: event.pointerId,
       anchorRow: hitRowIndex,
@@ -2151,6 +2149,42 @@ export function BitableGridView({
     );
   };
 
+  const handleCanvasDoubleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (activeView.locked) return;
+    if (editingCell) commitEditingCell();
+
+    const point = pointFromCanvas(event, canvasScrollOffsetX);
+    const hit = resolveSelectableCellAtPoint(point, {
+      gridRows,
+      columns,
+      dataWidth,
+      addRowIndex,
+      rowHeight: ROW_HEIGHT,
+      primaryFieldId: table.primaryFieldId,
+      treeMeta,
+      displayRecords,
+    });
+    if (!hit?.record) return;
+
+    const { record, column, rowIndex } = hit;
+    setSelectionRange(null);
+    setCellContextMenu(null);
+    setFieldMenu(null);
+    setSelectedCell({ recordId: record.id, fieldId: column.field.id, rowIndex });
+
+    if (column.field.type === 'attachment') {
+      pickFiles(record.id, column.field.id);
+      return;
+    }
+    if (isSelectField(column.field)) {
+      openSelectEditor(record, column, rowIndex);
+      return;
+    }
+    startEditing(record, column, rowIndex);
+  };
+
   const handleIndexRowContextMenu = (
     event: React.MouseEvent,
     record: BaseRecord,
@@ -2188,15 +2222,12 @@ export function BitableGridView({
       const record = recordAtGridRow(gridRows, cellDrag.anchorRow);
       const column = columns[cellDrag.anchorCol];
       if (!cellDrag.moved && record && column) {
-        const wasSame = pointerDownSelectedRef.current?.recordId === record.id
-          && pointerDownSelectedRef.current?.fieldId === column.field.id
-          && pointerDownSelectedRef.current?.rowIndex === cellDrag.anchorRow;
         setSelectionRange(null);
         if (column.field.type === 'attachment') {
           pickFiles(record.id, column.field.id);
         } else if (isSelectField(column.field)) {
           openSelectEditor(record, column, cellDrag.anchorRow);
-        } else if (wasSame) {
+        } else {
           startEditing(record, column, cellDrag.anchorRow);
         }
       }
@@ -2695,6 +2726,7 @@ export function BitableGridView({
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
+            onDoubleClick={handleCanvasDoubleClick}
           />
           <div className="base-grid-over-layer">
             {columns.map(column => {
@@ -2808,10 +2840,10 @@ export function BitableGridView({
                 />
               );
             })()}
-            {hoverRow != null && !editingCell && !selectEditor && selectedCell?.rowIndex !== hoverRow && displayRecords[hoverRow] && (() => {
+            {hoverRow != null && !editingCell && !selectEditor && selectedCell?.rowIndex !== hoverRow && gridRows[hoverRow]?.kind === 'record' && (() => {
               const primaryColumn = columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
               if (!primaryColumn || overlayInFrozenZone(primaryColumn.left)) return null;
-              const hoverRecord = displayRecords[hoverRow];
+              const hoverRecord = (gridRows[hoverRow] as Extract<GridDisplayRow, { kind: 'record' }>).record;
               return (
               <div
                 className="base-grid-row-hover-actions"

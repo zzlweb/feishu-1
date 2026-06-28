@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { Button, Checkbox, Input, Popup, Select, Switch, Upload } from 'tdesign-react';
 import { CalendarIcon } from 'tdesign-icons-react';
 import type { PopupProps } from 'tdesign-react';
+import { FLOATING_Z_INDEX } from '../../Editor/shared/floatingPanel';
 import { fieldTypeGlyph, isPreviewImage } from '../shared/BitableViewShared';
 import {
   DEFAULT_RECORD_OPERATOR,
@@ -47,8 +49,28 @@ function fieldPlaceholder(field: BaseField) {
 /** 卡片弹层 z-index 为 10060，TDesign 浮层需挂到 body 并抬高层级 */
 const CARD_MODAL_POPUP_PROPS: PopupProps = {
   attach: () => document.body,
-  zIndex: 10070,
+  zIndex: FLOATING_Z_INDEX.bitableModal,
 };
+
+const ATTACHMENT_PANEL_WIDTH = 360;
+const ATTACHMENT_PANEL_HEIGHT = 240;
+const CARD_MODAL_POPUP_MARGIN = 12;
+
+function clampAttachmentPanelPosition(trigger: DOMRect, boundary?: DOMRect | null) {
+  let left = trigger.right - ATTACHMENT_PANEL_WIDTH;
+  let top = trigger.bottom + 4;
+  const minLeft = boundary ? boundary.left + CARD_MODAL_POPUP_MARGIN : CARD_MODAL_POPUP_MARGIN;
+  const maxLeft = boundary
+    ? boundary.right - ATTACHMENT_PANEL_WIDTH - CARD_MODAL_POPUP_MARGIN
+    : window.innerWidth - ATTACHMENT_PANEL_WIDTH - CARD_MODAL_POPUP_MARGIN;
+  const minTop = boundary ? boundary.top + CARD_MODAL_POPUP_MARGIN : CARD_MODAL_POPUP_MARGIN;
+  const maxTop = boundary
+    ? boundary.bottom - ATTACHMENT_PANEL_HEIGHT - CARD_MODAL_POPUP_MARGIN
+    : window.innerHeight - ATTACHMENT_PANEL_HEIGHT - CARD_MODAL_POPUP_MARGIN;
+  left = Math.max(minLeft, Math.min(left, maxLeft));
+  top = Math.max(minTop, Math.min(top, maxTop));
+  return { left, top };
+}
 
 function formatCardDateDisplay(value: CellValue): string {
   const raw = valueText(value);
@@ -246,34 +268,50 @@ function AttachmentUploadPopover({
   record,
   disabled,
   onUpload,
+  modalBoundaryRef,
 }: {
   field: BaseField;
   record: BaseRecord;
   disabled?: boolean;
   onUpload?: (recordId: string, fieldId: string, files: File[]) => void;
+  modalBoundaryRef?: RefObject<HTMLElement | null>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const [panelPosition, setPanelPosition] = useState({ left: 0, top: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const attachments = getAttachments(record, field.id);
   const canUpload = !disabled && Boolean(onUpload);
+
+  function closePanel() {
+    setOpen(false);
+    setIsDragging(false);
+  }
+
+  function openPanel(trigger: HTMLElement) {
+    if (!canUpload) return;
+    const boundary = modalBoundaryRef?.current?.getBoundingClientRect();
+    setPanelPosition(clampAttachmentPanelPosition(trigger.getBoundingClientRect(), boundary));
+    setOpen(true);
+  }
 
   useEffect(() => {
     if (!open) return;
     popoverRef.current?.focus({ preventScroll: true });
   }, [open]);
 
-  useCardModalOutsideDismiss(open, () => {
-    setOpen(false);
-    setIsDragging(false);
-  }, rootRef, popoverRef);
+  useCardModalOutsideDismiss(open, closePanel, rootRef, target => {
+    if (popoverRef.current?.contains(target)) return true;
+    if (target instanceof Element && target.closest('.bitable-card-attachment-add')) return true;
+    return false;
+  });
 
   function uploadFiles(files: File[]) {
     if (!files.length || !canUpload) return;
     onUpload?.(record.id, field.id, files);
-    setOpen(false);
-    setIsDragging(false);
+    closePanel();
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
@@ -282,67 +320,15 @@ function AttachmentUploadPopover({
     uploadFiles(Array.from(event.dataTransfer.files));
   }
 
-  const panel = (
-    <div
-      ref={popoverRef}
-      tabIndex={-1}
-      className={`bitable-card-attachment-popover-panel${isDragging ? ' is-dragging' : ''}`}
-      onMouseDown={event => event.stopPropagation()}
-      onPaste={event => {
-        const files = Array.from(event.clipboardData.files);
-        if (files.length > 0) {
-          event.preventDefault();
-          uploadFiles(files);
-        }
-      }}
-      onDragEnter={event => {
-        event.preventDefault();
-        setIsDragging(true);
-      }}
-      onDragOver={event => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'copy';
-      }}
-      onDragLeave={event => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false);
-      }}
-      onDrop={handleDrop}
-    >
-      {attachments.length > 0 && (
-        <div className="bitable-card-attachment-list">
-          {attachments.map(attachment => <AttachmentFileItem key={attachment.id} attachment={attachment} />)}
-        </div>
-      )}
-      <div className="bitable-card-attachment-dropzone">
-        <span>粘贴或拖拽至这里上传</span>
-      </div>
-      <Upload
-        theme="custom"
-        multiple
-        autoUpload={false}
-        accept="image/*,video/*,application/pdf,*/*"
-        onSelectChange={files => {
-          uploadFiles(files);
-        }}
-      >
-        <Button
-          type="button"
-          variant="text"
-          className="bitable-card-attachment-local"
-        >
-          + 添加本地文件
-        </Button>
-      </Upload>
-    </div>
-  );
-
   return (
     <div ref={rootRef} className="bitable-card-field-value bitable-card-field-value--attachment bitable-card-field-value--tdesign">
       <div className={`bitable-card-attachment-inline${open ? ' is-active' : ''}${attachments.length ? '' : ' is-empty'}`}>
         <div
           className="bitable-card-attachment-previews"
           onClick={() => {
-            if (!attachments.length && canUpload) setOpen(true);
+            if (!attachments.length && canUpload && addButtonRef.current) {
+              openPanel(addButtonRef.current);
+            }
           }}
         >
           {attachments.length > 0 ? (
@@ -353,35 +339,81 @@ function AttachmentUploadPopover({
             <span className="bitable-card-attachment-empty bitable-card-field-placeholder">暂无附件</span>
           )}
         </div>
-        <Popup
-          visible={open}
-          trigger="click"
-          placement="bottom-left"
-          showArrow={false}
-          destroyOnClose={false}
+        <button
+          ref={addButtonRef}
+          type="button"
+          className="bitable-card-attachment-add"
           disabled={!canUpload}
-          overlayClassName="bitable-card-attachment-popup"
-          overlayInnerStyle={{ padding: 0, background: 'transparent', boxShadow: 'none' }}
-          attach={CARD_MODAL_POPUP_PROPS.attach}
-          zIndex={CARD_MODAL_POPUP_PROPS.zIndex}
-          content={panel}
-          onVisibleChange={visible => {
-            if (!canUpload && visible) return;
-            setOpen(visible);
-            if (!visible) setIsDragging(false);
+          aria-label="添加附件"
+          aria-expanded={open}
+          onMouseDown={event => event.stopPropagation()}
+          onClick={event => {
+            if (!canUpload) return;
+            if (open) {
+              closePanel();
+              return;
+            }
+            openPanel(event.currentTarget);
           }}
         >
-          <button
-            type="button"
-            className="bitable-card-attachment-add"
-            disabled={!canUpload}
-            aria-label="添加附件"
-            onMouseDown={event => event.stopPropagation()}
-          >
-            +
-          </button>
-        </Popup>
+          +
+        </button>
       </div>
+      {open && createPortal(
+        <div
+          ref={popoverRef}
+          tabIndex={-1}
+          className={`bitable-card-attachment-popover-panel bitable-card-attachment-popover-panel--portal${isDragging ? ' is-dragging' : ''}`}
+          style={{ left: panelPosition.left, top: panelPosition.top }}
+          onMouseDown={event => event.stopPropagation()}
+          onPaste={event => {
+            const files = Array.from(event.clipboardData.files);
+            if (files.length > 0) {
+              event.preventDefault();
+              uploadFiles(files);
+            }
+          }}
+          onDragEnter={event => {
+            event.preventDefault();
+            setIsDragging(true);
+          }}
+          onDragOver={event => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }}
+          onDragLeave={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false);
+          }}
+          onDrop={handleDrop}
+        >
+          {attachments.length > 0 && (
+            <div className="bitable-card-attachment-list">
+              {attachments.map(attachment => <AttachmentFileItem key={attachment.id} attachment={attachment} />)}
+            </div>
+          )}
+          <div className="bitable-card-attachment-dropzone">
+            <span>粘贴或拖拽至这里上传</span>
+          </div>
+          <Upload
+            theme="custom"
+            multiple
+            autoUpload={false}
+            accept="image/*,video/*,application/pdf,*/*"
+            onSelectChange={files => {
+              uploadFiles(files);
+            }}
+          >
+            <Button
+              type="button"
+              variant="text"
+              className="bitable-card-attachment-local"
+            >
+              + 添加本地文件
+            </Button>
+          </Upload>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -442,7 +474,7 @@ function DateFieldEditor({
         showArrow={false}
         destroyOnClose={false}
         disabled={disabled}
-        overlayClassName="bitable-card-date-popup"
+        overlayClassName="bitable-card-date-popup bitable-card-date-popup--portal"
         overlayInnerStyle={{ padding: 0 }}
         attach={CARD_MODAL_POPUP_PROPS.attach}
         zIndex={CARD_MODAL_POPUP_PROPS.zIndex}
@@ -585,6 +617,7 @@ function CardFieldEditor({
   disabled,
   onChange,
   onUploadAttachment,
+  modalBoundaryRef,
 }: {
   field: BaseField;
   record: BaseRecord;
@@ -592,6 +625,7 @@ function CardFieldEditor({
   disabled?: boolean;
   onChange: (value: CellValue) => void;
   onUploadAttachment?: (recordId: string, fieldId: string, files: File[]) => void;
+  modalBoundaryRef?: RefObject<HTMLElement | null>;
 }) {
   if (field.type === 'checkbox') {
     return (
@@ -626,6 +660,7 @@ function CardFieldEditor({
         record={record}
         disabled={disabled}
         onUpload={onUploadAttachment}
+        modalBoundaryRef={modalBoundaryRef}
       />
     );
   }
@@ -662,12 +697,14 @@ function CardFieldRow({
   locked,
   onChange,
   onUploadAttachment,
+  modalBoundaryRef,
 }: {
   field: BaseField;
   record: BaseRecord;
   locked?: boolean;
   onChange: (value: CellValue) => void;
   onUploadAttachment?: (recordId: string, fieldId: string, files: File[]) => void;
+  modalBoundaryRef?: RefObject<HTMLElement | null>;
 }) {
   return (
     <div className="base_record_card_field_editor_wrapper">
@@ -686,6 +723,7 @@ function CardFieldRow({
             disabled={locked}
             onChange={onChange}
             onUploadAttachment={onUploadAttachment}
+            modalBoundaryRef={modalBoundaryRef}
           />
         </span>
       </label>
@@ -1132,6 +1170,7 @@ export function BitableRecordCardModal({
                             field={field}
                             record={record}
                             locked={locked}
+                            modalBoundaryRef={contentRef}
                             onChange={value => onChange(record.id, field.id, value)}
                             onUploadAttachment={onUploadAttachment}
                           />
@@ -1156,6 +1195,7 @@ export function BitableRecordCardModal({
                                   field={field}
                                   record={record}
                                   locked={locked}
+                                  modalBoundaryRef={contentRef}
                                   onChange={value => onChange(record.id, field.id, value)}
                                   onUploadAttachment={onUploadAttachment}
                                 />

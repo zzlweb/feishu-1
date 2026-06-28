@@ -77,7 +77,10 @@ router.post('/import-url', async (req: Request, res: Response) => {
       title: imported.title,
       content: imported.content,
       author: String(author || '导入用户'),
-      icon: '📄',
+      icon: imported.coverUrl ? '📘' : '📄',
+      cover_url: imported.coverUrl || '',
+      read_only: 0,
+      import_metadata: imported.importMetadata ? JSON.stringify(imported.importMetadata) : '',
     });
 
     let template = null;
@@ -100,6 +103,9 @@ router.post('/import-url', async (req: Request, res: Response) => {
         source_url: imported.sourceUrl,
         asset_count: imported.assetCount,
         warnings: imported.warnings,
+        import_quality: imported.importQuality,
+        unsupported_blocks: imported.unsupportedBlocks,
+        import_metadata: imported.importMetadata,
       },
     });
   } catch (err: any) {
@@ -121,6 +127,8 @@ router.post('/import', importUpload.single('file'), async (req: Request, res: Re
       content: imported.content,
       author: String(req.body.author || '导入用户'),
       icon: '📄',
+      read_only: 0,
+      import_metadata: imported.importMetadata ? JSON.stringify(imported.importMetadata) : '',
     });
     res.status(201).json({
       code: 0,
@@ -128,6 +136,10 @@ router.post('/import', importUpload.single('file'), async (req: Request, res: Re
         document: doc,
         source_name: imported.sourceName,
         asset_count: imported.assetCount,
+        warnings: imported.warnings,
+        import_quality: imported.importQuality,
+        unsupported_blocks: imported.unsupportedBlocks,
+        import_metadata: imported.importMetadata,
       },
     });
   } catch (err: any) {

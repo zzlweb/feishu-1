@@ -2083,6 +2083,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           setSelectedIds(new Set([recordId]));
         }}
         removeRecords={removeRecords}
+        onConfig={setKanbanConfig}
         addGroup={addGroup}
         renameGroup={renameGroup}
         deleteGroup={deleteGroup}
@@ -2103,7 +2104,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const useHierarchySettingsIcon = activeView.type === 'grid' || activeView.type === 'gantt';
   const gridRowHeight = (activeView.config as GridViewConfig).rowHeight || 'low';
   const useDocFloatToolbar = activeView.type === 'gallery' || activeView.type === 'kanban';
-  const showDocFloatToolbar = isViewToolsVisible || showSettings || Boolean(activeToolbarPanel);
+  const showDocFloatToolbar = useDocFloatToolbar || isViewToolsVisible || showSettings || Boolean(activeToolbarPanel);
   const closeSettingsPanel = useCallback(() => setShowSettings(false), []);
   const closeActiveToolbarPanel = useCallback(() => setActiveToolbarPanel(null), []);
   const floatSettingsHover = useBitablePanelHoverHandlers(closeSettingsPanel, showSettings && useDocFloatToolbar);
@@ -3115,13 +3116,29 @@ function GalleryFieldCustomizePanel({
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const titleFieldId = config.titleFieldId || table.primaryFieldId;
   const attachmentFields = table.fields.filter(field => field.type === 'attachment');
+  const titleFields = table.fields.filter(field => field.type !== 'attachment');
+  const kanbanGroupField = isKanban
+    ? table.fields.find(field => field.id === config.groupByFieldId && field.type === 'single_select') ?? table.fields.find(field => field.type === 'single_select')
+    : undefined;
+  const hiddenGroupChoices = (kanbanGroupField?.options?.choices || []).filter(choice => (config.hiddenGroupIds || []).includes(choice.id));
+  const cardFields = [
+    ...table.fields.filter(field => field.id === titleFieldId),
+    ...config.visibleFieldIds
+      .map(fieldId => table.fields.find(field => field.id === fieldId))
+      .filter((field): field is BaseField => field != null && field.id !== titleFieldId),
+    ...table.fields.filter(field => (
+      field.id !== titleFieldId
+      && !config.visibleFieldIds.includes(field.id)
+      && field.type !== 'attachment'
+    )),
+  ];
   const cardLayoutMode = config.cardLayoutMode || 'regular';
   const hasCover = Boolean(config.coverFieldId);
   const coverField = table.fields.find(field => field.id === config.coverFieldId) ?? null;
   const coverLabel = hasCover ? (coverField?.name || '附件') : '无封面';
   const canDeleteField = table.fields.length > 1;
-  const listHeight = Math.min(240, Math.max(36, table.fields.length * 36));
-  const innerHeight = table.fields.length * 36;
+  const listHeight = Math.min(240, Math.max(36, cardFields.length * 36));
+  const innerHeight = cardFields.length * 36;
 
   const isFieldVisibleOnCard = (fieldId: string) => (
     fieldId === titleFieldId || config.visibleFieldIds.includes(fieldId)
@@ -3133,6 +3150,14 @@ function GalleryFieldCustomizePanel({
     if (visible.has(fieldId)) visible.delete(fieldId);
     else visible.add(fieldId);
     onConfig({ visibleFieldIds: Array.from(visible) });
+  };
+
+  const setTitleField = (fieldId: string) => {
+    if (view.locked || !fieldId) return;
+    onConfig({
+      titleFieldId: fieldId,
+      visibleFieldIds: config.visibleFieldIds.filter(id => id !== fieldId),
+    });
   };
 
   const openFieldMoreMenu = (btn: HTMLElement, fieldId: string) => {
@@ -3186,7 +3211,7 @@ function GalleryFieldCustomizePanel({
   };
 
   const handleFieldDragStart = (event: DragEvent, index: number) => {
-    if (view.locked || table.fields[index]?.id === titleFieldId) return;
+    if (view.locked || cardFields[index]?.id === titleFieldId) return;
     fieldDragFromRef.current = index;
     setDraggingFieldIndex(index);
     setDragOverFieldIndex(null);
@@ -3200,7 +3225,7 @@ function GalleryFieldCustomizePanel({
     if (view.locked || fieldDragFromRef.current == null) return;
     event.dataTransfer.dropEffect = 'move';
     const index = resolveFieldDropIndex(event.clientY);
-    if (index == null || table.fields[index]?.id === titleFieldId) {
+    if (index == null || cardFields[index]?.id === titleFieldId) {
       setDragOverFieldIndex(null);
       return;
     }
@@ -3220,8 +3245,22 @@ function GalleryFieldCustomizePanel({
     setDraggingFieldIndex(null);
     setDragOverFieldIndex(null);
     if (toIndex == null || Number.isNaN(fromIndex) || fromIndex === toIndex) return;
-    if (table.fields[toIndex]?.id === titleFieldId) return;
-    onReorderFields(fromIndex, toIndex);
+    if (cardFields[toIndex]?.id === titleFieldId) return;
+    const movedField = cardFields[fromIndex];
+    if (!movedField || movedField.id === titleFieldId) return;
+    const visibleOrder = cardFields
+      .filter(field => field.id !== titleFieldId && (config.visibleFieldIds.includes(field.id) || field.id === movedField.id))
+      .map(field => field.id);
+    const fromVisibleIndex = visibleOrder.indexOf(movedField.id);
+    const targetField = cardFields[toIndex];
+    const toVisibleIndex = targetField
+      ? Math.max(0, visibleOrder.indexOf(targetField.id))
+      : visibleOrder.length - 1;
+    if (fromVisibleIndex < 0 || toVisibleIndex < 0) return;
+    const nextVisible = [...visibleOrder];
+    const [moved] = nextVisible.splice(fromVisibleIndex, 1);
+    nextVisible.splice(toVisibleIndex, 0, moved);
+    onConfig({ visibleFieldIds: nextVisible });
   };
 
   const handleFieldDragEnd = () => {
@@ -3259,6 +3298,23 @@ function GalleryFieldCustomizePanel({
         )}
         <div className="bitable-common-card-config">
           <div className={`${isKanban ? 'bitable-kanban-card-config' : 'bitable-gallery-card-config'}${view.locked ? ' select-disabled' : ''}`}>
+            <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+              <div className={`${settingPrefix}_setting_item field-setting-item`}>
+                <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>标题字段</span>
+                <div className={`${settingPrefix}__field-setting-children`}>
+                  <select
+                    className="bitable-card-config-select"
+                    value={titleFieldId}
+                    disabled={view.locked}
+                    onChange={event => setTitleField(event.target.value)}
+                  >
+                    {titleFields.map(field => (
+                      <option key={field.id} value={field.id}>{field.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
             <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
               <div className={`${settingPrefix}_setting_item field-setting-item${isKanban ? ' has-divider' : ''}`}>
                 <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>封面内容</span>
@@ -3350,6 +3406,26 @@ function GalleryFieldCustomizePanel({
               </div>
             </div>
             )}
+            {!isKanban && (
+            <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+              <div className={`${settingPrefix}_setting_item field-setting-item`}>
+                <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>卡片比例</span>
+                <div className={`${settingPrefix}__field-setting-children`}>
+                  <select
+                    className="bitable-card-config-select"
+                    value={config.cardAspectRatio}
+                    disabled={view.locked}
+                    onChange={event => onConfig({ cardAspectRatio: event.target.value as GalleryViewConfig['cardAspectRatio'] })}
+                  >
+                    <option value="1:1">1:1</option>
+                    <option value="4:3">4:3</option>
+                    <option value="16:9">16:9</option>
+                    <option value="auto">自动</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            )}
             {!isKanban && <div className="bitable-gallery-divider" />}
             <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
               <div className={`${settingPrefix}_setting_item field-setting-item`}>
@@ -3394,6 +3470,84 @@ function GalleryFieldCustomizePanel({
                 </div>
               </div>
             </div>
+            {isKanban && (
+              <>
+                <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+                  <div className={`${settingPrefix}_setting_item field-setting-item`}>
+                    <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>显示空分组</span>
+                    <div className={`${settingPrefix}__field-setting-children`}>
+                      <button
+                        type="button"
+                        className="bitable-common-hover-press-background icon-background bitable-layout-row bitable-layout-main-cross-center"
+                        aria-label={config.showEmptyGroups === false ? '显示空分组' : '隐藏空分组'}
+                        disabled={view.locked}
+                        onClick={() => onConfig({ showEmptyGroups: config.showEmptyGroups === false })}
+                      >
+                        <span className="universe-icon setting_visible_icon">
+                          {config.showEmptyGroups === false ? <GlyphInvisible size={16} /> : <GlyphVisible size={16} />}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {hiddenGroupChoices.length > 0 && (
+                  <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+                    <div className={`${settingPrefix}_setting_item field-setting-item bitable-card-config-hidden-groups`}>
+                      <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>已隐藏分组</span>
+                      <div className={`${settingPrefix}__field-setting-children bitable-card-config-hidden-groups__list`}>
+                        {hiddenGroupChoices.map(choice => (
+                          <button
+                            type="button"
+                            key={choice.id}
+                            className="bitable-card-config-hidden-groups__item"
+                            disabled={view.locked}
+                            onClick={() => onConfig({ hiddenGroupIds: (config.hiddenGroupIds || []).filter(id => id !== choice.id) })}
+                          >
+                            {choice.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+                  <div className={`${settingPrefix}_setting_item field-setting-item`}>
+                    <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>新建记录按钮</span>
+                    <div className={`${settingPrefix}__field-setting-children`}>
+                      <button
+                        type="button"
+                        className="bitable-common-hover-press-background icon-background bitable-layout-row bitable-layout-main-cross-center"
+                        aria-label={config.showNewRecordButton === false ? '显示新建记录按钮' : '隐藏新建记录按钮'}
+                        disabled={view.locked}
+                        onClick={() => onConfig({ showNewRecordButton: config.showNewRecordButton === false })}
+                      >
+                        <span className="universe-icon setting_visible_icon">
+                          {config.showNewRecordButton === false ? <GlyphInvisible size={16} /> : <GlyphVisible size={16} />}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className={`${settingPrefix}_setting_item_wrapper field-setting-item_wrapper`}>
+                  <div className={`${settingPrefix}_setting_item field-setting-item`}>
+                    <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>新建分组</span>
+                    <div className={`${settingPrefix}__field-setting-children`}>
+                      <button
+                        type="button"
+                        className="bitable-common-hover-press-background icon-background bitable-layout-row bitable-layout-main-cross-center"
+                        aria-label={config.showCreateGroup === false ? '显示新建分组' : '隐藏新建分组'}
+                        disabled={view.locked}
+                        onClick={() => onConfig({ showCreateGroup: config.showCreateGroup === false })}
+                      >
+                        <span className="universe-icon setting_visible_icon">
+                          {config.showCreateGroup === false ? <GlyphInvisible size={16} /> : <GlyphVisible size={16} />}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
         <div className="bitable-field-divider" />
@@ -3405,7 +3559,7 @@ function GalleryFieldCustomizePanel({
           onDrop={handleFieldListDrop}
         >
           <div ref={fieldListRef} style={{ height: innerHeight, width: '100%', position: 'relative' }}>
-            {table.fields.map((field, index) => {
+            {cardFields.map((field, index) => {
               const isPrimary = field.id === titleFieldId;
               const isVisible = isFieldVisibleOnCard(field.id);
               return (

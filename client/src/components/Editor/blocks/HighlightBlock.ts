@@ -10,6 +10,7 @@ type HighlightBlockAttrs = {
   bgColor?: string;
   borderColor?: string;
   textColor?: string;
+  icon?: string;
   blockId?: string;
 };
 
@@ -20,6 +21,26 @@ type CommandContext = {
 const DEFAULT_BG = '#fff0d9';
 const DEFAULT_BORDER = '#ffb057';
 const DEFAULT_TEXT = '#1f2329';
+
+const CALLOUT_ICON_MAP: Record<string, string> = {
+  bulb: '💡',
+  link: '🔗',
+  pushpin: '📌',
+  pin: '📌',
+  page_with_curl: '📄',
+  speech_balloon: '💬',
+  memo: '📝',
+  warning: '⚠️',
+  star: '⭐',
+  gift: '🎁',
+  fire: '🔥',
+  book: '📚',
+};
+
+function normalizeCalloutIcon(icon: string | null | undefined) {
+  if (!icon) return '📍';
+  return CALLOUT_ICON_MAP[icon] || icon;
+}
 
 const TEXT_COLORS = ['#1f2329', '#8f959e', '#d83931', '#de7802', '#dc9b04', '#2ea121', '#245bdb', '#6425d0'];
 const BORDER_COLORS = ['#ffffff', '#dee0e3', '#f98e8b', '#ffba6b', '#fff67a', '#8ee085', '#82a7fc', '#ad82f7'];
@@ -170,7 +191,7 @@ function HighlightBlockView({ editor, node, updateAttributes }: NodeViewProps) {
       ),
     ),
     h('div', { className: 'feishu-highlight-block' },
-      h('span', { className: 'feishu-highlight-icon', contentEditable: false }, '📍'),
+      h('span', { className: 'feishu-highlight-icon', contentEditable: false }, normalizeCalloutIcon(node.attrs.icon)),
       h(NodeViewContent, { className: 'feishu-highlight-content' }),
     ),
   );
@@ -218,6 +239,11 @@ export const HighlightBlock = Node.create<HighlightBlockOptions>({
           'data-text-color': attributes.textColor,
           style: `--highlight-block-text: ${attributes.textColor};`,
         }),
+      },
+      icon: {
+        default: '📍',
+        parseHTML: element => normalizeCalloutIcon(element.getAttribute('data-icon')),
+        renderHTML: attributes => ({ 'data-icon': normalizeCalloutIcon(attributes.icon) }),
       },
       blockId: {
         default: null,

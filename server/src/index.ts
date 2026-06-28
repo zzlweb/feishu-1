@@ -1,3 +1,8 @@
+import path from 'path';
+import { config as loadEnv } from 'dotenv';
+
+loadEnv({ path: path.resolve(__dirname, '..', '.env') });
+
 import appModule from './app';
 
 const app = (appModule as any).default ?? appModule;

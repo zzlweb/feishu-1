@@ -34,7 +34,7 @@
     flex-shrink: 0;
     position: sticky;
     top: 0;
-    z-index: 100;
+    z-index: var(--z-sticky-header, 100);
 
     .home-header-title {
       font-size: 16px;
@@ -609,7 +609,7 @@
 // ---- Row context menu ----
 .row-context-menu {
   position: fixed;
-  z-index: 500;
+  z-index: var(--z-doc-floating, 1000);
   background: @bg-white;
   border: 1px solid @border-light;
   border-radius: @radius-md;
@@ -669,7 +669,7 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-doc-floating, 1000);
   background: rgba(0, 0, 0, 0.3);
   display: flex;
   align-items: center;
@@ -752,6 +752,154 @@
     input {
       margin: 0;
     }
+  }
+}
+
+.feishu-import-result {
+  padding: 12px;
+  border: 1px solid #dce3f5;
+  border-radius: 8px;
+  background: #f7faff;
+
+  &--full {
+    border-color: #b7eb8f;
+    background: #f6ffed;
+  }
+
+  &--partial {
+    border-color: #b8d4ff;
+    background: #f7faff;
+  }
+
+  &--fallback {
+    border-color: #ffd591;
+    background: #fff8ec;
+  }
+}
+
+.feishu-import-result__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  strong {
+    min-width: 0;
+    overflow: hidden;
+    color: @text-primary;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.feishu-import-result__badge {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: @primary;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.feishu-import-result__meta {
+  margin-top: 6px;
+  color: @text-secondary;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.feishu-import-result__metadata {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(31, 35, 41, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.feishu-import-result__metadata-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: @text-secondary;
+  font-size: 12px;
+  line-height: 20px;
+
+  strong {
+    color: @text-primary;
+    font-weight: 500;
+  }
+}
+
+.feishu-import-result__metadata-notes {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: @text-secondary;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.feishu-import-result__list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #8a5a00;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.feishu-import-result__ok {
+  margin: 10px 0 0;
+  color: #2f7a2f;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.feishu-import-result__unsupported {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(31, 35, 41, 0.08);
+
+  > strong {
+    display: block;
+    margin-bottom: 6px;
+    color: @text-primary;
+    font-size: 12px;
+  }
+}
+
+.feishu-import-result__unsupported-item {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  color: @text-secondary;
+  font-size: 12px;
+  line-height: 18px;
+
+  span {
+    flex-shrink: 0;
+    min-width: 72px;
+    color: #d46b08;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+
+  em {
+    font-style: normal;
+  }
+}
+
+.feishu-import-result__reset {
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: @primary;
+  cursor: pointer;
+  font-size: 12px;
+
+  &:hover {
+    color: @primary-hover;
   }
 }
 

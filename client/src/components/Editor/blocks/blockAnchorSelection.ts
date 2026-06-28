@@ -2,6 +2,7 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/react';
 import { syncImageNodeSelection } from '../media/imageBlockUtils';
 import { getTableElementFromHost, resolveTableHostFromElement } from '../tables/tableDom';
+import { resolveDraggableBlockPos } from './feishuBlockDrag';
 
 function trySetTextCaret(editor: Editor, el: HTMLElement, offset: number): boolean {
   try {
@@ -130,10 +131,9 @@ export function syncEditorSelectionToAnchoredBlock(editor: Editor, blockEl: HTML
     : (blockEl.closest('.feishu-bitable-block') as HTMLElement | null);
   if (bitableEl?.isConnected && view.dom.contains(bitableEl)) {
     try {
-      const pos = view.posAtDOM(bitableEl, 0);
-      const node = editor.state.doc.nodeAt(pos);
-      if (node?.type.name === 'localBitableBlock' && NodeSelection.isSelectable(node)) {
-        editor.chain().focus().setNodeSelection(pos).run();
+      const block = resolveDraggableBlockPos(editor, bitableEl);
+      if (block?.node.type.name === 'localBitableBlock' && NodeSelection.isSelectable(block.node)) {
+        editor.chain().focus().setNodeSelection(block.pos).run();
         return;
       }
     } catch {
