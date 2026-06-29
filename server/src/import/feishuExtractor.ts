@@ -54,7 +54,12 @@ interface FeishuBlock {
   grid_column?: { width_ratio?: number | string };
   iframe?: { component?: { type?: number | string; url?: string } };
   image?: { token?: string; url?: string };
-  table?: { cells?: string[][]; row_size?: number; column_size?: number };
+  table?: {
+    cells?: string[][] | string[];
+    row_size?: number;
+    column_size?: number;
+    property?: { row_size?: number; column_size?: number };
+  };
   table_cell?: { row_span?: number; col_span?: number; background_color?: number | string };
   equation?: { elements?: FeishuTextElement[]; content?: string };
   quote_container?: Record<string, never>;
@@ -878,19 +883,25 @@ async function convertFeishuBlock(
     };
   }
 
-  if (block.table?.cells?.length) {
+  if (block.table?.cells?.length && Array.isArray(block.table.cells[0])) {
     return {
       type: 'table',
-      rows: block.table.cells.map((row, rowIndex) => row.map(content => ({
+      rows: (block.table.cells as string[][]).map((row, rowIndex) => row.map(content => ({
         content: String(content || ''),
         header: rowIndex === 0,
       }))),
     };
   }
 
-  if (block.table?.row_size && block.children?.length) {
-    const columnSize = Math.max(1, Number(block.table.column_size) || block.children.length);
-    const cellBlocks = block.children
+  if ((block.table?.row_size || block.table?.property?.row_size) && block.children?.length) {
+    const columnSize = Math.max(
+      1,
+      Number(block.table.column_size || block.table.property?.column_size) || block.children.length,
+    );
+    const orderedCellIds = (Array.isArray(block.table.cells) && typeof block.table.cells[0] === 'string'
+      ? block.table.cells as string[]
+      : block.children);
+    const cellBlocks = orderedCellIds
       .map(childId => blockMap.get(childId))
       .filter((child): child is FeishuBlock => Boolean(child?.table_cell));
     const cellTexts = await Promise.all(cellBlocks.map(async cell => {
@@ -939,11 +950,40 @@ async function convertChildBlocks(
     const child = blockMap.get(childId);
     if (!child) continue;
     visiting.add(childId);
-    const converted = await convertFeishuBlock(child, blockMap, visiting, client, warnings, assets, assetHeaders, apiBaseUrl);
+    const converted = await safeConvertFeishuBlock(child, blockMap, visiting, client, warnings, assets, assetHeaders, apiBaseUrl);
     visiting.delete(childId);
     if (converted) blocks.push(converted);
   }
   return blocks;
+}
+
+async function safeConvertFeishuBlock(
+  block: FeishuBlock,
+  blockMap: Map<string, FeishuBlock>,
+  visiting: Set<string>,
+  client: FeishuApiClient,
+  warnings: ImportWarning[],
+  assets: ImportedAsset[],
+  assetHeaders: Record<string, string>,
+  apiBaseUrl: string,
+): Promise<ImportedBlock | null> {
+  try {
+    return await convertFeishuBlock(block, blockMap, visiting, client, warnings, assets, assetHeaders, apiBaseUrl);
+  } catch (error) {
+    const type = blockTypeName(block);
+    const title = blockTypeLabel(block);
+    warnings.push({
+      type: 'partial-data',
+      blockType: type,
+      message: `${title} 转换失败，已保留为本地占位卡片：${error instanceof Error ? error.message : '未知错误'}`,
+    });
+    return {
+      type: 'embed',
+      title,
+      kind: `feishu-block-${type}`,
+      desc: block.block_id || `block_type ${type}`,
+    };
+  }
 }
 
 async function fetchAllDocumentBlocks(client: FeishuApiClient, documentToken: string): Promise<FeishuBlock[]> {
@@ -1190,7 +1230,7 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
       .flatMap(block => (isPageBlock(block) && block.children?.length
         ? block.children.map(childId => blockMap.get(childId)).filter((child): child is FeishuBlock => Boolean(child))
         : [block]));
-    const importedBlocks = (await Promise.all(rootBlocks.map(block => convertFeishuBlock(
+    const importedBlocks = (await Promise.all(rootBlocks.map(block => safeConvertFeishuBlock(
       block,
       blockMap,
       new Set(block.block_id ? [block.block_id] : []),

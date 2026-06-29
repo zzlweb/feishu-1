@@ -79,7 +79,7 @@ export function readColumnRatios(columnsNode: ProseMirrorNode): number[] {
 
 export function buildGridTemplate(columnsNode: ProseMirrorNode): string {
   return readColumnRatios(columnsNode)
-    .map(ratio => `minmax(0, ${ratio.toFixed(4)}fr)`)
+    .map(ratio => `minmax(${ratio <= 12 ? '76px' : '0'}, ${ratio.toFixed(4)}fr)`)
     .join(' ');
 }
 

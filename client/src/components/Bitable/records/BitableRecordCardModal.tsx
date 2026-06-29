@@ -12,6 +12,7 @@ import {
   formatHistoryTime,
   formatCardDateValue,
   getAttachments,
+  normalizeColorValue,
   textColorForBackground,
   valueText,
   type AttachmentValue,
@@ -419,7 +420,7 @@ function AttachmentUploadPopover({
 }
 
 function SelectTag({ choice, label }: { choice: SelectChoice | null; label: string }) {
-  const background = choice?.color || '#e8f0ff';
+  const background = normalizeColorValue(choice?.color);
   const color = textColorForBackground(background);
   return (
     <span className="bitable-card-select-tag" style={{ backgroundColor: background, color }}>

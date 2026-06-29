@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
-import { valueText, buildRecordTreeMeta, buildGridDisplayRows, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, resolveRecordInsertIndex, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridDisplayRow, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from '../model/bitableModel';
+import { valueText, buildRecordTreeMeta, buildGridDisplayRows, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, resolveRecordInsertIndex, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, normalizeColorValue, textColorForBackground as readableTextColorForBackground, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridDisplayRow, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from '../model/bitableModel';
 import { createPortal } from 'react-dom';
 import type { Ref } from 'react';
 import { BITABLE_BLOCK_EXPAND_ALL } from '../BitableContextMenu';
@@ -465,7 +465,7 @@ function GridSelectCellTags({
   return (
     <>
       {visible.map(choice => {
-        const background = choice.color || '#e8f0ff';
+        const background = normalizeColorValue(choice.color);
         const color = textColorForBackground(background);
         return (
           <span
@@ -616,13 +616,8 @@ function isTreeToggleHit(
     && point.y <= toggleTop + TREE_TOGGLE_SIZE;
 }
 
-function textColorForBackground(background: string) {
-  const hex = background.replace('#', '');
-  if (hex.length !== 6) return '#1f2329';
-  const r = parseInt(hex.slice(0, 2), 16);
-  const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(4, 6), 16);
-  return (r * 299 + g * 587 + b * 114) / 1000 > 170 ? '#1f2329' : '#fff';
+function textColorForBackground(background: unknown) {
+  return readableTextColorForBackground(background);
 }
 
 function isSelectField(field: BaseField) {
@@ -3057,7 +3052,15 @@ export function BitableGridView({
                         className={`base-grid-select-editor__item${selected ? ' is-selected' : ''}`}
                         onClick={() => applySelectChoice(choice)}
                       >
-                        <span className="base-grid-select-editor__tag" style={{ backgroundColor: choice.color, color: textColorForBackground(choice.color) }}>{choice.name}</span>
+                        <span
+                          className="base-grid-select-editor__tag"
+                          style={{
+                            backgroundColor: normalizeColorValue(choice.color),
+                            color: textColorForBackground(choice.color),
+                          }}
+                        >
+                          {choice.name}
+                        </span>
                         {selected && <span className="base-grid-select-editor__check" aria-hidden>✓</span>}
                       </button>
                     );

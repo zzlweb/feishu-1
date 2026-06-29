@@ -381,8 +381,46 @@ export function formatCardDateValue(value: CellValue) {
   return `${year}/${month}/${day}`;
 }
 
-export function textColorForBackground(hex: string) {
-  const normalized = hex.replace('#', '');
+const SELECT_CHOICE_FALLBACK_COLORS = [
+  '#dee8ff',
+  '#f8e6c2',
+  '#c7effb',
+  '#fddbd5',
+  '#d9f5e3',
+  '#ede2fe',
+  '#fff3cd',
+  '#e8eaed',
+  '#ffcfc9',
+  '#b7eb8f',
+];
+
+export function normalizeColorValue(value: unknown, fallback = '#e8f0ff'): string {
+  if (typeof value === 'string') {
+    const color = value.trim();
+    if (!color) return fallback;
+    if (/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(color)) return color;
+    if (/^[0-9a-fA-F]{6}$/.test(color)) return `#${color}`;
+    if (/^(rgb|rgba|hsl|hsla)\(/i.test(color) || /^var\(/i.test(color)) return color;
+    if (/^[a-zA-Z]+$/.test(color)) return color;
+    return fallback;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return SELECT_CHOICE_FALLBACK_COLORS[Math.abs(Math.trunc(value)) % SELECT_CHOICE_FALLBACK_COLORS.length];
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    for (const key of ['color', 'backgroundColor', 'background_color', 'bgColor', 'hex', 'value']) {
+      const normalized = normalizeColorValue(record[key], '');
+      if (normalized) return normalized;
+    }
+  }
+  return fallback;
+}
+
+export function textColorForBackground(background: unknown) {
+  const color = normalizeColorValue(background);
+  if (!color.startsWith('#')) return '#1f2329';
+  const normalized = color.replace('#', '');
   if (normalized.length !== 6) return '#1f2329';
   const r = parseInt(normalized.slice(0, 2), 16);
   const g = parseInt(normalized.slice(2, 4), 16);

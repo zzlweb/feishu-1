@@ -354,6 +354,10 @@
           word-break: break-word;
         }
 
+        p > br:first-child + br.ProseMirror-trailingBreak {
+          display: none;
+        }
+
         // 正文/标题块缩进（选区工具栏「增加缩进」，与列表嵌套独立）
         .loop-block-indent(@i) when (@i > 0) {
           .loop-block-indent(@i - 1);
@@ -879,6 +883,47 @@
             margin: 0;
             line-height: 26px;
           }
+        }
+
+        .feishu-highlight-block-wrap[data-highlight-icon="💎"],
+        .feishu-highlight-block-wrap[data-highlight-icon="🌱"],
+        .feishu-highlight-block-wrap[data-highlight-icon="🌟"] {
+          .feishu-highlight-block {
+            min-height: 64px;
+            align-items: center;
+            padding: 14px 16px;
+            border-color: transparent;
+            border-radius: 8px;
+          }
+
+          .feishu-highlight-icon {
+            margin-top: 0;
+            margin-right: 8px;
+            font-size: 22px;
+            line-height: 28px;
+          }
+
+          .feishu-highlight-content h2 {
+            margin: 0;
+            font-size: 24px;
+            line-height: 30px;
+            font-weight: 700;
+          }
+        }
+
+        .feishu-highlight-block-wrap[data-highlight-icon="💎"] .feishu-highlight-block {
+          background: #eef3ff;
+          color: #1f5eff;
+        }
+
+        .feishu-highlight-block-wrap[data-highlight-icon="🌱"] .feishu-highlight-block {
+          background: #edf8ee;
+          color: #22a722;
+        }
+
+        .feishu-highlight-block-wrap[data-highlight-icon="🌟"] .feishu-highlight-block {
+          background: #fff4e8;
+          color: #d99000;
         }
 
         .feishu-highlight-comment {
@@ -1440,6 +1485,118 @@
           font-size: 13px;
           text-decoration: none;
           flex-shrink: 0;
+        }
+
+        .feishu-local-card--feishu-block-35 {
+          min-height: 34px;
+          padding: 6px 0;
+          border: none;
+          background: transparent;
+          box-shadow: none;
+
+          &:hover {
+            border-color: transparent;
+            background: transparent;
+          }
+
+          .feishu-local-card__icon {
+            width: 16px;
+            height: 16px;
+            margin-top: 2px;
+            border: 1px solid #1f2329;
+            border-radius: 3px;
+            background: #fff;
+            color: transparent;
+          }
+
+          .feishu-local-card__title {
+            font-size: 15px;
+            line-height: 22px;
+            font-weight: 400;
+            color: #1f2329;
+          }
+
+          .feishu-local-card__desc {
+            display: none;
+          }
+        }
+
+        .feishu-task-block {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-height: 32px;
+          margin: 2px 0;
+          padding: 2px 0;
+          color: #1f2329;
+          font-size: 15px;
+          line-height: 24px;
+          cursor: default;
+
+          &.is-selected {
+            border-radius: 4px;
+            background: #e8f3ff;
+            box-shadow: 0 0 0 1px rgba(51, 112, 255, 0.18);
+          }
+
+          .feishu-task-block__checkbox {
+            width: 16px;
+            height: 16px;
+            box-sizing: border-box;
+            padding: 0;
+            border: 1.4px solid #1f2329;
+            border-radius: 3px;
+            background: #fff;
+            appearance: none;
+            cursor: pointer;
+            flex: 0 0 auto;
+          }
+
+          &.is-checked .feishu-task-block__checkbox {
+            border-color: #3370ff;
+            background: #3370ff;
+            box-shadow: inset 0 0 0 3px #fff;
+          }
+
+          .feishu-task-block__title {
+            min-width: 0;
+            color: #1f2329;
+            white-space: nowrap;
+            outline: none;
+          }
+
+          &.is-checked .feishu-task-block__title {
+            color: #8f959e;
+            text-decoration: line-through;
+          }
+
+          .feishu-task-block__assignee {
+            display: inline-flex;
+            align-items: center;
+            height: 22px;
+            padding: 0 6px;
+            border-radius: 6px;
+            background: #eff4ff;
+            color: #445067;
+            font-size: 14px;
+            line-height: 22px;
+            white-space: nowrap;
+          }
+
+          .feishu-task-block__due {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: #646a73;
+            white-space: nowrap;
+          }
+
+          .feishu-task-block__calendar,
+          .feishu-task-block__reminder {
+            color: #646a73;
+            font-size: 14px;
+            line-height: 1;
+          }
         }
 
         .feishu-local-card__title-input,

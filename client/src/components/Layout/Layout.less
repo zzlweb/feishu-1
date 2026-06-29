@@ -17,7 +17,6 @@
 @editor-page-width: 860px;
 /** 左侧目录轨宽（固定占位，展开/收起目录不改变正文列位置） */
 @catalogue-rail-width: 232px;
-@catalogue-collapsed-rail-width: 64px;
 @font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
   "Microsoft YaHei", sans-serif;
 
@@ -549,19 +548,10 @@
     min-height: 100%;
   }
 
-  .doc-page-catalogue-rail--collapsed {
-    width: @catalogue-collapsed-rail-width;
-    min-width: @catalogue-collapsed-rail-width;
-  }
-
   .doc-page-main {
     .editor-container {
       /* 目录轨占据了正文左侧空间，这里按整个页面中心线校正文档版心。 */
       margin-left: max(calc((100% - @editor-page-width - @catalogue-rail-width) / 2), 24px);
-    }
-
-    &:has(.doc-page-catalogue-rail--collapsed) .editor-container {
-      margin-left: max(calc((100% - @editor-page-width - @catalogue-collapsed-rail-width) / 2), 24px);
     }
   }
 
@@ -1316,8 +1306,9 @@
   &.catalogue-aside--collapsed {
     .catalogue-inner {
       width: 100%;
-      padding: 28px 0 16px;
-      align-items: center;
+      // 与展开态保持相同内边距与左对齐，避免收起时按钮位置跳动
+      padding: 12px 10px 16px 16px;
+      padding-top: 54px;
     }
   }
 
@@ -1355,7 +1346,6 @@
   }
 
   &.catalogue-aside--collapsed .catalogue-collapse-btn {
-    margin-bottom: 0;
     color: #646a73;
   }
 

@@ -32,6 +32,9 @@ const CALLOUT_ICON_MAP: Record<string, string> = {
   memo: '📝',
   warning: '⚠️',
   star: '⭐',
+  star2: '🌟',
+  gem: '💎',
+  seedling: '🌱',
   gift: '🎁',
   fire: '🔥',
   book: '📚',
@@ -154,6 +157,7 @@ function HighlightBlockView({ editor, node, updateAttributes }: NodeViewProps) {
       ref: wrapperRef,
       'data-type': 'highlight-block',
       'data-block-id': blockId,
+      'data-highlight-icon': normalizeCalloutIcon(node.attrs.icon),
       className: 'feishu-highlight-block-wrap',
       onMouseLeave: () => { if (showColors) setShowColors(false); },
       style: {

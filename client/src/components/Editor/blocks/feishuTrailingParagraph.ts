@@ -17,9 +17,10 @@ export function findEmptyParagraphNearPoint(
     const text = (paragraph.textContent ?? '').replace(/\u200b/g, '').trim();
     if (text) continue;
     const rect = paragraph.getBoundingClientRect();
-    const expandedTop = rect.top - 18;
-    const expandedBottom = rect.bottom + 120;
-    if (clientY < expandedTop || clientY > expandedBottom) continue;
+    // 空段落只响应自身可见行高内的点击。任何“附近吸附”都会抢走普通文本行的点击，
+    // 让 ProseMirror 选择落到后面的空段落，表现为光标整体错位。
+    if (clientY < rect.top || clientY > rect.bottom) continue;
+    if (clientX < rect.left || clientX > rect.right) continue;
     const center = rect.top + rect.height / 2;
     const distance = Math.abs(clientY - center);
     if (!best || distance < best.distance) best = { paragraph, distance };
@@ -40,10 +41,13 @@ function findLastContentBlockElement(tiptap: HTMLElement): HTMLElement | null {
   return children.length > 0 ? children[children.length - 1] : null;
 }
 
-function focusParagraphDom(editor: Editor, paragraph: HTMLElement): void {
+function focusParagraphDom(editor: Editor, paragraph: HTMLElement, clientX?: number, clientY?: number): void {
   try {
-    const pos = editor.view.posAtDOM(paragraph, 0);
-    const textPos = Math.max(1, Math.min(pos + 1, editor.state.doc.content.size - 1));
+    const posAtPoint = clientX != null && clientY != null
+      ? editor.view.posAtCoords({ left: clientX, top: clientY })?.pos
+      : null;
+    const pos = posAtPoint ?? editor.view.posAtDOM(paragraph, 0) + 1;
+    const textPos = Math.max(1, Math.min(pos, editor.state.doc.content.size - 1));
     editor.view.dispatch(
       editor.state.tr.setSelection(TextSelection.create(editor.state.doc, textPos)).scrollIntoView(),
     );
@@ -107,7 +111,7 @@ export function handleEditorBlankAreaClick(editor: Editor, clientX: number, clie
 
   const emptyParagraphAtPoint = findEmptyParagraphNearPoint(tiptap, clientX, clientY);
   if (emptyParagraphAtPoint) {
-    focusParagraphDom(editor, emptyParagraphAtPoint);
+    focusParagraphDom(editor, emptyParagraphAtPoint, clientX, clientY);
     return true;
   }
 
@@ -147,7 +151,7 @@ export function handleEditorBlankAreaDoubleClick(editor: Editor, clientX: number
 
   const emptyParagraphAtPoint = findEmptyParagraphNearPoint(tiptap, clientX, clientY);
   if (emptyParagraphAtPoint) {
-    focusParagraphDom(editor, emptyParagraphAtPoint);
+    focusParagraphDom(editor, emptyParagraphAtPoint, clientX, clientY);
     return true;
   }
 

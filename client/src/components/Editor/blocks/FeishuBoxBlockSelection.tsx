@@ -13,7 +13,6 @@ import {
   collectSelectableUnits,
   findSelectableUnitAtPoint,
   findUnitsInClientRect,
-  isBlankEditorPoint,
   isListItemEmpty,
   isListItemTextArea,
   isListSelectableUnit,
@@ -31,6 +30,17 @@ import './FeishuBoxBlockSelection.less';
 const MIN_DRAG_PX = 3;
 const AUTO_SCROLL_EDGE_PX = 40;
 const AUTO_SCROLL_MAX_PX = 18;
+
+function isStrictBlankClickPoint(clientX: number, clientY: number, tiptap: HTMLElement): boolean {
+  const hit = document.elementFromPoint(clientX, clientY);
+  const element = hit instanceof Element ? hit : null;
+  if (!element || !tiptap.contains(element)) return false;
+  if (element === tiptap || element.classList.contains('ProseMirror') || element.classList.contains('tiptap')) {
+    return true;
+  }
+  return element instanceof HTMLParagraphElement
+    && (element.textContent ?? '').replace(/\u200b/g, '').trim() === '';
+}
 
 interface DragState {
   startX: number;
@@ -314,7 +324,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, editorCo
         if (
           ed
           && tiptap instanceof HTMLElement
-          && isBlankEditorPoint(pending.startX, pending.startY, tiptap)
+          && isStrictBlankClickPoint(pending.startX, pending.startY, tiptap)
         ) {
           handleEditorBlankAreaClick(ed, pending.startX, pending.startY);
         }

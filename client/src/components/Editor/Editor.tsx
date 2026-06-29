@@ -14,6 +14,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Image from '@tiptap/extension-image';
 import HorizontalRule from '@tiptap/extension-horizontal-rule';
 import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { Fragment as ProseMirrorFragment } from '@tiptap/pm/model';
 import { common, createLowlight } from 'lowlight';
 import 'katex/dist/katex.min.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
@@ -1762,6 +1763,110 @@ const EMBED_KIND_META: Record<string, { icon: string; title: string; desc: strin
   embed: { icon: '+', title: '内容块', desc: '' },
 };
 
+function taskBlockTitleFromElement(element: Element) {
+  const rawTitle = element.getAttribute('data-title') || element.querySelector('.feishu-task-block__title')?.textContent || '';
+  const rawDesc = element.getAttribute('data-desc') || '';
+  if (rawTitle && rawTitle !== '飞书任务' && rawTitle !== '内容块') return rawTitle;
+  if (rawDesc && rawDesc !== 'block_type 35') return rawDesc;
+  return '描述';
+}
+
+function LocalFeishuTaskBlockView({ node, selected, updateAttributes }: NodeViewProps) {
+  const checked = Boolean(node.attrs.checked);
+  const assignee = String(node.attrs.assignee || '');
+  const dueAt = String(node.attrs.dueAt || '');
+  const hasReminder = Boolean(node.attrs.reminder);
+
+  return (
+    <NodeViewWrapper
+      as="div"
+      className={`feishu-task-block${checked ? ' is-checked' : ''}${selected ? ' is-selected' : ''}`}
+      data-local-block="feishu-task"
+      data-kind="feishu-block-35"
+      {...blockDomAttrs(node.attrs)}
+    >
+      <button
+        type="button"
+        className="feishu-task-block__checkbox"
+        aria-label={checked ? '标记为未完成' : '标记为完成'}
+        contentEditable={false}
+        onMouseDown={event => event.preventDefault()}
+        onClick={() => updateAttributes({ checked: !checked })}
+      />
+      <NodeViewContent as="span" className="feishu-task-block__title" />
+      {assignee && <span className="feishu-task-block__assignee" contentEditable={false}>{assignee}</span>}
+      {dueAt && (
+        <span className="feishu-task-block__due" contentEditable={false}>
+          <span className="feishu-task-block__calendar" aria-hidden>▣</span>
+          {dueAt}
+        </span>
+      )}
+      {hasReminder && <span className="feishu-task-block__reminder" aria-label="提醒" contentEditable={false}>♧</span>}
+    </NodeViewWrapper>
+  );
+}
+
+const LocalFeishuTaskBlock = TiptapNode.create({
+  name: 'localFeishuTaskBlock',
+  group: 'block',
+  content: 'inline*',
+  defining: true,
+  priority: 1000,
+  addAttributes() {
+    return {
+      checked: {
+        default: false,
+        parseHTML: element => element.getAttribute('data-checked') === 'true',
+        renderHTML: attributes => ({ 'data-checked': attributes.checked ? 'true' : 'false' }),
+      },
+      assignee: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-assignee') || '',
+        renderHTML: attributes => attributes.assignee ? { 'data-assignee': attributes.assignee } : {},
+      },
+      dueAt: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-due-at') || '',
+        renderHTML: attributes => attributes.dueAt ? { 'data-due-at': attributes.dueAt } : {},
+      },
+      reminder: {
+        default: false,
+        parseHTML: element => element.getAttribute('data-reminder') === 'true',
+        renderHTML: attributes => attributes.reminder ? { 'data-reminder': 'true' } : {},
+      },
+      blockId: {
+        default: null,
+        parseHTML: element => element.getAttribute('id') || element.getAttribute('data-block-id'),
+        renderHTML: attributes => blockDomAttrs(attributes),
+      },
+    };
+  },
+  parseHTML() {
+    return [{
+      tag: 'div[data-kind="feishu-block-35"]',
+      getContent: (element, schema) => ProseMirrorFragment.from(schema.text(taskBlockTitleFromElement(element as Element))),
+    }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return [
+      'div',
+      {
+        ...HTMLAttributes,
+        'data-local-block': 'feishu-task',
+        'data-kind': 'feishu-block-35',
+        class: 'feishu-task-block',
+      },
+      ['span', { class: 'feishu-task-block__checkbox' }],
+      ['span', { class: 'feishu-task-block__title' }, 0],
+      HTMLAttributes.assignee ? ['span', { class: 'feishu-task-block__assignee' }, HTMLAttributes.assignee] : '',
+      HTMLAttributes.dueAt ? ['span', { class: 'feishu-task-block__due' }, HTMLAttributes.dueAt] : '',
+    ];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(LocalFeishuTaskBlockView);
+  },
+});
+
 function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const kind = String(node.attrs.kind || 'embed');
   const meta = EMBED_KIND_META[kind] || EMBED_KIND_META.embed;
@@ -1778,6 +1883,35 @@ function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos 
       editor.chain().focus().setNodeSelection(pos).run();
     }
   };
+
+  if (kind === 'feishu-block-35') {
+    const taskTitle = title && title !== '飞书任务' ? title : (desc && desc !== 'block_type 35' ? desc : '描述');
+    const assignee = String(node.attrs.assignee || '');
+    const dueAt = String(node.attrs.dueAt || '');
+    const hasReminder = Boolean(node.attrs.reminder);
+
+    return (
+      <NodeViewWrapper
+        className={`feishu-task-block${selected ? ' is-selected' : ''}`}
+        data-local-block="embed"
+        data-kind="feishu-block-35"
+        {...blockDomAttrs(node.attrs)}
+        contentEditable={false}
+        onMouseDown={selectThisBlock}
+      >
+        <span className="feishu-task-block__checkbox" aria-hidden />
+        <span className="feishu-task-block__title">{taskTitle}</span>
+        {assignee && <span className="feishu-task-block__assignee">{assignee}</span>}
+        {dueAt && (
+          <span className="feishu-task-block__due">
+            <span className="feishu-task-block__calendar" aria-hidden>▣</span>
+            {dueAt}
+          </span>
+        )}
+        {hasReminder && <span className="feishu-task-block__reminder" aria-label="提醒">♧</span>}
+      </NodeViewWrapper>
+    );
+  }
 
   return (
     <NodeViewWrapper
@@ -1836,7 +1970,11 @@ const LocalEmbedBlock = TiptapNode.create({
     return {
       title: {
         default: '内容块',
-        parseHTML: element => element.getAttribute('data-title') || element.querySelector('.feishu-local-card__title')?.textContent || '内容块',
+        parseHTML: element =>
+          element.getAttribute('data-title')
+          || element.querySelector('.feishu-task-block__title')?.textContent
+          || element.querySelector('.feishu-local-card__title')?.textContent
+          || '内容块',
         renderHTML: attributes => ({ 'data-title': attributes.title }),
       },
       desc: {
@@ -1854,12 +1992,45 @@ const LocalEmbedBlock = TiptapNode.create({
         parseHTML: element => element.getAttribute('href') || element.getAttribute('data-href') || '',
         renderHTML: attributes => ({ 'data-href': attributes.href }),
       },
+      assignee: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-assignee') || '',
+        renderHTML: attributes => attributes.assignee ? { 'data-assignee': attributes.assignee } : {},
+      },
+      dueAt: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-due-at') || '',
+        renderHTML: attributes => attributes.dueAt ? { 'data-due-at': attributes.dueAt } : {},
+      },
+      reminder: {
+        default: false,
+        parseHTML: element => element.getAttribute('data-reminder') === 'true',
+        renderHTML: attributes => attributes.reminder ? { 'data-reminder': 'true' } : {},
+      },
     };
   },
   parseHTML() {
     return [{ tag: 'div[data-local-block="embed"]' }, { tag: 'a[data-local-block="embed"]' }];
   },
   renderHTML({ HTMLAttributes }) {
+    if (HTMLAttributes.kind === 'feishu-block-35') {
+      const title = HTMLAttributes.title && HTMLAttributes.title !== '飞书任务'
+        ? HTMLAttributes.title
+        : (HTMLAttributes.desc && HTMLAttributes.desc !== 'block_type 35' ? HTMLAttributes.desc : '描述');
+      return [
+        'div',
+        {
+          ...HTMLAttributes,
+          'data-local-block': 'embed',
+          'data-kind': 'feishu-block-35',
+          class: 'feishu-task-block',
+        },
+        ['span', { class: 'feishu-task-block__checkbox' }],
+        ['span', { class: 'feishu-task-block__title' }, title],
+        HTMLAttributes.assignee ? ['span', { class: 'feishu-task-block__assignee' }, HTMLAttributes.assignee] : '',
+        HTMLAttributes.dueAt ? ['span', { class: 'feishu-task-block__due' }, HTMLAttributes.dueAt] : '',
+      ];
+    }
     const content = [['div', { class: 'feishu-local-card__icon' }, '＋'], ['div', { class: 'feishu-local-card__body' }, ['div', { class: 'feishu-local-card__title' }, HTMLAttributes.title || '内容块'], ['div', { class: 'feishu-local-card__desc' }, HTMLAttributes.desc || '']]];
     if (HTMLAttributes.href) {
       return ['a', { ...HTMLAttributes, href: HTMLAttributes.href, 'data-local-block': 'embed', class: `feishu-local-card feishu-local-card--link feishu-local-card--${HTMLAttributes.kind || 'embed'}` }, ...content];
@@ -1947,6 +2118,7 @@ const editorExtensions = [
   LocalBitableBlock,
   DashboardChartBlock,
   LocalDocNavBlock,
+  LocalFeishuTaskBlock,
   LocalEmbedBlock,
   Placeholder.configure({
     includeChildren: false,
@@ -2489,6 +2661,10 @@ export default function Editor({
     if (embedBlock && editorAreaRef.current.contains(embedBlock)) {
       return { element: embedBlock, type: 'embed', isEmpty: false };
     }
+    const feishuTaskBlock = target.closest('.feishu-task-block') as HTMLElement | null;
+    if (feishuTaskBlock && editorAreaRef.current.contains(feishuTaskBlock)) {
+      return { element: feishuTaskBlock, type: 'task', isEmpty: !feishuTaskBlock.textContent?.trim() };
+    }
     const fileBlock = target.closest('.feishu-file-block') as HTMLElement | null;
     if (fileBlock && editorAreaRef.current.contains(fileBlock)) {
       return { element: fileBlock, type: 'file', isEmpty: false };
@@ -2539,6 +2715,7 @@ export default function Editor({
       return bitableToolTypeFromView(attrs.view);
     }
     if (editorInstance.isActive('localDivTableBlock')) return 'div-table';
+    if (editorInstance.isActive('localFeishuTaskBlock')) return 'task';
     if (editorInstance.isActive('localEmbedBlock')) return 'embed';
     if (editorInstance.isActive('localSyncBlock')) return 'sync';
     return 'paragraph';
@@ -3236,9 +3413,10 @@ export default function Editor({
     const isEmptyParagraphTarget = target instanceof HTMLElement
       && target.matches('p')
       && (target.textContent ?? '').replace(/\u200b/g, '').trim() === '';
+    const isEditorBlankTarget = target === e.currentTarget
+      || (target instanceof Element && target.classList.contains('tiptap'));
     if (
-      target !== e.currentTarget
-      && !(target instanceof Element && target.classList.contains('tiptap'))
+      !isEditorBlankTarget
       && !isEmptyParagraphTarget
     ) return;
 
@@ -3263,9 +3441,10 @@ export default function Editor({
     const isEmptyParagraphTarget = target instanceof HTMLElement
       && target.matches('p')
       && (target.textContent ?? '').replace(/\u200b/g, '').trim() === '';
+    const isEditorBlankTarget = target === e.currentTarget
+      || (target instanceof Element && target.classList.contains('tiptap'));
     if (
-      target !== e.currentTarget
-      && !(target instanceof Element && target.classList.contains('tiptap'))
+      !isEditorBlankTarget
       && !isEmptyParagraphTarget
     ) return;
 

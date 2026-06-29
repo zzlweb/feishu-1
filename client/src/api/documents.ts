@@ -3,16 +3,23 @@ import { readApiPayload } from './http';
 
 const BASE_URL = '/api';
 const REQUEST_TIMEOUT_MS = 10000;
+const IMPORT_URL_TIMEOUT_MS = 60000;
 
-async function request<T>(url: string, options?: RequestInit): Promise<ApiResponse<T>> {
+interface ApiRequestOptions extends RequestInit {
+  timeoutMs?: number;
+  timeoutMessage?: string;
+}
+
+async function request<T>(url: string, options?: ApiRequestOptions): Promise<ApiResponse<T>> {
+  const { timeoutMs = REQUEST_TIMEOUT_MS, timeoutMessage, ...fetchOptions } = options || {};
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(`${BASE_URL}${url}`, {
       headers: { 'Content-Type': 'application/json; charset=utf-8', Accept: 'application/json; charset=utf-8' },
       signal: controller.signal,
-      ...options,
+      ...fetchOptions,
     });
 
     const body = await readApiPayload<T>(res);
@@ -26,7 +33,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<ApiRespon
     return body as ApiResponse<T>;
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      return { code: -1, message: '请求超时，请确认后端服务已启动' };
+      return { code: -1, message: timeoutMessage || '请求超时，请确认后端服务已启动' };
     }
     return {
       code: -1,
@@ -81,6 +88,8 @@ export async function importDocumentUrl(
 ): Promise<ApiResponse<ImportDocumentResult>> {
   return request<ImportDocumentResult>('/documents/import-url', {
     method: 'POST',
+    timeoutMs: IMPORT_URL_TIMEOUT_MS,
+    timeoutMessage: '飞书导入耗时较长已超时，请确认文档已公开或后端飞书配置可用后重试',
     body: JSON.stringify({
       url,
       author: options?.author,

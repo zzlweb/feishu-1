@@ -279,7 +279,10 @@ test('importFeishuPublicUrl maps Open API container and media blocks', async () 
       block_id: 'table',
       block_type: 31,
       children: ['cell1', 'cell2', 'cell3', 'cell4'],
-      table: { row_size: 2, column_size: 2 },
+      table: {
+        cells: ['cell1', 'cell2', 'cell3', 'cell4'],
+        property: { row_size: 2, column_size: 2 },
+      },
     },
     {
       block_id: 'cell1',

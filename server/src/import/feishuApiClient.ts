@@ -16,6 +16,7 @@ interface FeishuApiEnvelope<T> {
 }
 
 const DEFAULT_BASE_URL = 'https://open.feishu.cn';
+const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 
 export function getFeishuApiConfigFromEnv(): FeishuApiConfig | null {
   const appId = process.env.FEISHU_APP_ID?.trim();
@@ -88,6 +89,24 @@ function isSuccessCode(code: number | undefined) {
   return code === undefined || code === 0;
 }
 
+function getRequestTimeoutMs() {
+  const value = Number(process.env.FEISHU_OPEN_API_TIMEOUT_MS || DEFAULT_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+async function fetchWithTimeout(url: string, init?: RequestInit) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), getRequestTimeoutMs());
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 interface TenantAccessTokenResponse {
   code?: number;
   msg?: string;
@@ -100,7 +119,7 @@ export function createFeishuApiClient(config: FeishuApiConfig): FeishuApiClient 
 
   async function getTenantAccessToken() {
     if (tenantToken) return tenantToken;
-    const response = await fetch(`${baseUrl}/open-apis/auth/v3/tenant_access_token/internal`, {
+    const response = await fetchWithTimeout(`${baseUrl}/open-apis/auth/v3/tenant_access_token/internal`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
       body: JSON.stringify({
@@ -118,7 +137,7 @@ export function createFeishuApiClient(config: FeishuApiConfig): FeishuApiClient 
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const token = await getTenantAccessToken();
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetchWithTimeout(`${baseUrl}${path}`, {
       ...init,
       headers: {
         Accept: 'application/json; charset=utf-8',

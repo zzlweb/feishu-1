@@ -197,6 +197,7 @@ export default function DocumentList() {
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
   const [rowMenu, setRowMenu] = useState<RowMenu | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleteTemplateTarget, setDeleteTemplateTarget] = useState<{ id: string; title: string } | null>(null);
   const [templateDialogVisible, setTemplateDialogVisible] = useState(false);
   const [feishuImportVisible, setFeishuImportVisible] = useState(false);
   const [feishuImportUrl, setFeishuImportUrl] = useState('');
@@ -467,10 +468,17 @@ export default function DocumentList() {
     }
   };
 
-  const handleDeleteTemplate = async (template: Template) => {
-    const confirmed = window.confirm(`删除模板“${template.title || '未命名模板'}”？`);
-    if (!confirmed) return;
-    const res = await deleteTemplate(template.id);
+  const showDeleteTemplateModal = (template: Template) => {
+    setDeleteTemplateTarget({
+      id: template.id,
+      title: template.title || '未命名模板',
+    });
+  };
+
+  const handleConfirmDeleteTemplate = async () => {
+    if (!deleteTemplateTarget) return;
+    const res = await deleteTemplate(deleteTemplateTarget.id);
+    setDeleteTemplateTarget(null);
     if (res.code === 0) {
       void MessagePlugin.success('模板已删除');
       const templateRes = await getTemplates();
@@ -827,7 +835,7 @@ export default function DocumentList() {
                 aria-label="删除模板"
                 onClick={event => {
                   event.stopPropagation();
-                  void handleDeleteTemplate(template);
+                  showDeleteTemplateModal(template);
                 }}
               >
                 <DeleteIcon size="16px" />
@@ -850,6 +858,21 @@ export default function DocumentList() {
       >
         <p className="modal-desc" style={{ margin: 0 }}>
           删除后将从当前文档列表中移除，同时删除它的评论数据。此操作不能撤销。
+        </p>
+      </Dialog>
+
+      <Dialog
+        visible={!!deleteTemplateTarget}
+        destroyOnClose
+        header={deleteTemplateTarget ? `删除模板“${deleteTemplateTarget.title}”？` : ''}
+        cancelBtn="取消"
+        confirmBtn={{ content: '删除', theme: 'danger' }}
+        onClose={() => setDeleteTemplateTarget(null)}
+        onCancel={() => setDeleteTemplateTarget(null)}
+        onConfirm={() => void handleConfirmDeleteTemplate()}
+      >
+        <p className="modal-desc" style={{ margin: 0 }}>
+          删除后将从模板库中移除，此操作不能撤销。
         </p>
       </Dialog>
     </div>

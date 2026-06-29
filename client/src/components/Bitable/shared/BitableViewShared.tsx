@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import * as React from 'react';
 import { SelGlyphChevronDown } from '../../../icons/selectionToolbarGlyphs';
 import { FieldLockGlyph, fieldTypeGlyph } from '../fields/bitableFieldTypeIcons';
-import { getAttachments, getMultiSelectChoices, valueText, findSelectChoice, formatCardDateValue, textColorForBackground, type AttachmentValue, type BaseField, type BaseRecord, type CellValue } from '../model/bitableModel';
+import { getAttachments, getMultiSelectChoices, valueText, findSelectChoice, formatCardDateValue, normalizeColorValue, textColorForBackground, type AttachmentValue, type BaseField, type BaseRecord, type CellValue } from '../model/bitableModel';
 
 export { FieldLockGlyph, fieldTypeGlyph };
 
@@ -104,7 +104,7 @@ export function FieldDisplay({ field, value }: { field: BaseField; value: CellVa
     if (!text) return null;
     const choice = findSelectChoice(field, text);
     if (!choice) return <span className="base-cell-tag">{text}</span>;
-    const color = choice.color || '#e8f0ff';
+    const color = normalizeColorValue(choice.color);
     return (
       <span
         className="base-cell-tag is-colored"
@@ -120,7 +120,7 @@ export function FieldDisplay({ field, value }: { field: BaseField; value: CellVa
     return (
       <span className="base-cell-tag-list">
         {choices.map(choice => {
-          const color = choice.color || '#e8f0ff';
+          const color = normalizeColorValue(choice.color);
           return (
             <span
               key={choice.id}

@@ -9,7 +9,9 @@ export function parseJsonPayload<T>(text: string): ApiPayload<T> {
   try {
     return JSON.parse(text) as ApiPayload<T>;
   } catch {
-    return { code: -1, message: '服务器响应格式错误' };
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 120);
+    const suffix = snippet ? `：${snippet}` : '';
+    return { code: -1, message: `服务器返回了非 JSON 响应，请确认后端服务或代理是否正常${suffix}` };
   }
 }
 
