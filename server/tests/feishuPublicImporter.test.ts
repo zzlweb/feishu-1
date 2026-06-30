@@ -314,7 +314,7 @@ test('importFeishuPublicUrl maps Open API container and media blocks', async () 
       block_id: 'cell3',
       parent_id: 'table',
       block_type: 32,
-      children: ['cell3Text'],
+      children: ['cell3Text', 'cell3Image'],
       table_cell: {},
     },
     {
@@ -322,6 +322,12 @@ test('importFeishuPublicUrl maps Open API container and media blocks', async () 
       parent_id: 'cell3',
       block_type: 2,
       text: { elements: [{ text_run: { content: '数据 A' } }] },
+    },
+    {
+      block_id: 'cell3Image',
+      parent_id: 'cell3',
+      block_type: 27,
+      image: { token: 'table-image-token' },
     },
     {
       block_id: 'cell4',
@@ -354,6 +360,7 @@ test('importFeishuPublicUrl maps Open API container and media blocks', async () 
   ];
   const { server, baseUrl } = await startMockFeishuApi(blocks, {
     'image-token': { body: 'fake-image', contentType: 'image/png' },
+    'table-image-token': { body: 'fake-table-image', contentType: 'image/webp' },
     'file-token': { body: 'fake-pdf', contentType: 'application/pdf' },
   });
   const previousAppId = process.env.FEISHU_APP_ID;
@@ -371,7 +378,7 @@ test('importFeishuPublicUrl maps Open API container and media blocks', async () 
 
     assert.equal(imported.title, '容器与媒体块测试');
     assert.equal(imported.importQuality, 'full');
-    assert.equal(imported.assetCount, 2);
+    assert.equal(imported.assetCount, 3);
     assert.match(imported.content, /data-type="highlight-block"/);
     assert.match(imported.content, /高亮块内容/);
     assert.match(imported.content, /data-local-block="columns"/);
@@ -381,6 +388,7 @@ test('importFeishuPublicUrl maps Open API container and media blocks', async () 
     assert.match(imported.content, /class="feishu-table"/);
     assert.match(imported.content, /<th class="feishu-table__header-cell" data-table-cell="true"><p>表头 A<\/p><\/th>/);
     assert.match(imported.content, /<td class="feishu-table__cell" data-table-cell="true"><p>数据 B<\/p><\/td>/);
+    assert.match(imported.content, /<td class="feishu-table__cell" data-table-cell="true"><p>数据 A<\/p><img class="feishu-image" data-align="center" src="\/static\/uploads\//);
     assert.match(imported.content, /<img class="feishu-image" data-align="center" src="\/static\/uploads\//);
     assert.match(imported.content, /data-local-block="embed" data-kind="iframe" data-href="https:\/\/example.com\/embed"/);
     assert.match(imported.content, /data-local-block="embed" data-kind="file" data-href="\/static\/uploads\//);

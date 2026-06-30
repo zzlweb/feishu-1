@@ -27,6 +27,7 @@ export interface ImportedInline {
 
 export interface ImportedTableCell {
   content: string;
+  blocks?: ImportedBlock[];
   header?: boolean;
   rowSpan?: number;
   colSpan?: number;

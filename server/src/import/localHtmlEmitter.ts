@@ -42,9 +42,10 @@ function renderTableCell(cell: ImportedTableCell) {
     cell.colSpan && cell.colSpan > 1 ? `colspan="${cell.colSpan}"` : '',
     cell.bgColor ? `style="background-color:${escapeAttr(cell.bgColor)}"` : '',
   ].filter(Boolean).join(' ');
-  const inner = cell.content
+  const blockInner = cell.blocks?.length ? renderBlockChildren(cell.blocks) : '';
+  const inner = blockInner || (cell.content
     ? `<p>${escapeHtml(cell.content)}</p>`
-    : '<p><br></p>';
+    : '<p><br></p>');
   return `<${tag} ${attrs}>${inner}</${tag}>`;
 }
 

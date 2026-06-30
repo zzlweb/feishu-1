@@ -16,6 +16,7 @@ import {
 } from './businessReportEnricher';
 import { mapFeishuBitableToBaseTable } from './bitableMapper';
 import { mirrorBitableTableAttachments, type BitableAttachmentMirrorContext } from './bitableAttachmentMirror';
+import { fetchFeishuRawDocumentData, type FeishuRawFetchWarning } from './feishuRawDocumentFetcher';
 import { emitLocalHtml } from './localHtmlEmitter';
 import type { EmittedImportPayload, ImportedBlock, ImportedDocument, ImportedInline, ImportWarning } from './types';
 import type { ImportedAsset } from './types';
@@ -904,15 +905,19 @@ async function convertFeishuBlock(
     const cellBlocks = orderedCellIds
       .map(childId => blockMap.get(childId))
       .filter((child): child is FeishuBlock => Boolean(child?.table_cell));
-    const cellTexts = await Promise.all(cellBlocks.map(async cell => {
+    const cellContents = await Promise.all(cellBlocks.map(async cell => {
       const children = await convertChildBlocks(cell.children || [], blockMap, visiting, client, warnings, assets, assetHeaders, apiBaseUrl);
-      return children.map(importedBlockText).filter(Boolean).join('\n');
+      return {
+        blocks: children,
+        text: children.map(importedBlockText).filter(Boolean).join('\n'),
+      };
     }));
-    const rows = Array.from({ length: Math.ceil(cellTexts.length / columnSize) }, (_, rowIndex) =>
-      cellTexts.slice(rowIndex * columnSize, rowIndex * columnSize + columnSize).map((content, cellIndex) => {
+    const rows = Array.from({ length: Math.ceil(cellContents.length / columnSize) }, (_, rowIndex) =>
+      cellContents.slice(rowIndex * columnSize, rowIndex * columnSize + columnSize).map((content, cellIndex) => {
         const cell = cellBlocks[rowIndex * columnSize + cellIndex];
         return {
-        content,
+        content: content.text,
+        blocks: content.blocks,
         header: rowIndex === 0,
         rowSpan: Number(cell?.table_cell?.row_span || 1),
         colSpan: Number(cell?.table_cell?.col_span || 1),
@@ -1017,6 +1022,34 @@ function buildFallbackBusinessReportPayload(sourceUrl: string, warning: string):
     importQuality: 'partial',
     unsupportedBlocks: [{ type: 'feishu-api-bitable', reason: '飞书 API 未提供完整多维表格 view 配置或当前凭据无权限访问。' }],
   };
+}
+
+function rawWarningToImportWarning(warning: FeishuRawFetchWarning): ImportWarning {
+  if (warning.type === 'asset') {
+    return {
+      type: 'asset',
+      blockType: warning.blockType,
+      message: warning.message,
+    };
+  }
+  if (warning.type === 'unsupported-target') {
+    return {
+      type: 'unsupported-block',
+      blockType: warning.blockType || 'target',
+      message: warning.message,
+    };
+  }
+  return {
+    type: 'partial-data',
+    blockType: warning.blockType,
+    message: warning.message,
+  };
+}
+
+function localImportCompletenessMessages(messages: string[]): string[] {
+  return messages.filter(message =>
+    !/媒体|附件|二进制|只收集了引用|尚未下载/.test(message),
+  );
 }
 
 interface FeishuWikiNode {
@@ -1213,23 +1246,35 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
   const warnings: ImportWarning[] = [];
 
   try {
-    const target = await resolveDocumentTarget(client, parsed, warnings);
+    const rawData = await fetchFeishuRawDocumentData(sourceUrl, {
+      config,
+      client,
+      // 本地转换阶段会再次下载图片/附件到 /static/uploads，这里只收集完整引用和结构。
+      downloadMedia: false,
+    });
+    warnings.push(...rawData.warnings.map(rawWarningToImportWarning));
+    const target = rawData.target;
 
     if (target.type === 'bitable') {
       const bitablePayload = await importStandaloneBitableApp(client, target, sourceUrl, warnings);
       if (bitablePayload) return bitablePayload;
     }
 
-    const blocks = await fetchAllDocumentBlocks(client, target.token);
+    const blocks = (rawData.document?.blocks || []) as FeishuBlock[];
     const assets: ImportedAsset[] = [];
     const token = await client.getTenantAccessToken();
     const blockMap = new Map(blocks.filter(block => block.block_id).map(block => [block.block_id!, block]));
+    const rootBlockIds = rawData.document?.rootBlockIds || [];
+    const rootBlocksFromRaw = rootBlockIds
+      .map(blockId => blockMap.get(blockId))
+      .filter((block): block is FeishuBlock => Boolean(block));
     const containedChildren = new Set(blocks.flatMap(block => block.children || []));
-    const rootBlocks = blocks
+    const fallbackRootBlocks = blocks
       .filter(block => !block.block_id || !containedChildren.has(block.block_id))
       .flatMap(block => (isPageBlock(block) && block.children?.length
         ? block.children.map(childId => blockMap.get(childId)).filter((child): child is FeishuBlock => Boolean(child))
         : [block]));
+    const rootBlocks = rootBlocksFromRaw.length ? rootBlocksFromRaw : fallbackRootBlocks;
     const importedBlocks = (await Promise.all(rootBlocks.map(block => safeConvertFeishuBlock(
       block,
       blockMap,
@@ -1270,6 +1315,7 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
     const pageTitle = pageBlock?.page?.elements
       ? inlineText(textElementsToInlines(pageBlock.page.elements))
       : '';
+    const localCompletenessMessages = localImportCompletenessMessages(rawData.completeness.missing);
     const document: ImportedDocument = {
       title: pageTitle || target.title || (firstHeading ? inlineText(firstHeading.inlines) : '') || '飞书文档',
       sourceUrl,
@@ -1283,7 +1329,10 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
         readonly: false,
         comments: 'not_supported',
         notes: [
-          '已通过飞书 Open API 读取文档结构；本地保存为可编辑副本。',
+          '已通过飞书 Open API 读取文档结构，并使用完整原始数据模块构建 block 树、表格详情、媒体引用和多维表格数据。',
+          localCompletenessMessages.length === 0
+            ? '飞书原始数据完整性检查通过。'
+            : `飞书原始数据完整性检查提示：${localCompletenessMessages.slice(0, 3).join('；')}`,
           '飞书评论线程尚未接入 Open API 导入，评论侧栏只显示本地评论。',
         ],
       },
