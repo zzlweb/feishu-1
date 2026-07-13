@@ -175,12 +175,17 @@ test('inserts and deletes rows and columns from a cell selection toolbar', async
   await expect(page.locator('tr[data-row-index="0"] td[data-table-cell="true"]')).toHaveCount(4);
 
   await openRichTable(page);
-  const columnRail = page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--col').first();
+  const columnRail = page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--col').nth(1);
   await page.locator('.feishu-table-host, .tableWrapper').first().hover();
   await columnRail.click();
   await page.locator('.feishu-table-selection-toolbar button[title="删除列"]').click();
   await expect(page.locator('tr[data-row-index="0"] td[data-table-cell="true"]')).toHaveCount(2);
   await expect(page.locator('tr[data-row-index]')).toHaveCount(3);
+  await expect(page.locator('tr[data-row-index="0"] td[data-table-cell="true"]').nth(0)).toContainText('Alpha');
+  await expect(page.locator('tr[data-row-index="0"] td[data-table-cell="true"]').nth(1)).toContainText('Gamma');
+  await expect(page.locator('td[data-table-cell="true"]', { hasText: 'Beta' })).toHaveCount(0);
+  await expect(page.locator('td[data-table-cell="true"]', { hasText: 'Epsilon' })).toHaveCount(0);
+  await expect(page.locator('td[data-table-cell="true"]', { hasText: 'Theta' })).toHaveCount(0);
 });
 
 test('does not reorder rows when dragging the row rail', async ({ page }) => {

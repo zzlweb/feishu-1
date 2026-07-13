@@ -50,7 +50,11 @@ import {
   toggleTableHeaderColumn,
   toggleTableHeaderRow,
 } from '../panels/panelActions';
-import type { TableRailPin } from '../tables/tableDom';
+import {
+  getTablePosFromHost,
+  resolveTableCellPos,
+  type TableRailPin,
+} from '../tables/tableDom';
 
 const IndentRight = wrapIcon(IndentRightIcon);
 const IndentLeft = wrapIcon(IndentLeftIcon);
@@ -81,6 +85,7 @@ const ALIGN_OPTIONS = [
 
 interface Props {
   editor: Editor;
+  tableHost?: HTMLElement;
   pinnedRail?: TableRailPin | null;
   left: number;
   top: number;
@@ -111,7 +116,7 @@ function StyleMenuRow({
   );
 }
 
-export default function TableSelectionToolbar({ editor, pinnedRail, left, top }: Props) {
+export default function TableSelectionToolbar({ editor, tableHost, pinnedRail, left, top }: Props) {
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   const [showCellBgMenu, setShowCellBgMenu] = useState(false);
   const [showTurnIntoMenu, setShowTurnIntoMenu] = useState(false);
@@ -175,6 +180,34 @@ export default function TableSelectionToolbar({ editor, pinnedRail, left, top }:
     }
     action();
   }, [editor]);
+
+  const runWithPinnedRailSelection = useCallback((pin: TableRailPin, action: () => void) => {
+    editor.view.focus();
+    const tablePos = tableHost ? getTablePosFromHost(editor, tableHost) : null;
+    const cellPos = tablePos == null
+      ? null
+      : resolveTableCellPos(
+        editor,
+        tablePos,
+        pin.kind === 'row' ? pin.index : 0,
+        pin.kind === 'col' ? pin.index : 0,
+      );
+
+    if (cellPos != null) {
+      try {
+        const $cell = editor.state.doc.resolve(cellPos);
+        const selection = pin.kind === 'col'
+          ? CellSelection.colSelection($cell)
+          : CellSelection.rowSelection($cell);
+        editor.view.dispatch(editor.state.tr.setSelection(selection));
+        lastCellSelectionRef.current = selection;
+      } catch {
+        // Fall back to the last ProseMirror CellSelection if the table changed.
+      }
+    }
+
+    runWithCellSelection(action);
+  }, [editor, runWithCellSelection, tableHost]);
 
   const canMergeCells = editor.can().mergeCells();
   const canSplitCell = editor.can().splitCell();
@@ -559,7 +592,7 @@ export default function TableSelectionToolbar({ editor, pinnedRail, left, top }:
             type="button"
             className="feishu-table-selection-toolbar__btn feishu-table-selection-toolbar__btn--danger"
             title={pinnedRail.kind === 'col' ? '删除列' : '删除行'}
-            onClick={() => runWithCellSelection(() => {
+            onClick={() => runWithPinnedRailSelection(pinnedRail, () => {
               if (pinnedRail.kind === 'col') removeSelectedTableColumn(editor);
               else removeSelectedTableRow(editor);
             })}

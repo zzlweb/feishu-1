@@ -1438,6 +1438,7 @@ function FeishuTableOverlay({
       {selectionToolbar && (
         <TableSelectionToolbar
           editor={editor}
+          tableHost={tableHost}
           pinnedRail={pinnedRail}
           left={selectionToolbar.left}
           top={selectionToolbar.top}

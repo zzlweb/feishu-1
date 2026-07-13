@@ -103,17 +103,18 @@ export function resolveCellTextPos(tablePos: number, row: number, col: number, e
   const table = editor.state.doc.nodeAt(tablePos);
   if (!table || table.type.name !== 'table' || table.childCount === 0) return null;
 
-  const safeRow = Math.max(0, Math.min(row, table.childCount - 1));
-  const rowNode = table.child(safeRow);
-  const safeCol = Math.max(0, Math.min(col, rowNode.childCount - 1));
+  const map = TableMap.get(table);
+  if (map.width === 0 || map.height === 0) return null;
 
-  let pos = tablePos + 1;
-  for (let r = 0; r < safeRow; r++) pos += table.child(r).nodeSize;
-  pos += 1;
-  for (let c = 0; c < safeCol; c++) pos += rowNode.child(c).nodeSize;
+  const safeRow = Math.max(0, Math.min(row, map.height - 1));
+  const safeCol = Math.max(0, Math.min(col, map.width - 1));
+  const cellOffset = map.map[safeRow * map.width + safeCol];
+  if (cellOffset == null) return null;
+  const cellPos = tablePos + 1 + cellOffset;
+  const cell = table.nodeAt(cellOffset);
+  if (!cell) return null;
 
-  const cell = rowNode.child(safeCol);
-  const inside = pos + 1;
+  const inside = cellPos + 1;
   const docSize = editor.state.doc.content.size;
   if (inside >= docSize) return null;
 
