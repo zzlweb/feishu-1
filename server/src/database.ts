@@ -59,6 +59,10 @@ interface Database {
   templates: TemplateRecord[];
 }
 
+interface JsonObject {
+  [key: string]: unknown;
+}
+
 function getDbPath() {
   return process.env.FEISHU_DOC_DB_PATH || path.join(__dirname, '..', 'data', 'db.json');
 }
@@ -106,26 +110,197 @@ function getDefaultTemplates(): TemplateRecord[] {
   ];
 }
 
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requiredString(record: JsonObject, field: string, recordName: string): string {
+  const value = record[field];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${recordName}.${field} 必须是非空字符串`);
+  }
+  return value;
+}
+
+function stringValue(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function numberValue(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeDocument(value: unknown, index: number): DocumentRecord {
+  if (!isJsonObject(value)) {
+    throw new Error(`documents[${index}] 必须是对象`);
+  }
+  const createdAt = stringValue(value.created_at, nowStr());
+  return {
+    id: requiredString(value, 'id', `documents[${index}]`),
+    title: stringValue(value.title),
+    content: stringValue(value.content),
+    author: stringValue(value.author, '张正亮'),
+    created_at: createdAt,
+    updated_at: stringValue(value.updated_at, createdAt),
+    is_template: numberValue(value.is_template) ? 1 : 0,
+    parent_id: typeof value.parent_id === 'string' ? value.parent_id : null,
+    cover_url: stringValue(value.cover_url),
+    icon: stringValue(value.icon),
+    collapsed_heading_ids: normalizeStringList(value.collapsed_heading_ids),
+    read_only: numberValue(value.read_only) ? 1 : 0,
+    import_metadata: stringValue(value.import_metadata),
+  };
+}
+
+const commentStatuses = new Set<NonNullable<CommentRecord['status']>>(['open', 'resolved', 'deleted', 'anchor_lost']);
+const commentVisibilities = new Set<NonNullable<CommentRecord['visibility']>>(['public', 'private']);
+const commentAnchorTypes = new Set<NonNullable<CommentRecord['anchor_type']>>([
+  'text-range', 'block', 'image', 'video', 'file', 'table-cell', 'table-range', 'document',
+]);
+
+function optionalEnum<T extends string>(value: unknown, allowed: Set<T>): T | undefined {
+  return typeof value === 'string' && allowed.has(value as T) ? value as T : undefined;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function normalizeComment(value: unknown, index: number): CommentRecord {
+  if (!isJsonObject(value)) {
+    throw new Error(`comments[${index}] 必须是对象`);
+  }
+  const id = requiredString(value, 'id', `comments[${index}]`);
+  const createdAt = stringValue(value.created_at, nowStr());
+  const blockId = stringValue(value.block_id);
+  const resolved = numberValue(value.resolved) ? 1 : 0;
+  return {
+    id,
+    document_id: requiredString(value, 'document_id', `comments[${index}]`),
+    block_id: blockId,
+    thread_id: optionalString(value.thread_id) || blockId || id,
+    parent_id: optionalString(value.parent_id),
+    message_id: optionalString(value.message_id) || id,
+    content: stringValue(value.content),
+    author: stringValue(value.author, '张正亮'),
+    position_from: numberValue(value.position_from),
+    position_to: numberValue(value.position_to),
+    created_at: createdAt,
+    updated_at: stringValue(value.updated_at, createdAt),
+    resolved,
+    status: optionalEnum(value.status, commentStatuses) || (resolved ? 'resolved' : 'open'),
+    visibility: optionalEnum(value.visibility, commentVisibilities) || 'public',
+    quote: optionalString(value.quote),
+    anchor_type: optionalEnum(value.anchor_type, commentAnchorTypes),
+    anchor_json: optionalString(value.anchor_json),
+    mentioned_user_ids: optionalString(value.mentioned_user_ids),
+    private_visible_user_ids: optionalString(value.private_visible_user_ids),
+    deleted_at: optionalString(value.deleted_at),
+    resolved_at: optionalString(value.resolved_at),
+    resolved_by: optionalString(value.resolved_by),
+    is_edited: numberValue(value.is_edited) ? 1 : 0,
+  };
+}
+
+function normalizeTemplate(value: unknown, index: number): TemplateRecord {
+  if (!isJsonObject(value)) {
+    throw new Error(`templates[${index}] 必须是对象`);
+  }
+  return {
+    id: requiredString(value, 'id', `templates[${index}]`),
+    title: stringValue(value.title),
+    content: stringValue(value.content),
+    author: stringValue(value.author, '系统'),
+    created_at: stringValue(value.created_at, nowStr()),
+  };
+}
+
+function normalizeDatabase(value: unknown): Database {
+  if (!isJsonObject(value)) {
+    throw new Error('数据库根结构必须是对象');
+  }
+  for (const field of ['documents', 'comments', 'templates']) {
+    if (value[field] !== undefined && !Array.isArray(value[field])) {
+      throw new Error(`数据库字段 ${field} 必须是数组`);
+    }
+  }
+
+  const documents = (value.documents as unknown[] | undefined) ?? [];
+  const comments = (value.comments as unknown[] | undefined) ?? [];
+  const templates = (value.templates as unknown[] | undefined) ?? [];
+  return {
+    documents: documents.map(normalizeDocument),
+    comments: comments.map(normalizeComment),
+    templates: templates.length > 0 ? templates.map(normalizeTemplate) : getDefaultTemplates(),
+  };
+}
+
+function createCorruptBackup(dbPath: string): string {
+  const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
+  let backupPath = `${dbPath}.corrupt-${timestamp}.bak`;
+  let suffix = 0;
+  while (fs.existsSync(backupPath)) {
+    suffix += 1;
+    backupPath = `${dbPath}.corrupt-${timestamp}-${suffix}.bak`;
+  }
+  fs.copyFileSync(dbPath, backupPath, fs.constants.COPYFILE_EXCL);
+  return backupPath;
+}
+
 function loadDb(): Database {
   const dbPath = getDbPath();
   const dataDir = path.dirname(dbPath);
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
+  if (!fs.existsSync(dbPath)) {
+    const defaultDb = { documents: [], comments: [], templates: getDefaultTemplates() };
+    saveDb(defaultDb);
+    return defaultDb;
+  }
+
+  const raw = fs.readFileSync(dbPath, 'utf-8');
+  let parsed: unknown;
+  let normalized: Database;
   try {
-    if (fs.existsSync(dbPath)) {
-      const raw = fs.readFileSync(dbPath, 'utf-8');
-      const db = JSON.parse(raw);
-      if (!db.templates || db.templates.length === 0) {
-        db.templates = getDefaultTemplates();
-        saveDb(db);
-      }
-      return db;
+    parsed = JSON.parse(raw);
+    normalized = normalizeDatabase(parsed);
+  } catch (error) {
+    let backupPath: string;
+    try {
+      backupPath = createCorruptBackup(dbPath);
+    } catch (backupError) {
+      const detail = backupError instanceof Error ? backupError.message : String(backupError);
+      throw new Error(`数据库文件损坏，且无法创建备份；原文件未被覆盖：${dbPath}（${detail}）`);
     }
-  } catch { /* ignore */ }
-  const defaultDb = { documents: [], comments: [], templates: getDefaultTemplates() };
-  saveDb(defaultDb);
-  return defaultDb;
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`数据库文件损坏，原文件未被覆盖；备份已创建：${backupPath}（${detail}）`);
+  }
+  if (JSON.stringify(parsed) !== JSON.stringify(normalized)) {
+    saveDb(normalized);
+  }
+  return normalized;
+}
+
+function sleep(milliseconds: number): void {
+  const buffer = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+}
+
+function renameWithWindowsRetry(tempPath: string, dbPath: string): void {
+  const retryableCodes = new Set(['EACCES', 'EBUSY', 'EPERM']);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      fs.renameSync(tempPath, dbPath);
+      return;
+    } catch (error) {
+      const code = isJsonObject(error) && typeof error.code === 'string' ? error.code : '';
+      if (process.platform !== 'win32' || !retryableCodes.has(code) || attempt === 4) {
+        throw error;
+      }
+      sleep(10 * (attempt + 1));
+    }
+  }
 }
 
 function saveDb(db: Database) {
@@ -134,7 +309,19 @@ function saveDb(db: Database) {
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
-  fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf-8');
+  const tempPath = path.join(dataDir, `.${path.basename(dbPath)}.${process.pid}.${Date.now()}.tmp`);
+  let fileDescriptor: number | undefined;
+  try {
+    fileDescriptor = fs.openSync(tempPath, 'wx');
+    fs.writeFileSync(fileDescriptor, JSON.stringify(db, null, 2), 'utf-8');
+    fs.fsyncSync(fileDescriptor);
+    fs.closeSync(fileDescriptor);
+    fileDescriptor = undefined;
+    renameWithWindowsRetry(tempPath, dbPath);
+  } finally {
+    if (fileDescriptor !== undefined) fs.closeSync(fileDescriptor);
+    if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+  }
 }
 
 function nowStr() {

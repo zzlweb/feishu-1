@@ -18,12 +18,12 @@ import { Fragment as ProseMirrorFragment } from '@tiptap/pm/model';
 import { common, createLowlight } from 'lowlight';
 import 'katex/dist/katex.min.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { MessagePlugin } from 'tdesign-react';
+import { Input, MessagePlugin, Select } from 'tdesign-react';
 import ContextMenu from './menus/ContextMenu';
 import BitableContextMenu from '../Bitable/BitableContextMenu';
 import ImageContextMenu from './media/ImageContextMenu';
 import TableContextMenu from './tables/TableContextMenu';
-import { computeBlockPanelPosition, useHoverFloatingGroup } from './shared/floatingPanel';
+import { computeBlockPanelPosition, FLOATING_Z_INDEX, useHoverFloatingGroup } from './shared/floatingPanel';
 import { computeTableBlockMenuPosition } from './tables/tableMenu';
 import SlashMenu from './menus/SlashMenu';
 import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH, type ButtonActionType } from './menus/slashMenuConfig';
@@ -319,6 +319,30 @@ function updateMediaBlockAttrs(editor: TipTapEditor, uploadId: string, attrs: Re
   return true;
 }
 
+function isEmptyParagraphElement(element: Element) {
+  if (element.tagName !== 'P') return false;
+  const text = (element.textContent || '').replace(/\u00a0/g, '').trim();
+  if (text) return false;
+  return !element.querySelector('img, video, audio, iframe, object, embed, table, [data-local-block]');
+}
+
+/** 折叠连续空段落，避免多维表格等块下方被导入/残留空行撑出大片空白 */
+function collapseConsecutiveEmptyParagraphs(parent: Element) {
+  let emptyRun = 0;
+  Array.from(parent.children).forEach(child => {
+    if (isEmptyParagraphElement(child)) {
+      emptyRun += 1;
+      if (emptyRun > 1) {
+        child.remove();
+        return;
+      }
+      return;
+    }
+    emptyRun = 0;
+    collapseConsecutiveEmptyParagraphs(child);
+  });
+}
+
 function sanitizeEditorHtmlForSave(html: string) {
   if (typeof DOMParser === 'undefined') return html;
   const doc = new DOMParser().parseFromString(`<div data-editor-save-root="true">${html}</div>`, 'text/html');
@@ -333,6 +357,8 @@ function sanitizeEditorHtmlForSave(html: string) {
     });
     element.querySelectorAll('[src^="blob:"]').forEach(media => media.removeAttribute('src'));
   });
+
+  collapseConsecutiveEmptyParagraphs(root);
 
   return root.innerHTML;
 }
@@ -646,6 +672,18 @@ const CODE_BLOCK_LANGUAGES = [
   { label: 'Go', value: 'go' },
   { label: 'SQL', value: 'sql' },
 ];
+
+const EDITOR_TD_SELECT_POPUP_PROPS = {
+  attach: () => document.body,
+  zIndex: FLOATING_Z_INDEX.docMenu,
+  overlayClassName: 'editor-td-select-popup',
+};
+
+const BUTTON_ACTION_OPTIONS = [
+  { label: '打开超链接', value: 'link' },
+  { label: '创建副本', value: 'duplicate' },
+  { label: '关注文档更新', value: 'follow' },
+] as const;
 
 // ── Divider NodeView ──────────────────────────────────────────────────────────
 function FeishuDividerView({ node, selected, getPos, editor }: NodeViewProps) {
@@ -1456,32 +1494,32 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
             </div>
             <label className="button-panel__form-item">
               <span className="button-panel__label">执行操作</span>
-              <select
-                className="button-panel__select"
+              <Select
+                className="button-panel__td-select"
+                size="small"
                 value={draftActionType}
-                onChange={event => {
-                  const nextType = normalizeButtonActionType(event.target.value);
+                options={[...BUTTON_ACTION_OPTIONS]}
+                popupProps={EDITOR_TD_SELECT_POPUP_PROPS}
+                onChange={value => {
+                  const nextType = normalizeButtonActionType(value);
                   setDraftActionType(nextType);
                   if (!draftText.trim() || draftText === BUTTON_ACTION_LABELS[draftActionType]) {
                     setDraftText(BUTTON_ACTION_LABELS[nextType]);
                   }
                 }}
-              >
-                <option value="link">打开超链接</option>
-                <option value="duplicate">创建副本</option>
-                <option value="follow">关注文档更新</option>
-              </select>
+              />
             </label>
             {draftActionType === 'link' && (
               <label className="button-panel__form-item">
                 <span className="button-panel__label">超链接地址</span>
-                <input
-                  className="button-panel__input"
+                <Input
+                  className="button-panel__td-input"
+                  size="small"
                   value={draftUrl}
                   placeholder="请输入链接地址"
-                  onChange={event => setDraftUrl(event.target.value)}
-                  onKeyDown={event => {
-                    if (event.key === 'Escape') cancelPanel();
+                  onChange={value => setDraftUrl(String(value ?? ''))}
+                  onKeydown={(_value, context) => {
+                    if (context.e.key === 'Escape') cancelPanel();
                   }}
                 />
               </label>
@@ -1494,33 +1532,34 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
         </form>
       )}
       <div className="feishu-button-block__form">
-        <select
-          className="feishu-block-field feishu-button-block__type"
+        <Select
+          className="feishu-block-field feishu-button-block__td-type"
+          size="small"
           value={actionType}
-          onChange={e => {
-            const nextType = normalizeButtonActionType(e.target.value);
+          options={[...BUTTON_ACTION_OPTIONS]}
+          popupProps={EDITOR_TD_SELECT_POPUP_PROPS}
+          onChange={value => {
+            const nextType = normalizeButtonActionType(value);
             updateAttributes({
               actionType: nextType,
               text: text === BUTTON_ACTION_LABELS[actionType] ? BUTTON_ACTION_LABELS[nextType] : text,
             });
           }}
-        >
-          <option value="link">打开超链接</option>
-          <option value="duplicate">创建副本</option>
-          <option value="follow">关注文档更新</option>
-        </select>
-        <input
-          className="feishu-block-field"
+        />
+        <Input
+          className="feishu-block-field feishu-button-block__td-input"
+          size="small"
           value={text}
           placeholder="按钮文字"
-          onChange={e => updateAttributes({ text: e.target.value })}
+          onChange={value => updateAttributes({ text: String(value ?? '') })}
         />
         {actionType === 'link' ? (
-          <input
-            className="feishu-block-field"
+          <Input
+            className="feishu-block-field feishu-button-block__td-input"
+            size="small"
             value={url}
             placeholder="链接或页面地址"
-            onChange={e => updateAttributes({ url: e.target.value })}
+            onChange={value => updateAttributes({ url: String(value ?? '') })}
           />
         ) : (
           <span className="feishu-button-block__hint">
@@ -2055,15 +2094,15 @@ function FeishuCodeBlockView({ node, updateAttributes }: any) {
       <div className="feishu-code-block__toolbar" contentEditable={false}>
         <span className="feishu-code-block__title">代码块</span>
         <div className="feishu-code-block__actions">
-          <select
-            className="feishu-code-block__language"
+          <Select
+            className="feishu-code-block__td-language"
+            size="small"
+            filterable
             value={language}
-            onChange={e => updateAttributes({ language: e.target.value })}
-          >
-            {CODE_BLOCK_LANGUAGES.map(item => (
-              <option key={item.value} value={item.value}>{item.label}</option>
-            ))}
-          </select>
+            options={CODE_BLOCK_LANGUAGES}
+            popupProps={EDITOR_TD_SELECT_POPUP_PROPS}
+            onChange={value => updateAttributes({ language: String(value ?? 'plaintext') })}
+          />
           <button type="button" className="feishu-code-block__action" onClick={() => setWrap(v => !v)}>
             自动换行
           </button>
@@ -2511,7 +2550,48 @@ export default function Editor({
   });
   const [activeTableHost, setActiveTableHost] = useState<HTMLElement | null>(null);
   const [tableHandleHovered, setTableHandleHovered] = useState(false);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingContentSaveRef = useRef<{
+    documentId: string;
+    content: string;
+    save: EditorProps['onSave'];
+  } | null>(null);
+  const pendingTitleSaveRef = useRef<{
+    documentId: string;
+    title: string;
+    save: EditorProps['onSave'];
+  } | null>(null);
+  const currentDocumentIdRef = useRef(documentId);
+  const latestOnSaveRef = useRef(onSave);
+  const latestReadOnlyRef = useRef(readOnly);
+  const loadedDocumentIdRef = useRef<string | null>(null);
+  const isApplyingExternalContentRef = useRef(false);
+  currentDocumentIdRef.current = documentId;
+  latestOnSaveRef.current = onSave;
+  latestReadOnlyRef.current = readOnly;
+
+  const flushContentSave = useCallback(() => {
+    if (contentSaveTimerRef.current) {
+      clearTimeout(contentSaveTimerRef.current);
+      contentSaveTimerRef.current = null;
+    }
+    const pending = pendingContentSaveRef.current;
+    pendingContentSaveRef.current = null;
+    if (!pending) return;
+    pending.save({ content: pending.content });
+  }, []);
+
+  const flushTitleSave = useCallback(() => {
+    if (titleSaveTimerRef.current) {
+      clearTimeout(titleSaveTimerRef.current);
+      titleSaveTimerRef.current = null;
+    }
+    const pending = pendingTitleSaveRef.current;
+    pendingTitleSaveRef.current = null;
+    if (!pending) return;
+    pending.save({ title: pending.title });
+  }, []);
   const lastEditorPointerRef = useRef<{ x: number; y: number } | null>(null);
   const contextMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
@@ -2738,6 +2818,10 @@ export default function Editor({
     if (selectedIsEmptyParagraph && selectedRow?.isConnected) {
       row = selectedRow;
       activeBlockElRef.current = row;
+    } else if (selectedRow?.classList.contains('feishu-bitable-block') && selectedRow.isConnected) {
+      // 选中多维表格块时强制露出左侧 + / 块柄
+      row = selectedRow;
+      activeBlockElRef.current = row;
     } else if (selectedRow && row?.isConnected && selectedRow !== row) {
       return;
     }
@@ -2760,9 +2844,10 @@ export default function Editor({
     const blockType = row.classList.contains('feishu-bitable-block')
       ? bitableToolTypeFromElement(row)
       : getCurrentBlockType(editorInstance);
+    const isBitableSelected = isBitableToolType(blockType);
 
     setBlockTools(prev => {
-      if (!prev.visible && !(isEmpty && blockType === 'paragraph')) return prev;
+      if (!prev.visible && !(isEmpty && blockType === 'paragraph') && !isBitableSelected) return prev;
       return {
         ...prev,
         visible: true,
@@ -3070,10 +3155,15 @@ export default function Editor({
       ed.view.dispatch(ed.state.tr.setMeta('feishu-normalize-block-ids', true));
     },
     onUpdate: ({ editor }) => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        onSave({ content: sanitizeEditorHtmlForSave(editor.getHTML()) });
-      }, 1000);
+      if (!isApplyingExternalContentRef.current && !latestReadOnlyRef.current) {
+        pendingContentSaveRef.current = {
+          documentId: currentDocumentIdRef.current,
+          content: sanitizeEditorHtmlForSave(editor.getHTML()),
+          save: latestOnSaveRef.current,
+        };
+        if (contentSaveTimerRef.current) clearTimeout(contentSaveTimerRef.current);
+        contentSaveTimerRef.current = setTimeout(flushContentSave, 1000);
+      }
       extractHeadings(editor);
 
       const catCb = catalogueActiveCbRef.current;
@@ -3566,14 +3656,31 @@ export default function Editor({
   }, [editor, collapsedHeadingIds]);
 
   useEffect(() => {
-    if (editor && content !== undefined) {
-      const currentContent = editor.getHTML();
-      if (currentContent !== content && content) {
-        editor.commands.setContent(content);
-        extractHeadings(editor);
-      }
-    }
-  }, [content, editor, extractHeadings]);
+    if (!editor || loadedDocumentIdRef.current === documentId) return;
+
+    // 路由复用 Editor 时只在文档 ID 改变后回灌服务端内容。普通保存响应不能
+    // 覆盖当前本地草稿，否则慢响应会回滚用户在请求期间继续输入的文字。
+    flushContentSave();
+    flushTitleSave();
+    isApplyingExternalContentRef.current = true;
+    editor.commands.setContent(sanitizeEditorHtmlForSave(content || '<p></p>'), false);
+    isApplyingExternalContentRef.current = false;
+    loadedDocumentIdRef.current = documentId;
+    setDocTitle(normalizeTitle(title));
+    extractHeadings(editor);
+  }, [content, documentId, editor, extractHeadings, flushContentSave, flushTitleSave, title]);
+
+  useEffect(() => {
+    const flushPendingSaves = () => {
+      flushContentSave();
+      flushTitleSave();
+    };
+    window.addEventListener('pagehide', flushPendingSaves);
+    return () => {
+      window.removeEventListener('pagehide', flushPendingSaves);
+      flushPendingSaves();
+    };
+  }, [flushContentSave, flushTitleSave]);
 
   useEffect(() => {
     if (!editor) return;
@@ -3705,10 +3812,6 @@ export default function Editor({
     window.addEventListener('feishu-open-table-cell-slash-menu', openTableCellSlashMenu as EventListener);
     return () => window.removeEventListener('feishu-open-table-cell-slash-menu', openTableCellSlashMenu as EventListener);
   }, [editor, readOnly]);
-
-  useEffect(() => {
-    setDocTitle(normalizeTitle(title));
-  }, [title]);
 
   useEffect(() => {
     setDocIcon(icon || '');
@@ -3869,15 +3972,19 @@ export default function Editor({
     const newTitle = e.target.value;
     setDocTitle(newTitle);
     onTitleInputChange?.(newTitle);
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      onSave({ title: newTitle });
-    }, 500);
+    pendingTitleSaveRef.current = {
+      documentId: currentDocumentIdRef.current,
+      title: newTitle,
+      save: latestOnSaveRef.current,
+    };
+    if (titleSaveTimerRef.current) clearTimeout(titleSaveTimerRef.current);
+    titleSaveTimerRef.current = setTimeout(flushTitleSave, 500);
   };
 
   const handleTitleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      flushTitleSave();
       editor?.commands.focus('start');
     }
   };
@@ -4019,12 +4126,21 @@ export default function Editor({
     try {
       const pos = editor.view.posAtDOM(row, 0);
       const node = editor.state.doc.nodeAt(pos);
-      if (node?.isBlock) {
-        (editor as any).__plusInsertRange = { from: pos, to: pos + node.nodeSize };
-      } else {
+      if (!node?.isBlock) {
         (editor as any).__plusInsertRange = null;
+        editor.commands.focus();
+        return;
       }
-      editor.chain().focus(Math.min(pos + 1, editor.state.doc.content.size)).run();
+      // 空段落：用 + 替换当前块；多维表格等非空/原子块：在块后插入，避免误删
+      const isEmptyParagraph = node.type.name === 'paragraph' && node.content.size === 0;
+      if (isEmptyParagraph) {
+        (editor as any).__plusInsertRange = { from: pos, to: pos + node.nodeSize };
+        editor.chain().focus(Math.min(pos + 1, editor.state.doc.content.size)).run();
+        return;
+      }
+      const insertAt = pos + node.nodeSize;
+      (editor as any).__plusInsertRange = { from: insertAt, to: insertAt };
+      editor.chain().focus().setTextSelection(Math.min(insertAt, editor.state.doc.content.size)).run();
     } catch {
       (editor as any).__plusInsertRange = null;
       editor.commands.focus();
@@ -4407,31 +4523,31 @@ export default function Editor({
                 <div className="editor-page-link-form">
                   <label className="editor-page-link-row">
                     <span className="editor-page-link-label">文本</span>
-                    <input
-                      className="editor-page-link-input"
-                      type="text"
+                    <Input
+                      className="editor-page-link-td-input"
+                      size="small"
+                      autofocus
                       placeholder="输入文本"
                       value={pageLinkText}
-                      onChange={e => setPageLinkText(e.target.value)}
-                      autoFocus
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') confirmPageLink();
-                        if (e.key === 'Escape') closePageLinkDialog();
+                      onChange={value => setPageLinkText(String(value ?? ''))}
+                      onEnter={confirmPageLink}
+                      onKeydown={(_value, context) => {
+                        if (context.e.key === 'Escape') closePageLinkDialog();
                       }}
                     />
                   </label>
                   <div className="editor-page-link-row editor-page-link-row--with-action">
                     <label className="editor-page-link-url-field">
                       <span className="editor-page-link-label">链接</span>
-                      <input
-                        className="editor-page-link-input"
-                        type="text"
+                      <Input
+                        className="editor-page-link-td-input"
+                        size="small"
                         placeholder="粘贴或输入链接"
                         value={pageLinkUrl}
-                        onChange={e => setPageLinkUrl(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') confirmPageLink();
-                          if (e.key === 'Escape') closePageLinkDialog();
+                        onChange={value => setPageLinkUrl(String(value ?? ''))}
+                        onEnter={confirmPageLink}
+                        onKeydown={(_value, context) => {
+                          if (context.e.key === 'Escape') closePageLinkDialog();
                         }}
                       />
                     </label>

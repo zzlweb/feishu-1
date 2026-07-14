@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
-import { valueText, buildRecordTreeMeta, buildGridDisplayRows, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, resolveRecordInsertIndex, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, normalizeColorValue, textColorForBackground as readableTextColorForBackground, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridDisplayRow, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from '../model/bitableModel';
+import { Checkbox } from 'tdesign-react';
+import { valueText, buildRecordTreeMeta, buildGridDisplayRows, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, normalizeColorValue, textColorForBackground as readableTextColorForBackground, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridDisplayRow, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from '../model/bitableModel';
 import { createPortal } from 'react-dom';
 import type { Ref } from 'react';
 import { BITABLE_BLOCK_EXPAND_ALL } from '../BitableContextMenu';
@@ -33,14 +34,19 @@ export interface BitableGridViewProps {
   selectedIds: Set<string>;
   addField: (anchor: { left: number; top: number }) => void;
   addRecord: () => string;
-  insertRecordAt?: (index: number, count: number, initialTitle?: string) => string[];
+  insertRecordRelative?: (
+    recordId: string,
+    position: 'before' | 'after-subtree',
+    count: number,
+    initialTitle?: string,
+  ) => string[];
   insertChildRecord?: (parentRecordId: string, initialTitle?: string) => string;
   removeRecords?: (recordIds: string[], requireConfirm?: boolean) => void;
   changeCell: (recordId: string, fieldId: string, value: CellValue) => void;
   pickFiles: (recordId: string, fieldId?: string) => void;
   toggleRecordSelection: (recordId: string) => void;
   toggleAllRecordSelection: () => void;
-  reorderRecords: (fromIndex: number, toIndex: number) => void;
+  reorderRecords: (sourceRecordId: string, targetRecordId: string) => void;
   openRecord?: (recordId: string) => void;
   onFocusedRecordChange?: (recordId: string | null) => void;
   onOpenComment?: (recordId: string) => void;
@@ -882,7 +888,7 @@ export function BitableGridView({
   selectedIds,
   addField,
   addRecord,
-  insertRecordAt,
+  insertRecordRelative,
   insertChildRecord,
   removeRecords,
   changeCell,
@@ -916,7 +922,6 @@ export function BitableGridView({
   const menuRef = useRef<HTMLDivElement>(null);
   const cellMenuRef = useRef<HTMLDivElement>(null);
   const selectEditorRef = useRef<HTMLDivElement>(null);
-  const selectAllRef = useRef<HTMLInputElement>(null);
   const pendingCellFocusRef = useRef<{ recordId: string; fieldId: string; scrollAlign?: 'nearest' | 'end' } | null>(null);
   const suppressBlurCommitRef = useRef(false);
   const editingCellRef = useRef<EditingCell | null>(null);
@@ -966,6 +971,11 @@ export function BitableGridView({
   const fieldWidths = gridConfig.fieldWidths || {};
   const menuField = fieldMenu ? visibleFields.find(field => field.id === fieldMenu.fieldId) : null;
   const treeMeta = useMemo(() => buildRecordTreeMeta(displayRecords, records), [displayRecords, records]);
+
+  useEffect(() => {
+    setCollapsedRecordIds(new Set());
+    setCollapsedGroupKeys(new Set());
+  }, [activeView.id]);
 
   useEffect(() => {
     setCollapsedGroupKeys(new Set());
@@ -1399,11 +1409,6 @@ export function BitableGridView({
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [cellContextMenu]);
-
-  useEffect(() => {
-    if (!selectAllRef.current) return;
-    selectAllRef.current.indeterminate = isPartiallySelected;
-  }, [isPartiallySelected]);
 
   useEffect(() => {
     if (!selectionRange) return;
@@ -2491,8 +2496,8 @@ export function BitableGridView({
                         const focusColumn = primaryColumn ?? columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
                         const recordId = insertChildRecord
                           ? insertChildRecord(hoverRecord.id)
-                          : insertRecordAt
-                            ? insertRecordAt(hoverRow + 1, 1)[0]
+                          : insertRecordRelative
+                            ? insertRecordRelative(hoverRecord.id, 'after-subtree', 1)[0]
                             : addRecord();
                         if (recordId) {
                           expandRecord(hoverRecord.id);
@@ -2593,22 +2598,21 @@ export function BitableGridView({
           className="base-grid-index-rail base-grid-index-rail--pinned"
           style={{ width: INDEX_WIDTH, height: canvasHeight }}
         >
-          <label
+          <div
             className="base-grid-index-header"
             style={{ width: INDEX_WIDTH, height: HEADER_HEIGHT }}
             onMouseDown={event => event.stopPropagation()}
             onContextMenu={suppressBrowserContextMenu}
           >
-            <input
-              ref={selectAllRef}
-              type="checkbox"
+            <Checkbox
               className="base-grid-index-checkbox"
               checked={isAllSelected}
+              indeterminate={isPartiallySelected}
               disabled={activeView.locked || records.length === 0}
               onChange={() => toggleAllRecordSelection()}
               aria-label="全选"
             />
-          </label>
+          </div>
           {gridRows.map((row, rowIndex) => {
             if (row.kind !== 'record') return null;
             const record = row.record;
@@ -2670,9 +2674,7 @@ export function BitableGridView({
                               const fromDisplayIndex = displayRecords.findIndex(item => item.id === fromRecord.id);
                               const toDisplayIndex = displayRecords.findIndex(item => item.id === toRecord.id);
                               if (isValidTreeDropTarget(records, displayRecords, fromDisplayIndex, toDisplayIndex)) {
-                                const fromIndex = records.findIndex(item => item.id === fromRecord.id);
-                                const toIndex = records.findIndex(item => item.id === toRecord.id);
-                                reorderRecords(fromIndex, toIndex);
+                                reorderRecords(fromRecord.id, toRecord.id);
                               }
                             }
                           }
@@ -2688,8 +2690,7 @@ export function BitableGridView({
                     >
                       <span className="base-grid-row-drag-handle__dots" aria-hidden />
                     </button>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       className="base-grid-index-checkbox"
                       checked={selectedIds.has(record.id)}
                       disabled={activeView.locked}
@@ -2897,8 +2898,8 @@ export function BitableGridView({
                       const focusColumn = primaryColumn ?? columns.find(column => column.field.id === table.primaryFieldId) ?? columns[0];
                       const recordId = insertChildRecord
                         ? insertChildRecord(hoverRecord.id)
-                        : insertRecordAt
-                          ? insertRecordAt(hoverRow + 1, 1)[0]
+                        : insertRecordRelative
+                          ? insertRecordRelative(hoverRecord.id, 'after-subtree', 1)[0]
                           : addRecord();
                       if (recordId) {
                         expandRecord(hoverRecord.id);
@@ -3107,24 +3108,14 @@ export function BitableGridView({
           top={cellContextMenu.top}
           deleteOnly={cellContextMenu.deleteOnly}
           onInsertAbove={count => {
-            if (insertRecordAt) {
-              const insertIndex = resolveRecordInsertIndex(
-                records,
-                cellContextMenu.recordId,
-                'before',
-              );
-              insertRecordAt(insertIndex, count);
+            if (insertRecordRelative) {
+              insertRecordRelative(cellContextMenu.recordId, 'before', count);
             }
             setCellContextMenu(null);
           }}
           onInsertBelow={count => {
-            if (insertRecordAt) {
-              const insertIndex = resolveRecordInsertIndex(
-                records,
-                cellContextMenu.recordId,
-                'after-subtree',
-              );
-              insertRecordAt(insertIndex, count);
+            if (insertRecordRelative) {
+              insertRecordRelative(cellContextMenu.recordId, 'after-subtree', count);
             }
             setCellContextMenu(null);
           }}

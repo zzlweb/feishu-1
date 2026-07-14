@@ -1,5 +1,7 @@
 import { useReducer, useEffect, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
+import { Input } from 'tdesign-react';
+import type { InputRef } from 'tdesign-react';
 import { BubbleMenu } from '@tiptap/react';
 import type { Editor } from '@tiptap/react';
 import { isTextSelection } from '@tiptap/core';
@@ -339,7 +341,8 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
   const tableOptionsRef = useRef<HTMLDivElement>(null);
   const tableInsertRef = useRef<HTMLDivElement>(null);
   const tableDeleteRef = useRef<HTMLDivElement>(null);
-  const linkInputRef = useRef<HTMLInputElement>(null);
+  const linkRef = useRef<HTMLDivElement>(null);
+  const linkInputRef = useRef<InputRef>(null);
   const moreHeadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCellSelectionRef = useRef<CellSelection | null>(null);
   const [showHeadingMoreFlyout, setShowHeadingMoreFlyout] = useState(false);
@@ -399,6 +402,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
       if (tableOptionsRef.current && !tableOptionsRef.current.contains(t)) setShowTableOptions(false);
       if (tableInsertRef.current && !tableInsertRef.current.contains(t)) setShowTableInsert(false);
       if (tableDeleteRef.current && !tableDeleteRef.current.contains(t)) setShowTableDelete(false);
+      if (linkRef.current && !linkRef.current.contains(t)) setShowLinkInput(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -917,7 +921,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
             <SelGlyphUnderline size={GLYPH} />
           </button>
 
-          {!isTableSelection && <div className="selection-bubble-dropdown selection-bubble-dropdown--link">
+          {!isTableSelection && <div ref={linkRef} className="selection-bubble-dropdown selection-bubble-dropdown--link">
             <button
               type="button"
               className={`selection-bubble-btn ${editor.isActive('link') ? 'selection-bubble-btn--brand active' : ''}`}
@@ -932,15 +936,16 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                 <div className="selection-bubble-link-form">
                   <label className="selection-bubble-link-row">
                     <span className="selection-bubble-link-label">文本</span>
-                    <input
+                    <Input
                       ref={linkInputRef}
-                      type="text"
+                      className="selection-bubble-link-td-input"
+                      size="small"
                       placeholder="输入文本"
                       value={linkText}
-                      onChange={e => setLinkText(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') setLink();
-                        if (e.key === 'Escape') {
+                      onChange={value => setLinkText(String(value ?? ''))}
+                      onEnter={setLink}
+                      onKeydown={(_value, context) => {
+                        if (context.e.key === 'Escape') {
                           setShowLinkInput(false);
                           setLinkText('');
                           setLinkUrl('');
@@ -950,14 +955,16 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                   </label>
                   <label className="selection-bubble-link-row">
                     <span className="selection-bubble-link-label">链接</span>
-                    <input
+                    <Input
+                      className="selection-bubble-link-td-input"
+                      size="small"
                       type="url"
                       placeholder="粘贴或输入链接"
                       value={linkUrl}
-                      onChange={e => setLinkUrl(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') setLink();
-                        if (e.key === 'Escape') {
+                      onChange={value => setLinkUrl(String(value ?? ''))}
+                      onEnter={setLink}
+                      onKeydown={(_value, context) => {
+                        if (context.e.key === 'Escape') {
                           setShowLinkInput(false);
                           setLinkText('');
                           setLinkUrl('');
@@ -1034,7 +1041,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     }`}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      toggleTableHeaderRow(editor);
+                      runWithCellSelection(() => toggleTableHeaderRow(editor));
                       setShowTableOptions(false);
                     }}
                   >
@@ -1052,7 +1059,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                     }`}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
-                      toggleTableHeaderColumn(editor);
+                      runWithCellSelection(() => toggleTableHeaderColumn(editor));
                       setShowTableOptions(false);
                     }}
                   >

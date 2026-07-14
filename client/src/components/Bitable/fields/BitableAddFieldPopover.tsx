@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { Input } from 'tdesign-react';
+import type { InputRef } from 'tdesign-react';
 import { BitableFieldTypePicker } from './BitableFieldTypePicker';
 import { BitableSelectDefaultPicker, BitableSelectOptionsEditor } from './BitableSelectFieldEditor';
 import { fieldTypeGlyph } from './bitableFieldTypeIcons';
@@ -94,7 +96,7 @@ function FieldForm({
   onCancel: () => void;
   onConfirm: (input: CreateFieldInput | UpdateFieldInput) => void;
 }) {
-  const titleRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<InputRef>(null);
   const typeTriggerRef = useRef<HTMLButtonElement>(null);
   const [title, setTitle] = useState(initialName);
   const [fieldType, setFieldType] = useState<BaseFieldType>(initialType);
@@ -105,7 +107,7 @@ function FieldForm({
 
   useEffect(() => {
     titleRef.current?.focus();
-    if (mode === 'edit') titleRef.current?.select();
+    if (mode === 'edit') titleRef.current?.inputElement?.select();
   }, [mode]);
 
   const applyRecommend = (name: string, type: BaseFieldType) => {
@@ -177,20 +179,14 @@ function FieldForm({
         <div className="base-field-popover-new__body">
           <label className="base-b-field-label">
             <span className="base-b-field-label__text">标题</span>
-            <input
+            <Input
               ref={titleRef}
-              className="base-b-field-input"
-              type="text"
-              maxLength={1000}
+              className="base-b-field-td-input"
+              maxlength={1000}
               placeholder={initialName || '请输入字段标题'}
               value={title}
-              onChange={event => setTitle(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  handleConfirm();
-                }
-              }}
+              onChange={value => setTitle(String(value ?? ''))}
+              onEnter={handleConfirm}
             />
           </label>
 
@@ -251,12 +247,12 @@ function FieldForm({
                 默认值
                 <span className="base-b-field-label__info" title="新建记录时自动填入" aria-hidden><GlyphInfo /></span>
               </span>
-              <input
-                className="base-b-field-input"
+              <Input
+                className="base-b-field-td-input"
                 type={fieldType === 'number' ? 'number' : 'text'}
                 placeholder="请输入内容"
                 value={defaultValue}
-                onChange={event => setDefaultValue(event.target.value)}
+                onChange={value => setDefaultValue(String(value ?? ''))}
               />
             </label>
           ) : null}

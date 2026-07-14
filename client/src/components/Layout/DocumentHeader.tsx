@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Dialog, Input, MessagePlugin } from 'tdesign-react';
 import {
@@ -25,13 +25,49 @@ const Protect = wrapIcon(SecuredIcon);
 
 export interface DocumentHeaderProps {
   doc: Document;
-  saveStatus: 'saved' | 'saving' | 'idle';
+  saveStatus: 'saved' | 'saving' | 'error' | 'idle';
   readOnly: boolean;
   onReadOnlyChange: (readOnly: boolean) => void;
 }
 
 function displayTitle(doc: Document) {
   return doc.title?.trim() || '未命名文档';
+}
+
+interface DocumentSearchMatch {
+  node: Text;
+  parent: HTMLElement;
+}
+
+function clearDocumentSearchHighlight() {
+  document.querySelectorAll('.doc-search-hit').forEach(element => {
+    element.classList.remove('doc-search-hit');
+  });
+}
+
+function collectDocumentSearchMatches(query: string): DocumentSearchMatch[] {
+  const workspace = document.querySelector('.doc-page-workspace');
+  const root = workspace?.querySelector('.ProseMirror') || workspace;
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!root || !normalizedQuery) return [];
+
+  const matches: DocumentSearchMatch[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const textNode = node as Text;
+    const parent = textNode.parentElement;
+    if (parent && !parent.closest('script, style, [hidden], [aria-hidden="true"]')) {
+      const content = textNode.data.toLocaleLowerCase();
+      let offset = content.indexOf(normalizedQuery);
+      while (offset >= 0) {
+        matches.push({ node: textNode, parent });
+        offset = content.indexOf(normalizedQuery, offset + normalizedQuery.length);
+      }
+    }
+    node = walker.nextNode();
+  }
+  return matches;
 }
 
 export default function DocumentHeader({
@@ -45,6 +81,9 @@ export default function DocumentHeader({
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchValue, setSearchValue] = useState('');
+  const [searchResultCount, setSearchResultCount] = useState(0);
+  const [searchResultIndex, setSearchResultIndex] = useState(-1);
+  const searchResultIndexRef = useRef(-1);
   const moreMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,21 +92,9 @@ export default function DocumentHeader({
         setShowMoreMenu(false);
       }
     };
-    const handleKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        setSearchVisible(true);
-      }
-      if (e.key === 'Escape') {
-        setShowMoreMenu(false);
-        setSearchVisible(false);
-      }
-    };
     document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', handleKey);
     return () => {
       document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', handleKey);
     };
   }, []);
 
@@ -120,24 +147,59 @@ export default function DocumentHeader({
     }
   };
 
-  const handleSearchInDocument = () => {
-    const text = searchValue.trim();
-    if (!text) return;
-    const root = document.querySelector('.doc-page-workspace');
-    const walker = document.createTreeWalker(root || document.body, NodeFilter.SHOW_TEXT);
-    let node: Node | null = walker.nextNode();
-    while (node) {
-      if (node.textContent?.toLowerCase().includes(text.toLowerCase())) {
-        const parent = node.parentElement;
-        parent?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        parent?.classList.add('doc-search-hit');
-        window.setTimeout(() => parent?.classList.remove('doc-search-hit'), 1600);
+  const navigateSearchResult = useCallback((direction: 1 | -1) => {
+    const matches = collectDocumentSearchMatches(searchValue);
+    setSearchResultCount(matches.length);
+    clearDocumentSearchHighlight();
+    if (matches.length === 0) {
+      searchResultIndexRef.current = -1;
+      setSearchResultIndex(-1);
+      if (searchValue.trim()) void MessagePlugin.info('未找到匹配内容');
+      return;
+    }
+
+    const current = searchResultIndexRef.current;
+    const next = current < 0
+      ? (direction > 0 ? 0 : matches.length - 1)
+      : (current + direction + matches.length) % matches.length;
+    const match = matches[next];
+    searchResultIndexRef.current = next;
+    setSearchResultIndex(next);
+    match.parent.classList.add('doc-search-hit');
+    match.parent.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [searchValue]);
+
+  useEffect(() => {
+    clearDocumentSearchHighlight();
+    searchResultIndexRef.current = -1;
+    setSearchResultIndex(-1);
+    setSearchResultCount(searchVisible ? collectDocumentSearchMatches(searchValue).length : 0);
+    return clearDocumentSearchHighlight;
+  }, [doc.id, searchValue, searchVisible]);
+
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setSearchVisible(true);
         return;
       }
-      node = walker.nextNode();
-    }
-    void MessagePlugin.info('未找到匹配内容');
-  };
+      if (!searchVisible) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowMoreMenu(false);
+        setSearchVisible(false);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'F3' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const isPrevious = event.shiftKey || event.key === 'ArrowUp';
+        navigateSearchResult(isPrevious ? -1 : 1);
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [navigateSearchResult, searchVisible]);
 
   return (
     <header className="doc-page-header">
@@ -170,8 +232,15 @@ export default function DocumentHeader({
                 内部信息
               </span>
               <span className="header-meta-vsep" aria-hidden />
-              <span className="header-meta-item header-meta-cloud">
-                {saveStatus === 'saving' ? '保存中...' : '已保存到云端'}
+              <span
+                className={`header-meta-item header-meta-cloud${saveStatus === 'error' ? ' is-error' : ''}`}
+                title={saveStatus === 'error' ? '保存失败，请检查网络后继续编辑以重试' : undefined}
+              >
+                {saveStatus === 'saving'
+                  ? '保存中...'
+                  : saveStatus === 'error'
+                    ? '保存失败'
+                    : '已保存到云端'}
               </span>
             </div>
           </div>
@@ -187,8 +256,28 @@ export default function DocumentHeader({
                 value={searchValue}
                 placeholder="搜索正文"
                 onChange={value => setSearchValue(String(value))}
-                onEnter={handleSearchInDocument}
               />
+              <span className="doc-header-search__count" aria-live="polite">
+                {searchResultIndex >= 0 ? searchResultIndex + 1 : 0}/{searchResultCount}
+              </span>
+              <button
+                type="button"
+                className="doc-header-search__nav"
+                aria-label="上一个搜索结果"
+                disabled={searchResultCount === 0}
+                onClick={() => navigateSearchResult(-1)}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="doc-header-search__nav"
+                aria-label="下一个搜索结果"
+                disabled={searchResultCount === 0}
+                onClick={() => navigateSearchResult(1)}
+              >
+                ↓
+              </button>
             </div>
           )}
 

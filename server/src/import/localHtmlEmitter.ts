@@ -29,7 +29,56 @@ function renderInlines(inlines: ImportedInline[]) {
 }
 
 function renderBlockChildren(blocks: ImportedBlock[]) {
-  return blocks.map(renderImportedBlock).join('');
+  return collapseConsecutiveEmptyParagraphBlocks(blocks).map(renderImportedBlock).join('');
+}
+
+function isEmptyImportedParagraph(block: ImportedBlock) {
+  if (block.type !== 'paragraph') return false;
+  return block.inlines.every(inline => !inline.text.replace(/\u00a0/g, '').trim());
+}
+
+/** 导入时折叠连续空段落，避免多维表格等块下方留下大片空白 */
+function collapseConsecutiveEmptyParagraphBlocks(blocks: ImportedBlock[]): ImportedBlock[] {
+  const result: ImportedBlock[] = [];
+  let emptyRun = 0;
+  for (const block of blocks) {
+    if (isEmptyImportedParagraph(block)) {
+      emptyRun += 1;
+      if (emptyRun <= 1) result.push(block);
+      continue;
+    }
+    emptyRun = 0;
+    if (block.type === 'quote') {
+      result.push({ ...block, blocks: collapseConsecutiveEmptyParagraphBlocks(block.blocks) });
+      continue;
+    }
+    if (block.type === 'list') {
+      result.push({
+        ...block,
+        items: block.items.map(item => ({
+          ...item,
+          blocks: collapseConsecutiveEmptyParagraphBlocks(item.blocks),
+        })),
+      });
+      continue;
+    }
+    if (block.type === 'columns') {
+      result.push({
+        ...block,
+        columns: block.columns.map(column => collapseConsecutiveEmptyParagraphBlocks(column)),
+      });
+      continue;
+    }
+    if (block.type === 'highlight') {
+      result.push({
+        ...block,
+        content: collapseConsecutiveEmptyParagraphBlocks(block.content),
+      });
+      continue;
+    }
+    result.push(block);
+  }
+  return result;
 }
 
 function renderTableCell(cell: ImportedTableCell) {

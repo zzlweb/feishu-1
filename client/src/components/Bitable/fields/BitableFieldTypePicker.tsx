@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { Input } from 'tdesign-react';
+import type { InputRef } from 'tdesign-react';
 import { fieldTypeGlyph } from './bitableFieldTypeIcons';
 import { filterFieldTypeGroups, type FieldTypeGroupDef } from './bitableFieldTypes';
 import type { BaseFieldType } from '../model/bitableModel';
@@ -10,17 +12,6 @@ function GlyphSearch({ size = 16 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
         d="M16.473 17.887A9.46 9.46 0 0 1 10.5 20a9.5 9.5 0 1 1 9.5-9.5 9.46 9.46 0 0 1-2.113 5.973l3.773 3.773a.996.996 0 0 1-.007 1.407.996.996 0 0 1-1.407.007l-3.773-3.773ZM18 10.5a7.5 7.5 0 1 0-15 0 7.5 7.5 0 0 0 15 0Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-function GlyphClear({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M12 23C5.925 23 1 18.075 1 12S5.925 1 12 1s11 4.925 11 11-4.925 11-11 11Zm3.874-16.635L12 10.239 8.126 6.365a1.245 1.245 0 1 0-1.761 1.76L10.239 12l-3.874 3.874a1.245 1.245 0 1 0 1.76 1.761L12 13.761l3.874 3.874a1.245 1.245 0 1 0 1.761-1.76L13.761 12l3.874-3.874a1.245 1.245 0 1 0-1.76-1.761Z"
         fill="currentColor"
       />
     </svg>
@@ -98,7 +89,7 @@ export function BitableFieldTypePicker({
   onSelect: (type: BaseFieldType) => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<InputRef>(null);
   const [query, setQuery] = useState('');
   const position = useAnchoredFloatingPosition(anchorRef, panelRef, open, {
     placement: 'right-start',
@@ -155,27 +146,15 @@ export function BitableFieldTypePicker({
       <div className="base-b-field-option-panel">
         <div className="base-b-field-option-search">
           <span className="base-b-field-option-search__prefix" aria-hidden><GlyphSearch /></span>
-          <input
+          <Input
             ref={searchRef}
-            className="base-b-field-option-search__input"
-            type="text"
+            className="base-b-field-option-search__td-input"
+            borderless
+            clearable
             placeholder="搜索"
             value={query}
-            onChange={event => setQuery(event.target.value)}
+            onChange={value => setQuery(String(value ?? ''))}
           />
-          {query && (
-            <button
-              type="button"
-              className="base-b-field-option-search__clear"
-              aria-label="清除搜索"
-              onClick={() => {
-                setQuery('');
-                searchRef.current?.focus();
-              }}
-            >
-              <GlyphClear />
-            </button>
-          )}
         </div>
         <div className="base-b-field-options">
           <div className="base-b-field-option-list" style={{ maxHeight: position.maxHeight - 48 }}>

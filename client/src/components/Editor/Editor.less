@@ -1066,8 +1066,28 @@
             min-width: 0;
           }
 
-          .feishu-code-block__language {
+          .feishu-code-block__language,
+          .feishu-code-block__td-language {
             max-width: 140px;
+          }
+
+          .feishu-code-block__td-language .t-select__wrap {
+            width: 140px;
+          }
+
+          .feishu-code-block__td-language .t-input {
+            height: 24px;
+            min-height: 24px;
+            border: none;
+            background: transparent;
+            font-size: 12px;
+          }
+
+          .feishu-code-block__td-language .t-input:hover {
+            background: #edf0f3;
+          }
+
+          .feishu-code-block__language {
             height: 24px;
             padding: 0 20px 0 6px;
             border: none;
@@ -3169,6 +3189,12 @@
           flex: 1;
         }
 
+        .feishu-button-block__td-type .t-select__wrap,
+        .feishu-button-block__td-input.t-input__wrap,
+        .feishu-button-block__td-input .t-input__wrap {
+          width: 100%;
+        }
+
         .feishu-button-block__type {
           cursor: pointer;
         }
@@ -3238,8 +3264,20 @@
         }
 
         .button-panel__input,
-        .button-panel__select {
+        .button-panel__select,
+        .button-panel__td-select,
+        .button-panel__td-input {
           width: 100%;
+        }
+
+        .button-panel__td-select .t-select__wrap,
+        .button-panel__td-input.t-input__wrap,
+        .button-panel__td-input .t-input__wrap {
+          width: 100%;
+        }
+
+        .button-panel__input,
+        .button-panel__select {
           height: 32px;
           padding: 5px 10px;
           border: 1px solid #d0d3d6;
@@ -3490,11 +3528,25 @@
         }
 
         .feishu-bitable-block {
-          margin: 12px 0 24px;
+          margin: 8px 0 12px;
           border: 0;
           border-radius: 0;
           background: #fff;
           overflow: visible;
+          cursor: default;
+          caret-color: transparent;
+        }
+
+        .feishu-bitable-block,
+        .feishu-bitable-block * {
+          caret-color: transparent;
+        }
+
+        .feishu-bitable-block input,
+        .feishu-bitable-block textarea,
+        .feishu-bitable-block [contenteditable="true"] {
+          caret-color: #3370ff;
+          cursor: text;
         }
 
         .feishu-bitable-block.is-selected,
@@ -4195,10 +4247,18 @@
     font-weight: 400;
   }
 
-  .editor-page-link-input {
+  .editor-page-link-input,
+  .editor-page-link-td-input {
     box-sizing: border-box;
     flex: 1;
     min-width: 0;
+  }
+
+  .editor-page-link-td-input .t-input__wrap {
+    width: 100%;
+  }
+
+  .editor-page-link-input {
     height: 30px;
     padding: 0 10px;
     border: 1px solid #dee0e3;

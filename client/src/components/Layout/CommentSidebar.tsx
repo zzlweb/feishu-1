@@ -247,11 +247,22 @@ export default function CommentSidebar({
     updatePositions();
     const container = mainScrollRef.current;
     if (!container) return;
+    let scrollFrame = 0;
+    const handleScroll = () => {
+      if (scrollFrame) return;
+      scrollFrame = window.requestAnimationFrame(() => {
+        scrollFrame = 0;
+        updatePositions();
+      });
+    };
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updatePositions) : null;
     ro?.observe(container);
     const mo = new MutationObserver(updatePositions);
     mo.observe(container, { childList: true, subtree: true });
+    container.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
+      if (scrollFrame) window.cancelAnimationFrame(scrollFrame);
+      container.removeEventListener('scroll', handleScroll);
       ro?.disconnect();
       mo.disconnect();
     };
@@ -328,7 +339,8 @@ export default function CommentSidebar({
               const nextPanelBlockId = panelIdx >= 0 && panelIdx < resolvedPanels.length - 1 ? resolvedPanels[panelIdx + 1]!.blockId : null;
 
               const openComposer = () => {
-                onJumpToBlock(anchorBlockId || blockId);
+                // 草稿按 thread key 隔离；正文定位仍由 onJumpToBlock 内部解析真实锚点。
+                onJumpToBlock(blockId);
                 setReplyingBlockId(blockId);
                 onInputChange('');
               };

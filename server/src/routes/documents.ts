@@ -14,6 +14,7 @@ import {
   getAllTemplates,
   createTemplateRecord,
   deleteTemplateById,
+  CommentRecord,
 } from '../database';
 import { importDocumentFile } from '../documentImporter';
 import { importFeishuPublicUrl } from '../feishuPublicImporter';
@@ -23,6 +24,56 @@ const importUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 200 * 1024 * 1024 },
 });
+
+interface RequestBody {
+  [key: string]: unknown;
+}
+
+const commentStringFields = [
+  'thread_id',
+  'parent_id',
+  'message_id',
+  'block_id',
+  'author',
+  'quote',
+  'anchor_json',
+  'mentioned_user_ids',
+  'private_visible_user_ids',
+] as const;
+const commentAnchorTypes = new Set<NonNullable<CommentRecord['anchor_type']>>([
+  'text-range', 'block', 'image', 'video', 'file', 'table-cell', 'table-range', 'document',
+]);
+const commentVisibilities = new Set<NonNullable<CommentRecord['visibility']>>(['public', 'private']);
+
+function isRequestBody(value: unknown): value is RequestBody {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getCommentBodyError(body: unknown): string | undefined {
+  if (!isRequestBody(body)) return '请求体必须是对象';
+  if (body.id !== undefined && (typeof body.id !== 'string' || body.id.trim().length === 0)) {
+    return '评论 id 必须是非空字符串';
+  }
+  for (const field of commentStringFields) {
+    if (body[field] !== undefined && typeof body[field] !== 'string') {
+      return `评论字段 ${field} 必须是字符串`;
+    }
+  }
+  for (const field of ['position_from', 'position_to'] as const) {
+    if (body[field] !== undefined && (typeof body[field] !== 'number' || !Number.isFinite(body[field]))) {
+      return `评论字段 ${field} 必须是有限数字`;
+    }
+  }
+  if (body.anchor_type !== undefined
+    && (typeof body.anchor_type !== 'string' || !commentAnchorTypes.has(body.anchor_type as NonNullable<CommentRecord['anchor_type']>))) {
+    return '评论字段 anchor_type 无效';
+  }
+  if (body.visibility !== undefined
+    && (typeof body.visibility !== 'string' || !commentVisibilities.has(body.visibility as NonNullable<CommentRecord['visibility']>))) {
+    return '评论字段 visibility 无效';
+  }
+  return undefined;
+}
 
 // GET /api/documents - 获取文档列表
 router.get('/', (_req: Request, res: Response) => {
@@ -289,23 +340,42 @@ router.get('/:id/comments', (req: Request, res: Response) => {
 // POST /api/documents/:id/comments
 router.post('/:id/comments', (req: Request, res: Response) => {
   try {
-    const id = uuidv4();
-    const { content, author = '张正亮', block_id = '', position_from = 0, position_to = 0 } = req.body;
+    if (!getDocumentById(req.params.id)) {
+      return res.status(404).json({ code: -1, message: '文档不存在' });
+    }
+    const validationError = getCommentBodyError(req.body);
+    if (validationError) {
+      return res.status(400).json({ code: -1, message: validationError });
+    }
+    const body = req.body as RequestBody;
+    const content = body.content;
     if (!content || typeof content !== 'string' || !content.trim()) {
       return res.status(400).json({ code: -1, message: '评论内容不能为空' });
     }
+    const id = typeof body.id === 'string' ? body.id : uuidv4();
+    const blockId = typeof body.block_id === 'string' ? body.block_id : '';
     const now = new Date().toISOString();
     const comment = createCommentRecord({
       id,
       document_id: req.params.id,
-      block_id,
+      block_id: blockId,
+      thread_id: typeof body.thread_id === 'string' && body.thread_id ? body.thread_id : blockId || id,
+      parent_id: typeof body.parent_id === 'string' ? body.parent_id : undefined,
+      message_id: typeof body.message_id === 'string' && body.message_id ? body.message_id : id,
       content: content.trim(),
-      author,
-      position_from,
-      position_to,
+      author: typeof body.author === 'string' ? body.author : '张正亮',
+      position_from: typeof body.position_from === 'number' ? body.position_from : 0,
+      position_to: typeof body.position_to === 'number' ? body.position_to : 0,
       created_at: now,
       updated_at: now,
       resolved: 0,
+      status: 'open',
+      visibility: body.visibility as CommentRecord['visibility'] ?? 'public',
+      quote: typeof body.quote === 'string' ? body.quote : undefined,
+      anchor_type: body.anchor_type as CommentRecord['anchor_type'],
+      anchor_json: typeof body.anchor_json === 'string' ? body.anchor_json : undefined,
+      mentioned_user_ids: typeof body.mentioned_user_ids === 'string' ? body.mentioned_user_ids : undefined,
+      private_visible_user_ids: typeof body.private_visible_user_ids === 'string' ? body.private_visible_user_ids : undefined,
     });
     res.status(201).json({ code: 0, data: comment });
   } catch (err: any) {

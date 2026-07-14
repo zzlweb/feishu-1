@@ -113,6 +113,20 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (activeSubmenu) {
+        if (e.key === 'Escape' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          e.stopPropagation();
+          setActiveSubmenu(null);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+          // 子菜单目前分别处理鼠标选择；打开时不能让主菜单误执行当前主项。
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setActiveIdx(i => Math.min(i + 1, Math.max(0, allItems.length - 1)));
@@ -133,7 +147,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     return () => {
       window.removeEventListener('keydown', handler, true);
     };
-  }, [allItems, activeIdx, editor, onBeforeSelect, onClose]);
+  }, [activeSubmenu, allItems, activeIdx, editor, onBeforeSelect, onClose]);
 
   if (allItems.length === 0) return null;
 

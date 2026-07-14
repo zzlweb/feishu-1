@@ -12,9 +12,18 @@ process.env.NODE_ENV = 'test';
 
 const app = (appModule as any).default ?? appModule;
 
-async function withApi<T>(fn: (api: <R>(url: string, init?: RequestInit) => Promise<{ status: number; body: R }>) => Promise<T>) {
+interface ApiTestContext {
+  dbPath: string;
+  tempDir: string;
+}
+
+async function withApi<T>(fn: (
+  api: <R>(url: string, init?: RequestInit) => Promise<{ status: number; body: R }>,
+  context: ApiTestContext,
+) => Promise<T>) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feishu-doc-api-'));
-  process.env.FEISHU_DOC_DB_PATH = path.join(tempDir, 'db.json');
+  const dbPath = path.join(tempDir, 'db.json');
+  process.env.FEISHU_DOC_DB_PATH = dbPath;
 
   let server!: Server;
   await new Promise<void>((resolve) => {
@@ -32,7 +41,7 @@ async function withApi<T>(fn: (api: <R>(url: string, init?: RequestInit) => Prom
   }
 
   try {
-    return await fn(api);
+    return await fn(api, { dbPath, tempDir });
   } finally {
     server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
@@ -133,6 +142,123 @@ test('health API returns ok', async () => {
     const health = await api<any>('/api/health');
     assert.equal(health.status, 200);
     assert.equal(health.body.status, 'ok');
+  });
+});
+
+test('legacy comments are normalized and restored from the database', async () => {
+  await withApi(async (api, { dbPath }) => {
+    const createdAt = '2026-01-02T03:04:05.000Z';
+    fs.writeFileSync(dbPath, JSON.stringify({
+      documents: [{
+        id: 'legacy-document',
+        title: '旧文档',
+        content: '<p>legacy</p>',
+        author: '旧用户',
+        created_at: createdAt,
+        updated_at: createdAt,
+        is_template: 0,
+      }],
+      comments: [{
+        id: 'legacy-comment',
+        document_id: 'legacy-document',
+        block_id: 'legacy-block',
+        content: '旧评论',
+        author: '旧用户',
+        position_from: 1,
+        position_to: 3,
+        created_at: createdAt,
+        resolved: 0,
+      }],
+      templates: [],
+    }), 'utf-8');
+
+    const comments = await api<any>('/api/documents/legacy-document/comments');
+    assert.equal(comments.status, 200);
+    assert.equal(comments.body.data[0].thread_id, 'legacy-block');
+    assert.equal(comments.body.data[0].message_id, 'legacy-comment');
+    assert.equal(comments.body.data[0].status, 'open');
+    assert.equal(comments.body.data[0].visibility, 'public');
+    assert.equal(comments.body.data[0].updated_at, createdAt);
+
+    const persisted = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+    assert.deepEqual(persisted.documents[0].collapsed_heading_ids, []);
+    assert.equal(persisted.comments[0].thread_id, 'legacy-block');
+    assert.equal(persisted.comments[0].visibility, 'public');
+    assert.ok(persisted.templates.length > 0);
+  });
+});
+
+test('comment creation validates its target and persists client comment fields', async () => {
+  await withApi(async (api, { dbPath }) => {
+    const missing = await api<any>('/api/documents/missing-document/comments', {
+      method: 'POST',
+      body: JSON.stringify({ content: '不能写入' }),
+    });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.message, '文档不存在');
+
+    const document = await api<any>('/api/documents', {
+      method: 'POST',
+      body: JSON.stringify({ title: '评论字段测试' }),
+    });
+    const documentId = document.body.data.id;
+    const payload = {
+      id: 'client-comment-id',
+      thread_id: 'client-thread-id',
+      parent_id: 'parent-comment-id',
+      message_id: 'client-message-id',
+      block_id: 'paragraph-1',
+      content: '字段完整的评论',
+      author: '测试员',
+      position_from: 4,
+      position_to: 9,
+      quote: '引用文字',
+      anchor_type: 'text-range',
+      anchor_json: '{"from":4,"to":9}',
+      visibility: 'private',
+      mentioned_user_ids: '["user-1"]',
+      private_visible_user_ids: '["user-2"]',
+    };
+    const created = await api<any>(`/api/documents/${documentId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    assert.equal(created.status, 201);
+    for (const [field, value] of Object.entries(payload)) {
+      assert.equal(created.body.data[field], value);
+    }
+    assert.equal(created.body.data.document_id, documentId);
+    assert.equal(created.body.data.status, 'open');
+
+    const persisted = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+    const savedComment = persisted.comments.find((item: any) => item.id === payload.id);
+    assert.ok(savedComment);
+    for (const [field, value] of Object.entries(payload)) {
+      assert.equal(savedComment[field], value);
+    }
+
+    const invalid = await api<any>(`/api/documents/${documentId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ content: 'bad', anchor_type: 'unknown' }),
+    });
+    assert.equal(invalid.status, 400);
+  });
+});
+
+test('a corrupt database is backed up and never overwritten', async () => {
+  await withApi(async (api, { dbPath, tempDir }) => {
+    const corruptContents = '{"documents": [';
+    fs.writeFileSync(dbPath, corruptContents, 'utf-8');
+
+    const response = await api<any>('/api/documents');
+    assert.equal(response.status, 500);
+    assert.match(response.body.message, /数据库文件损坏/);
+    assert.match(response.body.message, /原文件未被覆盖/);
+    assert.equal(fs.readFileSync(dbPath, 'utf-8'), corruptContents);
+
+    const backups = fs.readdirSync(tempDir).filter(name => /^db\.json\.corrupt-\d+T\d+Z(?:-\d+)?\.bak$/.test(name));
+    assert.equal(backups.length, 1);
+    assert.equal(fs.readFileSync(path.join(tempDir, backups[0]), 'utf-8'), corruptContents);
   });
 });
 

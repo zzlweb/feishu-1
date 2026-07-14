@@ -373,12 +373,30 @@ export function formatHistoryTime(iso: string) {
 export function formatCardDateValue(value: CellValue) {
   const text = valueText(value);
   if (!text) return '';
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return text;
+  const date = parseDateCellValue(value);
+  if (!date) return text;
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}/${month}/${day}`;
+}
+
+export function parseDateCellValue(value: CellValue): Date | null {
+  const raw = valueText(value).trim();
+  const match = raw.match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/);
+  if (!match) return null;
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year
+    || date.getMonth() !== month - 1
+    || date.getDate() !== day
+  ) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
 }
 
 const SELECT_CHOICE_FALLBACK_COLORS = [
@@ -632,7 +650,8 @@ export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' | 'kan
     { id: startDateId, name: '开始日期', type: 'date' },
     { id: endDateId, name: '结束日期', type: 'date' },
   ];
-  const records = Array.from({ length: 3 }, (_, index) => createRecord(tableId, fields, titleId, initialView === 'grid' ? `任务 ${index + 1}` : `卡片 ${index + 1}`));
+  const recordCount = initialView === 'kanban' ? 0 : 3;
+  const records = Array.from({ length: recordCount }, (_, index) => createRecord(tableId, fields, titleId, initialView === 'grid' ? `任务 ${index + 1}` : `卡片 ${index + 1}`));
   if (initialView === 'grid') {
     const statuses = ['未开始', '进行中', '已完成'];
     const starts = ['2026/05/25', '2026/05/27', '2026/05/29'];
@@ -653,12 +672,6 @@ export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' | 'kan
       end.setDate(start.getDate() + 3);
       record.fields[startDateId] = start.toISOString().slice(0, 10);
       record.fields[endDateId] = end.toISOString().slice(0, 10);
-      record.fields[titleId] = `任务 ${index + 1}`;
-      record.fields[statusId] = '未开始';
-    });
-  }
-  if (initialView === 'kanban') {
-    records.forEach((record, index) => {
       record.fields[titleId] = `任务 ${index + 1}`;
       record.fields[statusId] = '未开始';
     });
@@ -1028,6 +1041,16 @@ export function reorderRecordsInTree(records: BaseRecord[], fromIndex: number, t
   return normalizeRecordTreeOrder(next);
 }
 
+export function reorderRecordsInTreeById(
+  records: BaseRecord[],
+  sourceRecordId: string,
+  targetRecordId: string,
+): BaseRecord[] {
+  const fromIndex = records.findIndex(record => record.id === sourceRecordId);
+  const toIndex = records.findIndex(record => record.id === targetRecordId);
+  return reorderRecordsInTree(records, fromIndex, toIndex);
+}
+
 export interface RecordTreeRowMeta {
   depth: number;
   guideContinues: boolean[];
@@ -1174,7 +1197,10 @@ export function filterRecordsForView(table: BaseTable, view: BaseView): BaseReco
       return text.toLocaleLowerCase().includes(search);
     })) return false;
     return activeFilters.every(rule => {
-      const text = valueText(record.fields[rule.fieldId]).toLocaleLowerCase();
+      const field = table.fields.find(item => item.id === rule.fieldId);
+      const text = field?.type === 'multi_select'
+        ? multiSelectDisplayText(field, record.fields[rule.fieldId]).toLocaleLowerCase()
+        : valueText(record.fields[rule.fieldId]).toLocaleLowerCase();
       const needle = String(rule.value || '').trim().toLocaleLowerCase();
       if (rule.operator === 'is_empty') return !text;
       if (rule.operator === 'is_not_empty') return Boolean(text);
@@ -1231,51 +1257,31 @@ export function resolveRecordInsertIndex(
 /** 将当前视图中的插入位置映射到归一化存储数组下标 */
 export function resolveStorageInsertIndex(
   table: BaseTable,
-  view: BaseView,
-  position: {
-    visibleIndex?: number;
-    recordId?: string;
-    mode?: 'before' | 'after-subtree' | 'append';
-  },
+  position:
+    | { mode: 'append' }
+    | { recordId: string; mode: 'before' | 'after-subtree' },
 ): number {
   const normalized = normalizeRecordTreeOrder(table.records);
-  const visible = visibleRecords({ ...table, records: normalized }, view);
 
   if (position.mode === 'append') {
     return normalized.length;
   }
 
-  if (position.visibleIndex != null && position.visibleIndex >= visible.length) {
-    if (!visible.length) return normalized.length;
-    const lastStorageIndex = normalized.findIndex(record => record.id === visible[visible.length - 1].id);
-    return findInsertIndexAfterSubtree(normalized, lastStorageIndex);
-  }
-
-  if (position.recordId) {
-    const storageIndex = normalized.findIndex(record => record.id === position.recordId);
-    if (storageIndex < 0) return normalized.length;
-    if (position.mode === 'after-subtree') return findInsertIndexAfterSubtree(normalized, storageIndex);
-    return storageIndex;
-  }
-
-  const visibleIndex = position.visibleIndex ?? 0;
-  const targetId = visible[visibleIndex]?.id;
-  if (!targetId) return normalized.length;
-  return normalized.findIndex(record => record.id === targetId);
+  const storageIndex = normalized.findIndex(record => record.id === position.recordId);
+  if (storageIndex < 0) return normalized.length;
+  if (position.mode === 'after-subtree') return findInsertIndexAfterSubtree(normalized, storageIndex);
+  return storageIndex;
 }
 
 export function insertRecordsIntoTable(
   table: BaseTable,
-  view: BaseView,
   recordsToInsert: BaseRecord[],
-  position: {
-    visibleIndex?: number;
-    recordId?: string;
-    mode?: 'before' | 'after-subtree' | 'append';
-  },
+  position:
+    | { mode: 'append' }
+    | { recordId: string; mode: 'before' | 'after-subtree' },
 ): BaseRecord[] {
   const normalized = normalizeRecordTreeOrder(table.records);
-  const insertIndex = resolveStorageInsertIndex({ ...table, records: normalized }, view, position);
+  const insertIndex = resolveStorageInsertIndex({ ...table, records: normalized }, position);
   const next = [...normalized];
   next.splice(insertIndex, 0, ...recordsToInsert);
   return next;
@@ -1292,6 +1298,24 @@ export function visibleRecords(table: BaseTable, view: BaseView): BaseRecord[] {
     const result = compareRecordsBySorts(a.record, b.record, sorts);
     return result || a.index - b.index;
   }).map(item => item.record);
+}
+
+/** 底部「+」新增时，在有排序的情况下仍把新行按新增顺序固定显示在列表末尾 */
+export function pinRecordsToVisibleBottom(records: BaseRecord[], pinnedIds: readonly string[]): BaseRecord[] {
+  if (!pinnedIds.length) return records;
+  const recordById = new Map(records.map(record => [record.id, record]));
+  const pinnedSet = new Set(pinnedIds);
+  const rest = records.filter(record => !pinnedSet.has(record.id));
+  const pinned = pinnedIds
+    .map(id => recordById.get(id))
+    .filter((record): record is BaseRecord => Boolean(record));
+  if (!pinned.length) return records;
+  return [...rest, ...pinned];
+}
+
+/** @deprecated 使用 pinRecordsToVisibleBottom */
+export function pinRecordToVisibleBottom(records: BaseRecord[], recordId: string | null | undefined): BaseRecord[] {
+  return pinRecordsToVisibleBottom(records, recordId ? [recordId] : []);
 }
 
 export function groupRecords(table: BaseTable, view: BaseView, records: BaseRecord[]) {
@@ -1358,13 +1382,21 @@ export function copyView(table: BaseTable, viewId: string): BaseTable {
 }
 
 export function deleteView(table: BaseTable, viewId: string): BaseTable {
-  if (table.views.length <= 1) return table;
+  const visibleViews = getVisibleViews(table);
+  if (visibleViews.length <= 1 && visibleViews.some(view => view.id === viewId)) return table;
   const index = table.views.findIndex(view => view.id === viewId);
   if (index < 0) return table;
   const views = table.views.filter(view => view.id !== viewId);
-  const activeViewId = table.activeViewId === viewId
-    ? views[Math.max(0, index - 1)]?.id || views[0].id
-    : table.activeViewId;
+  let activeViewId = table.activeViewId;
+  if (activeViewId === viewId) {
+    const visibleIndex = visibleViews.findIndex(view => view.id === viewId);
+    const remainingVisible = visibleViews.filter(view => view.id !== viewId);
+    activeViewId = remainingVisible[Math.max(0, visibleIndex - 1)]?.id
+      || remainingVisible[0]?.id
+      || views[Math.max(0, index - 1)]?.id
+      || views[0]?.id
+      || table.activeViewId;
+  }
   return { ...table, views, activeViewId };
 }
 

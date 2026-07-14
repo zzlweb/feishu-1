@@ -29,6 +29,22 @@ const CATALOGUE_RAIL_WIDTH = 232;
 const DOC_MAIN_MIN_GUTTER = 24;
 const COMMENT_SIDEBAR_WIDTH = 280;
 
+/** 侧栏展开会触发布局重排；在若干帧后把滚动位置拉回，避免误跳到顶部 */
+function preserveWorkspaceScroll(scrollRoot: HTMLElement | null, savedScrollTop: number) {
+  if (!scrollRoot) return;
+  const restore = () => {
+    if (Math.abs(scrollRoot.scrollTop - savedScrollTop) > 1) {
+      scrollRoot.scrollTop = savedScrollTop;
+    }
+  };
+  restore();
+  requestAnimationFrame(() => {
+    restore();
+    requestAnimationFrame(restore);
+  });
+  window.setTimeout(restore, 50);
+}
+
 function isCatalogueAreaSqueezed(pageMain: HTMLElement, commentSidebarOpen: boolean): boolean {
   const bitableBlocks = pageMain.querySelectorAll<HTMLElement>('.feishu-bitable-block');
   for (const block of bitableBlocks) {
@@ -53,14 +69,14 @@ export default function DocumentPage() {
   const [headings, setHeadings] = useState<HeadingItem[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'idle'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | 'idle'>('idle');
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentSidebarVisible, setCommentSidebarVisible] = useState(false);
   const [bitableCommentActive, setBitableCommentActive] = useState(false);
   const [bitableUnresolvedCount, setBitableUnresolvedCount] = useState(0);
   const [commentTrackHost, setCommentTrackHost] = useState<HTMLElement | null>(null);
   const [activeCommentBlockId, setActiveCommentBlockId] = useState('');
-  const [commentInput, setCommentInput] = useState('');
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [pendingCommentAnchor, setPendingCommentAnchor] = useState<{
     blockId: string;
     threadId: string;
@@ -73,13 +89,15 @@ export default function DocumentPage() {
   const outlineWasVisibleRef = useRef(false);
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const pageMainRef = useRef<HTMLElement>(null);
-  const sidebarRef = useRef<HTMLDivElement>(null);
   const sidebarCollapsedRef = useRef(sidebarCollapsed);
   const sidebarAutoCollapsedRef = useRef(false);
   const sidebarUserCollapsedRef = useRef(false);
   sidebarCollapsedRef.current = sidebarCollapsed;
   const collapsedPersistReadyRef = useRef(false);
   const collapsedPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveRequestSequenceRef = useRef(0);
+  const latestSaveByFieldRef = useRef<Record<string, number>>({});
   const [titleInputSnapshot, setTitleInputSnapshot] = useState('');
   const [catalogueActiveId, setCatalogueActiveId] = useState<string | null>(null);
   const [collapsedHeadingIds, setCollapsedHeadingIds] = useState<Set<string>>(() => new Set());
@@ -90,6 +108,12 @@ export default function DocumentPage() {
 
   const catalogueTitleDisplay = titleInputSnapshot.trim();
   const showOutlineSidebar = headings.length > 0 || catalogueTitleDisplay.length > 0;
+  const commentInput = activeCommentBlockId ? (commentDrafts[activeCommentBlockId] || '') : '';
+
+  const handleCommentInputChange = useCallback((value: string) => {
+    if (!activeCommentBlockId) return;
+    setCommentDrafts(current => ({ ...current, [activeCommentBlockId]: value }));
+  }, [activeCommentBlockId]);
 
   const handleTitleInputChange = useCallback((t: string) => {
     setTitleInputSnapshot(t);
@@ -165,7 +189,7 @@ export default function DocumentPage() {
   useEffect(() => {
     setComments([]);
     setActiveCommentBlockId('');
-    setCommentInput('');
+    setCommentDrafts({});
     setCommentSidebarVisible(false);
     setBitableCommentActive(false);
     setBitableUnresolvedCount(0);
@@ -175,7 +199,6 @@ export default function DocumentPage() {
   const closeCommentSidebar = useCallback(() => {
     setCommentSidebarVisible(false);
     setActiveCommentBlockId('');
-    setCommentInput('');
     setPendingCommentAnchor(null);
   }, []);
 
@@ -248,8 +271,11 @@ export default function DocumentPage() {
     const handleBitableOpen = (event: Event) => {
       const detail = (event as CustomEvent<{ blockId?: string; recordId?: string }>).detail;
       if (!detail?.blockId || !detail.recordId) return;
+      const scrollRoot = mainScrollRef.current;
+      const savedScrollTop = scrollRoot?.scrollTop ?? 0;
       setBitableCommentActive(true);
       setCommentSidebarVisible(true);
+      preserveWorkspaceScroll(scrollRoot, savedScrollTop);
     };
     const handleBitableClose = (event: Event) => {
       const detail = (event as CustomEvent<{ blockId?: string }>).detail;
@@ -294,6 +320,8 @@ export default function DocumentPage() {
       /* 不传 documentId 的旧事件仍打开（单页会话）；传入则必须与当前路由文档一致 */
       if (detail.documentId != null && detail.documentId !== id) return;
       const blockId = detail.blockId;
+      const scrollRoot = mainScrollRef.current;
+      const savedScrollTop = scrollRoot?.scrollTop ?? 0;
       setActiveCommentBlockId(blockId);
       if (detail.threadId && !comments.some(c => (c.thread_id || c.block_id || c.id) === detail.threadId)) {
         setPendingCommentAnchor({
@@ -309,9 +337,8 @@ export default function DocumentPage() {
         setPendingCommentAnchor(null);
       }
       setCommentSidebarVisible(true);
-      window.setTimeout(() => {
-        resolveBlockElement(mainScrollRef.current, blockId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }, 0);
+      // 只展开侧栏，不滚动正文；侧栏打开引起的布局变化也要保住当前阅读位置。
+      preserveWorkspaceScroll(scrollRoot, savedScrollTop);
     };
     const handleCloseCommentSidebar = () => closeCommentSidebar();
     window.addEventListener('feishu-open-comment-sidebar', handleOpenCommentSidebar);
@@ -329,32 +356,61 @@ export default function DocumentPage() {
     closeCommentSidebar();
   }, [bitableCommentActive, closeCommentSidebar, commentSidebarVisible, comments, pendingCommentAnchor]);
 
+  const beginSave = useCallback((fields: string[]) => {
+    const requestId = ++saveRequestSequenceRef.current;
+    fields.forEach(field => {
+      latestSaveByFieldRef.current[field] = requestId;
+    });
+    if (saveStatusTimerRef.current) window.clearTimeout(saveStatusTimerRef.current);
+    setSaveStatus('saving');
+    return requestId;
+  }, []);
+
+  const finishSave = useCallback((requestId: number, didSucceed: boolean) => {
+    // 任何未被同字段新请求取代的失败都必须可见；成功状态只由最新请求收敛。
+    if (!didSucceed) {
+      setSaveStatus('error');
+      if (saveStatusTimerRef.current) window.clearTimeout(saveStatusTimerRef.current);
+      saveStatusTimerRef.current = window.setTimeout(() => setSaveStatus('idle'), 4000);
+      return;
+    }
+    if (requestId !== saveRequestSequenceRef.current) return;
+    setSaveStatus(didSucceed ? 'saved' : 'error');
+    if (saveStatusTimerRef.current) window.clearTimeout(saveStatusTimerRef.current);
+    saveStatusTimerRef.current = window.setTimeout(() => setSaveStatus('idle'), 2000);
+  }, []);
+
+  useEffect(() => () => {
+    if (saveStatusTimerRef.current) window.clearTimeout(saveStatusTimerRef.current);
+  }, []);
+
   const handleSave = useCallback(async (data: { title?: string; content?: string; icon?: string; cover_url?: string }) => {
     if (!id) return;
+    const fields = Object.keys(data);
+    const requestId = beginSave(fields);
+    const res = await updateDocument(id, data);
+    if (res.code === 0 && res.data) {
+      const acceptedData = Object.fromEntries(
+        Object.entries(data).filter(([field]) => latestSaveByFieldRef.current[field] === requestId),
+      );
+      setDoc(prev => (prev ? { ...prev, ...acceptedData, updated_at: res.data!.updated_at } : null));
 
-    let nextComments = comments;
-    if (data.content !== undefined) {
-      const orphaned = findOrphanedComments(data.content, comments);
-      if (orphaned.length > 0) {
-        const results = await Promise.all(orphaned.map(comment => deleteComment(id, comment.id)));
-        const deletedIds = new Set(
-          orphaned.filter((_, index) => results[index]?.code === 0).map(comment => comment.id),
-        );
-        if (deletedIds.size > 0) {
-          nextComments = comments.filter(comment => !deletedIds.has(comment.id));
-          setComments(nextComments);
+      // 正文持久化成功后才能删除已失去锚点的评论，避免正文保存失败但评论已永久删除。
+      if (data.content !== undefined) {
+        const orphaned = findOrphanedComments(data.content, comments);
+        if (orphaned.length > 0) {
+          const results = await Promise.all(orphaned.map(comment => deleteComment(id, comment.id)));
+          const deletedIds = new Set(
+            orphaned.filter((_, index) => results[index]?.code === 0).map(comment => comment.id),
+          );
+          if (deletedIds.size > 0) {
+            setComments(current => current.filter(comment => !deletedIds.has(comment.id)));
+          }
         }
       }
     }
-
-    setSaveStatus('saving');
-    const res = await updateDocument(id, data);
-    if (res.code === 0 && res.data) {
-      setDoc(prev => (prev ? { ...prev, ...data, updated_at: res.data!.updated_at } : null));
-    }
-    setSaveStatus('saved');
-    setTimeout(() => setSaveStatus('idle'), 2000);
-  }, [comments, id]);
+    finishSave(requestId, res.code === 0 && Boolean(res.data));
+  }, [beginSave, comments, finishSave, id]);
 
   useEffect(() => {
     if (!id || !doc?.id) return;
@@ -364,8 +420,8 @@ export default function DocumentPage() {
     }
 
     if (collapsedPersistTimerRef.current) window.clearTimeout(collapsedPersistTimerRef.current);
-    setSaveStatus('saving');
     collapsedPersistTimerRef.current = window.setTimeout(async () => {
+      const requestId = beginSave(['collapsed_heading_ids']);
       const res = await updateDocument(id, { collapsed_heading_ids: collapsedHeadingIdList });
       if (res.code === 0 && res.data) {
         setDoc(prev => (prev ? {
@@ -374,25 +430,23 @@ export default function DocumentPage() {
           updated_at: res.data!.updated_at,
         } : null));
       }
-      setSaveStatus('saved');
-      window.setTimeout(() => setSaveStatus('idle'), 2000);
+      finishSave(requestId, res.code === 0 && Boolean(res.data));
     }, 350);
 
     return () => {
       if (collapsedPersistTimerRef.current) window.clearTimeout(collapsedPersistTimerRef.current);
     };
-  }, [collapsedHeadingIdList, doc?.id, id]);
+  }, [beginSave, collapsedHeadingIdList, doc?.id, finishSave, id]);
 
   const handleRemoveCover = useCallback(async () => {
     if (!id) return;
-    setSaveStatus('saving');
+    const requestId = beginSave(['cover_url']);
     const res = await updateDocument(id, { cover_url: '' });
     if (res.code === 0 && res.data) {
       setDoc(prev => (prev ? { ...prev, cover_url: '', updated_at: res.data!.updated_at } : null));
     }
-    setSaveStatus('saved');
-    setTimeout(() => setSaveStatus('idle'), 2000);
-  }, [id]);
+    finishSave(requestId, res.code === 0 && Boolean(res.data));
+  }, [beginSave, finishSave, id]);
 
   const handleSubmitComment = useCallback(async (threadKey?: string): Promise<boolean> => {
     if (!id || !commentInput.trim()) return false;
@@ -415,7 +469,11 @@ export default function DocumentPage() {
     });
     if (res.code === 0 && res.data) {
       setComments(prev => [...prev, res.data!]);
-      setCommentInput('');
+      setCommentDrafts(current => {
+        const next = { ...current };
+        delete next[activeThreadKey];
+        return next;
+      });
       setPendingCommentAnchor(null);
       return true;
     }
@@ -481,44 +539,6 @@ export default function DocumentPage() {
     if (target instanceof HTMLElement) target.classList.add('feishu-comment-highlight--active');
   }, [activeCommentBlockId, comments]);
 
-  useEffect(() => {
-    const el = mainScrollRef.current;
-    const sidebar = sidebarRef.current;
-    if (!el || !sidebar) return;
-    const cover = el.querySelector('.doc-cover-wrapper') as HTMLElement | null;
-    const img = cover?.querySelector('.doc-cover-img') as HTMLImageElement | null;
-
-    const updateTop = () => {
-      const coverEl = el.querySelector('.doc-cover-wrapper') as HTMLElement | null;
-      const coverH = coverEl ? coverEl.offsetHeight : 0;
-      sidebar.style.top = `${Math.max(0, coverH - el.scrollTop)}px`;
-    };
-    updateTop();
-
-    el.addEventListener('scroll', updateTop, { passive: true });
-    const obs = new MutationObserver(updateTop);
-    obs.observe(el, { childList: true });
-
-    let ro: ResizeObserver | null = null;
-    if (cover && typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(updateTop);
-      ro.observe(cover);
-    }
-
-    const onImgLoad = () => updateTop();
-    if (img) {
-      if (img.complete) updateTop();
-      else img.addEventListener('load', onImgLoad);
-    }
-
-    return () => {
-      el.removeEventListener('scroll', updateTop);
-      obs.disconnect();
-      ro?.disconnect();
-      img?.removeEventListener('load', onImgLoad);
-    };
-  }, [doc?.cover_url, showOutlineSidebar]);
-
   if (loading) {
     return (
       <div className="doc-page-loading">
@@ -555,7 +575,6 @@ export default function DocumentPage() {
               >
                 {showOutlineSidebar && (
                   <Sidebar
-                    ref={sidebarRef}
                     documentTitle={catalogueTitleDisplay}
                     headings={headings}
                     activeId={catalogueActiveId}
@@ -592,7 +611,7 @@ export default function DocumentPage() {
                 activeBlockId={activeCommentBlockId}
                 pendingThread={pendingCommentAnchor}
                 inputValue={commentInput}
-                onInputChange={setCommentInput}
+                onInputChange={handleCommentInputChange}
                 onSubmit={handleSubmitComment}
                 onResolve={handleToggleResolveComment}
                 onUpdateComment={handleUpdateComment}

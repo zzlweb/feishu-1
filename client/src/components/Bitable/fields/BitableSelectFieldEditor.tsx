@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { Checkbox, Input } from 'tdesign-react';
+import type { InputRef } from 'tdesign-react';
 import { createPortal } from 'react-dom';
 import type { BaseFieldType, SelectChoice } from '../model/bitableModel';
 import { useAnchoredFloatingPosition } from '../../Editor/shared/floatingPanel';
@@ -159,7 +161,7 @@ export function BitableSelectOptionsEditor({
   onChange: (choices: SelectChoice[]) => void;
 }) {
   const focusIdRef = useRef<string | null>(null);
-  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const inputRefs = useRef<Record<string, InputRef | null>>({});
   const dragIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -195,11 +197,9 @@ export function BitableSelectOptionsEditor({
       <div className="base-b-select-options__header">
         <span className="base-b-select-options__title">选项内容</span>
         <label className="base-b-select-options__ref">
-          <input
-            type="checkbox"
-            onChange={() => window.alert('引用选项功能即将推出。')}
-          />
-          <span>引用选项</span>
+          <Checkbox onChange={() => window.alert('引用选项功能即将推出。')}>
+            引用选项
+          </Checkbox>
           <span className="base-b-select-options__ref-help" title="引用其他表的选项" aria-hidden><GlyphHelp /></span>
         </label>
       </div>
@@ -232,14 +232,13 @@ export function BitableSelectOptionsEditor({
               >
                 <span className="base-b-select-options__drag" aria-hidden><GlyphDrag /></span>
                 <ColorPicker color={choice.color} onChange={color => updateChoice(choice.id, { color })} />
-                <input
+                <Input
                   ref={node => { inputRefs.current[choice.id] = node; }}
-                  className="base-b-select-options__input"
-                  type="text"
-                  maxLength={1000}
+                  className="base-b-select-options__td-input"
+                  maxlength={1000}
                   placeholder="请输入选项"
                   value={choice.name}
-                  onChange={event => updateChoice(choice.id, { name: event.target.value })}
+                  onChange={value => updateChoice(choice.id, { name: String(value ?? '') })}
                 />
                 <button
                   type="button"
@@ -353,13 +352,14 @@ export function BitableSelectDefaultPicker({
           data-floating-panel="true"
           onMouseDown={event => event.stopPropagation()}
         >
-          <input
-            className="base-b-select-default-panel__search"
-            type="text"
+          <Input
+            className="base-b-select-default-panel__td-search"
+            size="small"
+            clearable
             placeholder="查找选项"
-            maxLength={1000}
+            maxlength={1000}
             value={query}
-            onChange={event => setQuery(event.target.value)}
+            onChange={value => setQuery(String(value ?? ''))}
           />
           <div className="base-b-select-default-panel__list">
             {filtered.length ? filtered.map(choice => {

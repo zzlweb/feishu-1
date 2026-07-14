@@ -4,6 +4,7 @@ import * as React from 'react';
 import { SelGlyphChevronDown } from '../../../icons/selectionToolbarGlyphs';
 import { FieldLockGlyph, fieldTypeGlyph } from '../fields/bitableFieldTypeIcons';
 import { getAttachments, getMultiSelectChoices, valueText, findSelectChoice, formatCardDateValue, normalizeColorValue, textColorForBackground, type AttachmentValue, type BaseField, type BaseRecord, type CellValue } from '../model/bitableModel';
+import { BITABLE_TD_PORTAL_SELECTOR } from './bitableTdesign';
 
 export { FieldLockGlyph, fieldTypeGlyph };
 
@@ -365,7 +366,7 @@ export function attachmentCellLabel(record: BaseRecord, fieldId: string) {
 }
 
 export const BITABLE_PANEL_PORTAL_SELECTOR =
-  '.bitable-field-condition-picker__menu--portal, .bitable-group-field-picker__menu--portal, .base-filter-select__menu--portal, .base-field-edit-popover-portal, .base-b-field-type-picker-portal, .base-b-select-color-panel, .base-b-select-default-panel, .base-view-contextmenu--portal';
+  `.bitable-field-condition-picker__menu--portal, .bitable-group-field-picker__menu--portal, .base-filter-select__menu--portal, .base-field-edit-popover-portal, .base-b-field-type-picker-portal, .base-b-select-color-panel, .base-b-select-default-panel, .base-view-contextmenu--portal, ${BITABLE_TD_PORTAL_SELECTOR}`;
 
 export function isBitablePanelPortalTarget(node: EventTarget | null): boolean {
   return node instanceof Element && Boolean(node.closest(BITABLE_PANEL_PORTAL_SELECTOR));

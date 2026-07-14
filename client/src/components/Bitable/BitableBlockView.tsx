@@ -1,11 +1,14 @@
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { Dialog, Input, Radio, Select, Switch } from 'tdesign-react';
+import type { SelectProps } from 'tdesign-react';
 import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
 import { SlashGlyphBitableGrid, SlashGlyphGallery, SlashGlyphGantt, SlashGlyphKanban } from '../../icons/slashMenuGlyphs';
 import { BitableAddFieldPopover, BitableEditFieldPopover, buildNewFieldPayload, emptyDefaultValue, type CreateFieldInput, type UpdateFieldInput } from './fields/BitableAddFieldPopover';
 import { FieldLockGlyph, fieldTypeGlyph } from './fields/bitableFieldTypeIcons';
 import { BitableTooltip, useBitablePanelHoverHandlers } from './shared/BitableViewShared';
+import { BITABLE_TD_PORTAL_SELECTOR, BITABLE_TD_SELECT_POPUP_PROPS } from './shared/bitableTdesign';
 import { parseJsonPayload } from '../../api/http';
 import {
   addView,
@@ -23,8 +26,9 @@ import {
   hasActiveGridGroups,
   insertRecordsIntoTable,
   normalizeRecordTreeOrder,
-  reorderRecordsInTree,
-  resolveRecordInsertIndex,
+  parseDateCellValue,
+  pinRecordsToVisibleBottom,
+  reorderRecordsInTreeById,
   getActiveView,
   getAttachments,
   getGanttConfig,
@@ -62,13 +66,12 @@ import { BitableKanbanView } from './views/BitableKanbanView';
 import { BitableGridView, type GridFieldMenuAction, type GridFieldMenuPosition } from './views/BitableGridView';
 import { BitableRecordCommentPanel } from './records/BitableRecordCommentPanel';
 import { BitableRecordCardModal } from './records/BitableRecordCardModal';
-import { useAnchoredFloatingPosition } from '../Editor/shared/floatingPanel';
 import { createSelectChoice } from './fields/BitableSelectFieldEditor';
 
 function isToolbarPortaledDropdownTarget(target: Node): boolean {
   if (!(target instanceof Element)) return false;
   return Boolean(target.closest(
-    '.bitable-field-condition-picker__menu--portal, .bitable-group-field-picker__menu--portal, .base-filter-select__menu--portal',
+    `.bitable-field-condition-picker__menu--portal, .bitable-group-field-picker__menu--portal, .base-filter-select__menu--portal, ${BITABLE_TD_PORTAL_SELECTOR}`,
   ));
 }
 import { useCommentSidebarTrack } from '../Layout/CommentSidebarContext';
@@ -88,10 +91,7 @@ import './BitableBlock.less';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function readDate(value: CellValue): Date | null {
-  const raw = valueText(value);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
-  const date = new Date(`${raw}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return parseDateCellValue(value);
 }
 
 function dateValue(date: Date) {
@@ -222,21 +222,6 @@ const GlyphVisible = ({ size = 14 }: GlyphProps) => (
 const GlyphInvisible = ({ size = 16 }: GlyphProps) => (
   <svg {...svgProps(size)} data-icon="InvisibleOutlined">
     <path d="M2.032 8.172a1 1 0 0 1 1.388.267C5.263 11.159 8.637 13 12 13c3.364 0 6.737-1.841 8.58-4.561a1 1 0 0 1 1.656 1.122 11.928 11.928 0 0 1-2.002 2.259l2.009 2.008a1 1 0 1 1-1.415 1.415l-2.12-2.122a1.003 1.003 0 0 1-.085-.096c-.745.472-1.54.87-2.368 1.181l.712 2.658a1 1 0 1 1-1.932.517l-.702-2.62A11.64 11.64 0 0 1 12 15c-.71 0-1.42-.068-2.118-.197l-.691 2.578a1 1 0 1 1-1.932-.517l.692-2.582a13.01 13.01 0 0 1-2.607-1.278c-.03.04-.064.08-.101.117L3.12 15.243a1 1 0 1 1-1.414-1.415l2.032-2.032a11.919 11.919 0 0 1-1.974-2.235 1 1 0 0 1 .267-1.389Z" fill="currentColor" />
-  </svg>
-);
-const GlyphDownBold = ({ size = 12 }: GlyphProps) => (
-  <svg {...svgProps(size)} data-icon="DownBoldOutlined">
-    <path d="m3.414 7.086-.707.707a1 1 0 0 0 0 1.414l7.778 7.778a2 2 0 0 0 2.829 0l7.778-7.778a1 1 0 0 0 0-1.414l-.707-.707a1 1 0 0 0-1.415 0l-7.07 7.07-7.072-7.07a1 1 0 0 0-1.414 0Z" fill="currentColor" />
-  </svg>
-);
-const GlyphBan = ({ size = 16 }: GlyphProps) => (
-  <svg {...svgProps(size)} data-icon="BanOutlined">
-    <path d="M1 12c0 6.075 4.925 11 11 11s11-4.925 11-11S18.075 1 12 1 1 5.925 1 12Zm16.617 7.032a9 9 0 0 1-12.65-12.65l12.65 12.65Zm1.415-1.414L6.382 4.968a9 9 0 0 1 12.65 12.65Z" fill="currentColor" />
-  </svg>
-);
-const GlyphAttachment = ({ size = 16 }: GlyphProps) => (
-  <svg {...svgProps(size)} data-icon="AttachmentOutlined">
-    <path d="M12.304 7.315a1 1 0 0 1 1.414 1.414L8.13 14.317a1.485 1.485 0 0 0 0 2.1l.01.011a1.5 1.5 0 0 0 2.117-.005l7.43-7.43a3.5 3.5 0 0 0 0-4.95l-.036-.037a3.5 3.5 0 0 0-4.95 0l-7.778 7.777a5.521 5.521 0 0 0 7.808 7.809l7.07-7.07a1 1 0 0 1 1.415 1.414l-7.07 7.07A7.521 7.521 0 0 1 3.509 10.37l7.778-7.778a5.5 5.5 0 0 1 7.778 0l.037.037a5.5 5.5 0 0 1 0 7.778l-7.43 7.43a3.5 3.5 0 0 1-4.939.012l-.006-.006-.012-.012a3.485 3.485 0 0 1 0-4.928l5.589-5.588Z" fill="currentColor" />
   </svg>
 );
 const GlyphHelp = ({ size = 14 }: GlyphProps) => (
@@ -434,99 +419,60 @@ function DeleteRecordsDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onCancel]);
-
-  return createPortal(
-    <div className="base-delete-view-overlay" data-no-marquee-selection="true" onMouseDown={onCancel}>
-      <div
-        className="base-delete-records-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="base-delete-records-title"
-        onMouseDown={event => event.stopPropagation()}
-      >
-        <header className="base-delete-records-dialog__header">
-          <div className="base-delete-records-dialog__title-row">
-            <span className="base-delete-records-dialog__icon" aria-hidden>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 5.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM11 11.25a1 1 0 1 1 2 0v6.5a1 1 0 1 1-2 0v-6.5Z" fill="currentColor" />
-              </svg>
-            </span>
-            <h2 id="base-delete-records-title" className="base-delete-records-dialog__title">操作确认</h2>
-          </div>
-          <button type="button" className="base-delete-view-dialog__close" aria-label="关闭" onClick={onCancel}>
-            ×
-          </button>
-        </header>
-        <p className="base-delete-records-dialog__body">
-          该操作将删除 {count} 行记录，请确认是否继续？
-        </p>
-        <footer className="base-delete-view-dialog__footer">
-          <button type="button" className="base-delete-view-dialog__btn base-delete-view-dialog__btn--cancel" onClick={onCancel}>
-            取消
-          </button>
-          <button type="button" className="base-delete-view-dialog__btn base-delete-view-dialog__btn--danger" onClick={onConfirm}>
-            删除
-          </button>
-        </footer>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Dialog
+      visible
+      theme="warning"
+      header="操作确认"
+      width={420}
+      placement="center"
+      destroyOnClose
+      closeOnOverlayClick
+      confirmBtn={{ content: '删除', theme: 'danger' }}
+      cancelBtn="取消"
+      onClose={onCancel}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+      className="bitable-td-dialog"
+    >
+      <p className="bitable-td-dialog__body">该操作将删除 {count} 行记录，请确认是否继续？</p>
+    </Dialog>
   );
 }
 
 function DeleteViewDialog({
   viewName,
+  isLastView,
   onCancel,
   onConfirm,
 }: {
   viewName: string;
+  isLastView?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onCancel]);
-
-  return createPortal(
-    <div className="base-delete-view-overlay" data-no-marquee-selection="true" onMouseDown={onCancel}>
-      <div
-        className="base-delete-view-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="base-delete-view-title"
-        onMouseDown={event => event.stopPropagation()}
-      >
-        <header className="base-delete-view-dialog__header">
-          <h2 id="base-delete-view-title" className="base-delete-view-dialog__title">删除视图</h2>
-          <button type="button" className="base-delete-view-dialog__close" aria-label="关闭" onClick={onCancel}>
-            ×
-          </button>
-        </header>
-        <p className="base-delete-view-dialog__body">
-          确认要删除视图「{viewName}」吗？
-        </p>
-        <footer className="base-delete-view-dialog__footer">
-          <button type="button" className="base-delete-view-dialog__btn base-delete-view-dialog__btn--cancel" onClick={onCancel}>
-            取消
-          </button>
-          <button type="button" className="base-delete-view-dialog__btn base-delete-view-dialog__btn--danger" onClick={onConfirm}>
-            删除
-          </button>
-        </footer>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Dialog
+      visible
+      theme="danger"
+      header={isLastView ? '删除多维表格' : '删除视图'}
+      width={420}
+      placement="center"
+      destroyOnClose
+      closeOnOverlayClick
+      confirmBtn={{ content: '删除', theme: 'danger' }}
+      cancelBtn="取消"
+      onClose={onCancel}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+      className="bitable-td-dialog"
+    >
+      <p className="bitable-td-dialog__body">
+        {isLastView
+          ? `「${viewName}」是唯一视图，删除后将移除整个多维表格，确认继续吗？`
+          : `确认要删除视图「${viewName}」吗？`}
+      </p>
+    </Dialog>
   );
 }
 
@@ -671,7 +617,6 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   tableRef.current = parsedTable;
   const table = parsedTable;
   const activeView = getActiveView(table);
-  const records = visibleRecords(table, activeView);
   const galleryConfig = getGalleryConfig(table, activeView);
   const hasActiveFilters = useMemo(
     () => (activeView.filters || []).some(isFilterRuleActive),
@@ -692,8 +637,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     [activeView.sorts],
   );
   const hasSortRules = activeSortCount > 0;
+  const sortSignature = useMemo(
+    () => JSON.stringify((activeView.sorts || []).map(sort => [sort.fieldId, sort.direction])),
+    [activeView.sorts],
+  );
   const ganttConfig = getGanttConfig(table, activeView);
-  const groups = groupRecords(table, activeView, records);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [activeToolbarPanel, setActiveToolbarPanel] = useState<ToolbarPanel | null>(null);
@@ -714,6 +662,17 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const [commentCardTop, setCommentCardTop] = useState(0);
   const commentTrackHost = useCommentSidebarTrack();
   const [gridFocusedRecordId, setGridFocusedRecordId] = useState<string | null>(null);
+  const pinnedBottomRecordIdsRef = useRef<string[]>([]);
+  const [pinnedBottomVersion, setPinnedBottomVersion] = useState(0);
+  const pinReleaseEnabledRef = useRef(false);
+  const records = useMemo(
+    () => pinRecordsToVisibleBottom(visibleRecords(table, activeView), pinnedBottomRecordIdsRef.current),
+    [table, activeView, pinnedBottomVersion],
+  );
+  const groups = useMemo(
+    () => groupRecords(table, activeView, records),
+    [table, activeView, records],
+  );
   const [editingFieldPanel, setEditingFieldPanel] = useState<{ fieldId: string; left: number; top: number } | null>(null);
   const [addFieldPanel, setAddFieldPanel] = useState<{ left: number; top: number } | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
@@ -767,6 +726,37 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   useEffect(() => () => {
     if (viewToolsLeaveTimerRef.current != null) window.clearTimeout(viewToolsLeaveTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    pinnedBottomRecordIdsRef.current = [];
+    pinReleaseEnabledRef.current = false;
+    setPinnedBottomVersion(version => version + 1);
+  }, [activeView.id, sortSignature]);
+
+  useEffect(() => {
+    const pinnedIds = pinnedBottomRecordIdsRef.current;
+    if (!pinnedIds.length) return;
+    const existing = new Set(table.records.map(record => record.id));
+    const nextPinned = pinnedIds.filter(id => existing.has(id));
+    if (nextPinned.length === pinnedIds.length) return;
+    pinnedBottomRecordIdsRef.current = nextPinned;
+    pinReleaseEnabledRef.current = nextPinned.length > 0 && pinReleaseEnabledRef.current;
+    setPinnedBottomVersion(version => version + 1);
+  }, [table.records]);
+
+  useEffect(() => {
+    const pinnedIds = pinnedBottomRecordIdsRef.current;
+    if (!pinnedIds.length) return;
+    if (gridFocusedRecordId && pinnedIds.includes(gridFocusedRecordId)) {
+      pinReleaseEnabledRef.current = true;
+      return;
+    }
+    if (pinReleaseEnabledRef.current && gridFocusedRecordId && !pinnedIds.includes(gridFocusedRecordId)) {
+      pinnedBottomRecordIdsRef.current = [];
+      pinReleaseEnabledRef.current = false;
+      setPinnedBottomVersion(version => version + 1);
+    }
+  }, [gridFocusedRecordId, pinnedBottomVersion]);
 
   /* 左侧块柄（多维表格按钮）在 Editor 中渲染，hover 时同步显示右侧工具栏 */
   useEffect(() => {
@@ -911,6 +901,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
 
   const setView = (viewId: string) => {
     mutate(current => ({ ...current, activeViewId: viewId }));
+    setCollapsedGroups(new Set());
     setShowViewMenu(false);
     setShowSettings(false);
     setActiveToolbarPanel(null);
@@ -963,19 +954,27 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   };
 
   const removeView = (viewId: string) => {
-    if (table.views.length <= 1) return;
     const target = table.views.find(view => view.id === viewId);
     if (!target) return;
     setViewContextMenuId(null);
+    setShowViewMenu(false);
     setDeleteViewTarget({ id: target.id, name: target.name });
   };
 
   const confirmDeleteView = () => {
     if (!deleteViewTarget) return;
-    mutate(current => deleteView(current, deleteViewTarget.id));
+    const targetId = deleteViewTarget.id;
+    const isLastVisibleView = getVisibleViews(tableRef.current).length <= 1;
     setDeleteViewTarget(null);
     setRenamingViewId(null);
     setIsRenamingView(false);
+    if (isLastVisibleView) {
+      const pos = typeof getPos === 'function' ? getPos() : null;
+      if (typeof pos !== 'number') return;
+      editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
+      return;
+    }
+    mutate(current => deleteView(current, targetId));
   };
 
   const handleViewDragStart = (event: DragEvent, visibleIndex: number) => {
@@ -1146,21 +1145,36 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   };
 
   const addRecord = (initialTitle = '') => {
+    if (activeView.locked) return '';
     let insertedId = '';
     mutate(current => {
       const currentVisibleRecords = visibleRecords(current, activeView);
       const seedFromRecord = currentVisibleRecords[currentVisibleRecords.length - 1] ?? null;
       const record = buildNewRecord(current, initialTitle, seedFromRecord);
       insertedId = record.id;
+      // 同步写入 ref，确保 TipTap 同步重渲染时也能读到最新固定列表
+      pinnedBottomRecordIdsRef.current = [
+        ...pinnedBottomRecordIdsRef.current.filter(id => id !== record.id),
+        record.id,
+      ];
       return {
         ...current,
-        records: insertRecordsIntoTable(current, activeView, [record], { mode: 'append' }),
+        records: insertRecordsIntoTable(current, [record], { mode: 'append' }),
       };
     });
+    // 连续底部新增都固定在末尾；焦点离开这批新行后再按排序归位
+    pinReleaseEnabledRef.current = false;
+    setPinnedBottomVersion(version => version + 1);
     return insertedId;
   };
 
-  const insertRecordAt = (visibleIndex: number, count = 1, initialTitle = '') => {
+  const insertRecordRelative = (
+    recordId: string,
+    position: 'before' | 'after-subtree',
+    count = 1,
+    initialTitle = '',
+  ) => {
+    if (activeView.locked) return [];
     const insertedIds: string[] = [];
     mutate(current => {
       const recordsToInsert = Array.from({ length: count }, () => {
@@ -1168,15 +1182,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         insertedIds.push(record.id);
         return record;
       });
-      let nextRecords = current.records;
-      recordsToInsert.forEach((record, offset) => {
-        nextRecords = insertRecordsIntoTable(
-          { ...current, records: nextRecords },
-          activeView,
-          [record],
-          { visibleIndex: visibleIndex + offset },
-        );
-      });
+      const nextRecords = insertRecordsIntoTable(
+        current,
+        recordsToInsert,
+        { recordId, mode: position },
+      );
       return { ...current, records: nextRecords };
     });
     return insertedIds;
@@ -1214,13 +1224,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     }
   };
 
-  const insertRecordRelative = (recordId: string, offset: 0 | 1) => {
-    const index = table.records.findIndex(record => record.id === recordId);
-    if (index < 0) return;
-    insertRecordAt(index + offset, 1);
-  };
-
   const insertChildRecord = (parentRecordId: string, initialTitle = '') => {
+    if (activeView.locked) return '';
     let insertedId = '';
     mutate(current => {
       const parentIndex = current.records.findIndex(record => record.id === parentRecordId);
@@ -1245,6 +1250,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   };
 
   const changeCell = (recordId: string, fieldId: string, value: CellValue) => {
+    if (activeView.locked) return;
     mutate(current => updateRecord(current, recordId, record => {
       const field = current.fields.find(item => item.id === fieldId);
       const nextValue = field?.type === 'multi_select'
@@ -1525,15 +1531,17 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     }
     if (action === 'filter') {
       if (activeView.locked) return;
-      mutate(current => updateView(current, activeView.id, view => ({
-        ...view,
-        filters: [{
-          id: view.filters?.[0]?.id || `filter_${Date.now().toString(36)}`,
-          fieldId,
-          operator: view.filters?.[0]?.operator || 'contains',
-          value: view.filters?.[0]?.value || '',
-        }],
-      })));
+      mutate(current => updateView(current, activeView.id, view => {
+        const filters = view.filters || [];
+        if (filters.some(rule => rule.fieldId === fieldId)) return view;
+        return {
+          ...view,
+          filters: [
+            ...filters,
+            { id: `filter_${Date.now().toString(36)}`, fieldId, operator: 'contains', value: '' },
+          ],
+        };
+      }));
       setActiveToolbarPanel('filter');
       return;
     }
@@ -1627,6 +1635,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   };
 
   const onDropFiles = (event: DragEvent, recordId?: string) => {
+    if (activeView.locked) return;
     const files = Array.from(event.dataTransfer.files);
     if (!files.length) return;
     event.preventDefault();
@@ -1637,6 +1646,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   };
 
   const pickFiles = (recordId: string, fieldId?: string) => {
+    if (activeView.locked) return;
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
@@ -1693,8 +1703,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       removeRecords={removeRecords}
       addRecord={() => addRecord()}
       locked={activeView.locked}
-      onInsertRecordLeft={recordId => insertRecordRelative(recordId, 0)}
-      onInsertRecordRight={recordId => insertRecordRelative(recordId, 1)}
+      onInsertRecordLeft={recordId => insertRecordRelative(recordId, 'before')}
+      onInsertRecordRight={recordId => insertRecordRelative(recordId, 'after-subtree')}
       onShareRecord={() => openToolbarPanel('share')}
       onCopyRecordLink={copyRecordLink}
       onDuplicateRecord={duplicateRecord}
@@ -1737,7 +1747,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       selectedIds={selectedIds}
       addField={openAddFieldPanel}
       addRecord={() => addRecord()}
-      insertRecordAt={insertRecordAt}
+      insertRecordRelative={insertRecordRelative}
       insertChildRecord={insertChildRecord}
       removeRecords={removeRecords}
       changeCell={changeCell}
@@ -1833,12 +1843,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     }
   };
 
-  const reorderRecords = (fromIndex: number, toIndex: number) => {
-    if (activeView.locked || fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
-    if (fromIndex >= records.length || toIndex >= records.length) return;
+  const reorderRecords = (sourceRecordId: string, targetRecordId: string) => {
+    if (activeView.locked || sourceRecordId === targetRecordId) return;
     mutate(current => ({
       ...current,
-      records: reorderRecordsInTree(current.records, fromIndex, toIndex),
+      records: reorderRecordsInTreeById(current.records, sourceRecordId, targetRecordId),
     }));
   };
 
@@ -1981,6 +1990,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       scrollToToday={scrollToToday}
       scrollTimeline={scrollTimeline}
       addRecord={() => addRecord()}
+      locked={activeView.locked}
       scrollRef={ganttScrollRef}
     />
   );
@@ -1990,6 +2000,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       ? table.fields.find(field => field.id === galleryConfig.groupByFieldId && field.type === 'single_select') ?? table.fields.find(field => field.type === 'single_select')
       : table.fields.find(field => field.type === 'single_select');
     const addRecordToColumn = (statusValue: string) => {
+      if (activeView.locked) return;
       const recordId = addRecord();
       if (statusValue && statusField) {
         changeCell(recordId, statusField.id, statusValue);
@@ -2315,7 +2326,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 draggingViewIndex={draggingViewIndex}
                 contextMenuViewId={viewContextMenuId}
                 contextMenuRef={viewContextMenuRef}
-                canDeleteView={getVisibleViews(table).length > 1}
+                canDeleteView
                 onSelectView={setView}
                 onCreateView={createView}
                 onOpenContextMenu={openViewContextMenu}
@@ -2737,6 +2748,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       {deleteViewTarget && (
         <DeleteViewDialog
           viewName={deleteViewTarget.name}
+          isLastView={getVisibleViews(table).length <= 1}
           onCancel={() => setDeleteViewTarget(null)}
           onConfirm={confirmDeleteView}
         />
@@ -3122,16 +3134,36 @@ function GalleryFieldCustomizePanel({
   const settingPrefix = isKanban ? 'kanban-setting-item' : 'gallery-setting-item';
   const [fieldMoreId, setFieldMoreId] = useState<string | null>(null);
   const [fieldMoreAnchor, setFieldMoreAnchor] = useState<HTMLElement | null>(null);
-  const [coverOpen, setCoverOpen] = useState(false);
   const [draggingFieldIndex, setDraggingFieldIndex] = useState<number | null>(null);
   const [dragOverFieldIndex, setDragOverFieldIndex] = useState<number | null>(null);
-  const coverRef = useRef<HTMLDivElement>(null);
   const fieldListRef = useRef<HTMLDivElement>(null);
   const fieldDragFromRef = useRef<number | null>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const titleFieldId = config.titleFieldId || table.primaryFieldId;
   const attachmentFields = table.fields.filter(field => field.type === 'attachment');
-  const titleFields = table.fields.filter(field => field.type !== 'attachment');
+  const titleFieldOptions = useMemo(
+    () => table.fields
+      .filter(field => field.type !== 'attachment')
+      .map(field => ({ label: field.name, value: field.id })),
+    [table.fields],
+  );
+  const coverFieldOptions = useMemo(() => {
+    const options: Array<{ label: string; value: string }> = [];
+    if (isKanban) options.push({ label: '无封面', value: '__none__' });
+    table.fields
+      .filter(field => field.type === 'attachment')
+      .forEach(field => options.push({ label: field.name, value: field.id }));
+    return options;
+  }, [isKanban, table.fields]);
+  const aspectRatioOptions = useMemo(
+    () => ([
+      { label: '1:1', value: '1:1' },
+      { label: '4:3', value: '4:3' },
+      { label: '16:9', value: '16:9' },
+      { label: '自动', value: 'auto' },
+    ]),
+    [],
+  );
   const kanbanGroupField = isKanban
     ? table.fields.find(field => field.id === config.groupByFieldId && field.type === 'single_select') ?? table.fields.find(field => field.type === 'single_select')
     : undefined;
@@ -3148,9 +3180,9 @@ function GalleryFieldCustomizePanel({
     )),
   ];
   const cardLayoutMode = config.cardLayoutMode || 'regular';
-  const hasCover = Boolean(config.coverFieldId);
-  const coverField = table.fields.find(field => field.id === config.coverFieldId) ?? null;
-  const coverLabel = hasCover ? (coverField?.name || '附件') : '无封面';
+  const coverValue = isKanban
+    ? (config.coverFieldId || '__none__')
+    : (config.coverFieldId || attachmentFields[0]?.id || '');
   const canDeleteField = table.fields.length > 1;
   const listHeight = Math.min(240, Math.max(36, cardFields.length * 36));
   const innerHeight = cardFields.length * 36;
@@ -3173,6 +3205,21 @@ function GalleryFieldCustomizePanel({
       titleFieldId: fieldId,
       visibleFieldIds: config.visibleFieldIds.filter(id => id !== fieldId),
     });
+  };
+
+  const handleTitleFieldChange: SelectProps['onChange'] = value => {
+    setTitleField(String(value ?? ''));
+  };
+
+  const handleCoverFieldChange: SelectProps['onChange'] = value => {
+    if (view.locked) return;
+    const next = String(value ?? '');
+    onConfig({ coverFieldId: !next || next === '__none__' ? undefined : next });
+  };
+
+  const handleAspectRatioChange: SelectProps['onChange'] = value => {
+    if (view.locked) return;
+    onConfig({ cardAspectRatio: String(value ?? '4:3') as GalleryViewConfig['cardAspectRatio'] });
   };
 
   const openFieldMoreMenu = (btn: HTMLElement, fieldId: string) => {
@@ -3202,17 +3249,6 @@ function GalleryFieldCustomizePanel({
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [fieldMoreId, fieldMoreAnchor]);
-
-  useEffect(() => {
-    if (!coverOpen) return;
-    const close = (event: globalThis.PointerEvent) => {
-      if (!(event.target instanceof Node)) return;
-      if (coverRef.current?.contains(event.target)) return;
-      setCoverOpen(false);
-    };
-    document.addEventListener('pointerdown', close, true);
-    return () => document.removeEventListener('pointerdown', close, true);
-  }, [coverOpen]);
 
   const resolveFieldDropIndex = (clientY: number) => {
     const list = fieldListRef.current;
@@ -3317,16 +3353,15 @@ function GalleryFieldCustomizePanel({
               <div className={`${settingPrefix}_setting_item field-setting-item`}>
                 <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>标题字段</span>
                 <div className={`${settingPrefix}__field-setting-children`}>
-                  <select
-                    className="bitable-card-config-select"
-                    value={titleFieldId}
+                  <Select
+                    className="bitable-card-config-tdesign-select"
+                    size="small"
                     disabled={view.locked}
-                    onChange={event => setTitleField(event.target.value)}
-                  >
-                    {titleFields.map(field => (
-                      <option key={field.id} value={field.id}>{field.name}</option>
-                    ))}
-                  </select>
+                    value={titleFieldId}
+                    options={titleFieldOptions}
+                    popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+                    onChange={handleTitleFieldChange}
+                  />
                 </div>
               </div>
             </div>
@@ -3334,62 +3369,16 @@ function GalleryFieldCustomizePanel({
               <div className={`${settingPrefix}_setting_item field-setting-item${isKanban ? ' has-divider' : ''}`}>
                 <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>封面内容</span>
                 <div className={`${settingPrefix}__field-setting-children`}>
-                  <div className={`bitable-dropdown-select__wrapper${coverOpen ? ' is-open' : ''}`} ref={coverRef}>
-                    <div className={`bitable-select-trigger__wrapper ${isKanban ? 'bitable-dropdown-kanban' : 'bitable-dropdown-gallery'}`}>
-                      <button
-                        type="button"
-                        className="bitable-select-trigger__trigger"
-                        disabled={view.locked || (!isKanban && !attachmentFields.length)}
-                        aria-expanded={coverOpen}
-                        onClick={() => setCoverOpen(open => !open)}
-                      >
-                        <span className="bitable-select-trigger__icon">
-                          <span className="universe-icon">{hasCover ? <GlyphAttachment /> : <GlyphBan />}</span>
-                        </span>
-                        <span className="bitable-select-trigger__content">{isKanban ? coverLabel : (coverField?.name || '附件')}</span>
-                        <span className="bitable-select-trigger__arrow">
-                          <span className="universe-icon"><GlyphDownBold /></span>
-                        </span>
-                      </button>
-                    </div>
-                    {coverOpen && (
-                      <div className="bitable-dropdown-select__menu">
-                        {isKanban && (
-                          <button
-                            type="button"
-                            className={`bitable-dropdown-select__item${!hasCover ? ' is-selected' : ''}`}
-                            onMouseDown={event => {
-                              event.preventDefault();
-                              onConfig({ coverFieldId: undefined });
-                              setCoverOpen(false);
-                            }}
-                          >
-                            <span className="bitable-select-trigger__icon">
-                              <span className="universe-icon"><GlyphBan /></span>
-                            </span>
-                            <span>无封面</span>
-                          </button>
-                        )}
-                        {attachmentFields.map(field => (
-                          <button
-                            key={field.id}
-                            type="button"
-                            className={`bitable-dropdown-select__item${config.coverFieldId === field.id || (!isKanban && !config.coverFieldId && field.id === attachmentFields[0]?.id) ? ' is-selected' : ''}`}
-                            onMouseDown={event => {
-                              event.preventDefault();
-                              onConfig({ coverFieldId: field.id });
-                              setCoverOpen(false);
-                            }}
-                          >
-                            <span className="bitable-select-trigger__icon">
-                              <span className="universe-icon"><GlyphAttachment /></span>
-                            </span>
-                            <span>{field.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <Select
+                    className="bitable-card-config-tdesign-select"
+                    size="small"
+                    disabled={view.locked || (!isKanban && !attachmentFields.length)}
+                    value={coverValue}
+                    options={coverFieldOptions}
+                    placeholder={isKanban ? '无封面' : '附件'}
+                    popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+                    onChange={handleCoverFieldChange}
+                  />
                 </div>
               </div>
               {isKanban && <div className="field-setting-item_divider" />}
@@ -3400,22 +3389,17 @@ function GalleryFieldCustomizePanel({
                 <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>封面效果</span>
                 <div className={`${settingPrefix}__field-setting-children`}>
                   <div className="b-radio gallery_card_cover_type b-radio-upgrade">
-                    <div className="radio-group" role="group" aria-label="封面效果">
-                      {([
-                        ['contain', '适应'],
-                        ['cover', '裁剪'],
-                      ] as const).map(([fit, label]) => (
-                        <button
-                          key={fit}
-                          type="button"
-                          className={`radio-item ellipsis${config.coverFit === fit ? ' selected' : ''}`}
-                          disabled={view.locked}
-                          onClick={() => onConfig({ coverFit: fit })}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                    <Radio.Group
+                      variant="default-filled"
+                      size="small"
+                      disabled={view.locked}
+                      value={config.coverFit}
+                      options={[
+                        { label: '适应', value: 'contain' },
+                        { label: '裁剪', value: 'cover' },
+                      ]}
+                      onChange={value => onConfig({ coverFit: value as 'cover' | 'contain' })}
+                    />
                   </div>
                 </div>
               </div>
@@ -3426,17 +3410,15 @@ function GalleryFieldCustomizePanel({
               <div className={`${settingPrefix}_setting_item field-setting-item`}>
                 <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>卡片比例</span>
                 <div className={`${settingPrefix}__field-setting-children`}>
-                  <select
-                    className="bitable-card-config-select"
-                    value={config.cardAspectRatio}
+                  <Select
+                    className="bitable-card-config-tdesign-select"
+                    size="small"
                     disabled={view.locked}
-                    onChange={event => onConfig({ cardAspectRatio: event.target.value as GalleryViewConfig['cardAspectRatio'] })}
-                  >
-                    <option value="1:1">1:1</option>
-                    <option value="4:3">4:3</option>
-                    <option value="16:9">16:9</option>
-                    <option value="auto">自动</option>
-                  </select>
+                    value={config.cardAspectRatio}
+                    options={aspectRatioOptions}
+                    popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+                    onChange={handleAspectRatioChange}
+                  />
                 </div>
               </div>
             </div>
@@ -3447,22 +3429,17 @@ function GalleryFieldCustomizePanel({
                 <span className={`${settingPrefix}__field-setting-name ellipsis table-view-config-item__label`}>展示模式</span>
                 <div className={`${settingPrefix}__field-setting-children`}>
                   <div className="b-radio b-radio-upgrade">
-                    <div className="radio-group" role="group" aria-label="展示模式">
-                      {([
-                        ['regular', '常规'],
-                        ['compact', '紧凑'],
-                      ] as const).map(([mode, label]) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={`radio-item ellipsis${cardLayoutMode === mode ? ' selected' : ''}`}
-                          disabled={view.locked}
-                          onClick={() => onConfig({ cardLayoutMode: mode })}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                    <Radio.Group
+                      variant="default-filled"
+                      size="small"
+                      disabled={view.locked}
+                      value={cardLayoutMode}
+                      options={[
+                        { label: '常规', value: 'regular' },
+                        { label: '紧凑', value: 'compact' },
+                      ]}
+                      onChange={value => onConfig({ cardLayoutMode: value as 'regular' | 'compact' })}
+                    />
                   </div>
                 </div>
               </div>
@@ -3710,92 +3687,20 @@ function FilterPanelSelect<T extends string>({
   className?: string;
   onChange: (value: T) => void;
 }) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const selected = options.find(option => option.value === value);
-  const position = useAnchoredFloatingPosition(triggerRef, menuRef, open, {
-    placement: 'bottom-start',
-    fallbackWidth: 160,
-    fallbackHeight: 240,
-    matchAnchorWidth: true,
-    gap: 6,
-    pad: 8,
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: globalThis.MouseEvent) => {
-      if (!(event.target instanceof Node)) return;
-      if (rootRef.current?.contains(event.target)) return;
-      if (menuRef.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', close, true);
-    return () => document.removeEventListener('mousedown', close, true);
-  }, [open]);
-
   return (
     <div
-      ref={rootRef}
-      className={`base-filter-select${open ? ' is-open' : ''}${className ? ` ${className}` : ''}`}
+      className={`base-filter-tdesign-select-wrap${className ? ` ${className}` : ''}`}
+      onMouseDown={event => event.stopPropagation()}
     >
-      <button
-        ref={triggerRef}
-        type="button"
-        className="base-filter-select__trigger"
+      <Select
+        className="base-filter-tdesign-select"
+        size="small"
         disabled={disabled}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        onMouseDown={event => event.stopPropagation()}
-        onClick={() => {
-          if (disabled) return;
-          setOpen(current => !current);
-        }}
-      >
-        <span className="base-filter-select__label">{selected?.label || ''}</span>
-        <span className="base-filter-select__arrow" aria-hidden>
-          <SelGlyphChevronDown size={12} fill="currentColor" />
-        </span>
-      </button>
-      {open && createPortal(
-        <div
-          ref={menuRef}
-          className="base-filter-select__menu base-filter-select__menu--portal"
-          role="listbox"
-          style={{
-            position: 'fixed',
-            top: position.top,
-            left: position.left,
-            width: position.width,
-            maxHeight: position.maxHeight,
-            visibility: position.visibility,
-            zIndex: 10060,
-          }}
-          data-floating-panel="true"
-          data-no-marquee-selection="true"
-          onMouseDown={event => event.stopPropagation()}
-        >
-          {options.map(option => (
-            <button
-              key={option.value}
-              type="button"
-              role="option"
-              aria-selected={option.value === value}
-              className={`base-filter-select__option${option.value === value ? ' is-active' : ''}`}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              <span>{option.label}</span>
-              {option.value === value && <span className="base-filter-select__check" aria-hidden>✓</span>}
-            </button>
-          ))}
-        </div>,
-        document.body,
-      )}
+        value={value}
+        options={options.map(option => ({ label: option.label, value: option.value }))}
+        popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+        onChange={next => onChange(String(next ?? '') as T)}
+      />
     </div>
   );
 }
@@ -3823,91 +3728,20 @@ function GroupPanelFieldSelect<T extends string>({
   disabled?: boolean;
   onChange: (value: T) => void;
 }) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const selected = options.find(option => option.value === value);
-  const position = useAnchoredFloatingPosition(triggerRef, menuRef, open, {
-    placement: 'bottom-start',
-    fallbackWidth: 160,
-    fallbackHeight: 240,
-    matchAnchorWidth: true,
-    gap: 6,
-    pad: 8,
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: globalThis.MouseEvent) => {
-      if (!(event.target instanceof Node)) return;
-      if (rootRef.current?.contains(event.target)) return;
-      if (menuRef.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', close, true);
-    return () => document.removeEventListener('mousedown', close, true);
-  }, [open]);
-
   return (
     <div
-      ref={rootRef}
-      className={`bitable-dropdown-select__wrapper${open ? ' is-open' : ''}`}
-      style={{ marginLeft: 8, width: 'fit-content', maxWidth: '100%' }}
+      className="bitable-group-field-tdesign-select-wrap"
+      onMouseDown={event => event.stopPropagation()}
     >
-      <div className="bitable-select-trigger__wrapper bitable-select-trigger__wrapper--fit-content">
-        <div
-          ref={triggerRef}
-          className="bitable-select-trigger__trigger"
-          onMouseDown={event => event.stopPropagation()}
-          onClick={() => {
-            if (disabled) return;
-            setOpen(current => !current);
-          }}
-        >
-          <span className="bitable-select-trigger__content">{selected?.label || ''}</span>
-          <span className="bitable-select-trigger__arrow">
-            <span className="universe-icon"><GlyphDownBold size={14} /></span>
-          </span>
-        </div>
-        {open && createPortal(
-          <div
-            ref={menuRef}
-            className="bitable-group-field-picker__menu bitable-group-field-picker__menu--portal"
-            role="listbox"
-            style={{
-              position: 'fixed',
-              top: position.top,
-              left: position.left,
-              width: position.width,
-              maxHeight: position.maxHeight,
-              visibility: position.visibility,
-              zIndex: 10060,
-            }}
-            data-floating-panel="true"
-            data-no-marquee-selection="true"
-            onMouseDown={event => event.stopPropagation()}
-          >
-            {options.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={option.value === value}
-                className={`bitable-group-field-picker__option${option.value === value ? ' is-active' : ''}`}
-                onMouseDown={event => {
-                  event.preventDefault();
-                  onChange(option.value);
-                  setOpen(false);
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>,
-          document.body,
-        )}
-      </div>
+      <Select
+        className="bitable-group-field-tdesign-select"
+        size="small"
+        disabled={disabled}
+        value={value}
+        options={options.map(option => ({ label: option.label, value: option.value }))}
+        popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+        onChange={next => onChange(String(next ?? '') as T)}
+      />
     </div>
   );
 }
@@ -3948,21 +3782,7 @@ function SortAutoSwitch({
       <div className="b-switch-trigger bitable-group--switch disable-animation">
         <span className="b-trigger-text bitable-layout-row">自动排序</span>
         <div className="b-switch-trigger-switch-container">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={checked}
-            disabled={disabled}
-            className={[
-              'ud__switch',
-              'ud__switch-md',
-              'b-switch-trigger-udswitch',
-              checked ? 'ud__switch-checked b-switch-trigger-udswitch-checked' : '',
-            ].filter(Boolean).join(' ')}
-            onClick={() => !disabled && onChange(!checked)}
-          >
-            <div className="ud__switch__handler" />
-          </button>
+          <Switch size="small" value={checked} disabled={disabled} onChange={onChange} />
         </div>
       </div>
     </div>
@@ -4022,14 +3842,6 @@ function GroupOrderToggle({
   );
 }
 
-function GlyphSearch({ size = 14 }: GlyphProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-      <path d="M16.473 17.887A9.46 9.46 0 0 1 10.5 20a9.5 9.5 0 1 1 9.5-9.5 9.46 9.46 0 0 1-2.113 5.973l3.773 3.773a.996.996 0 0 1-.007 1.407.996.996 0 0 1-1.407.007l-3.773-3.773ZM18 10.5a7.5 7.5 0 1 0-15 0 7.5 7.5 0 0 0 15 0Z" fill="currentColor" />
-    </svg>
-  );
-}
-
 function FieldConditionPicker({
   fields,
   disabled,
@@ -4039,124 +3851,41 @@ function FieldConditionPicker({
   disabled?: boolean;
   onSelect: (fieldId: string) => void;
 }) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const filteredFields = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return fields;
-    return fields.filter(field => field.name.toLocaleLowerCase().includes(needle));
-  }, [fields, query]);
-  const position = useAnchoredFloatingPosition(triggerRef, menuRef, open, {
-    placement: 'bottom-start',
-    fallbackWidth: 200,
-    fallbackHeight: 280,
-    gap: 6,
-    pad: 8,
-  });
-
-  useEffect(() => {
-    if (!open) {
-      setQuery('');
-      return;
-    }
-    searchRef.current?.focus();
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: globalThis.MouseEvent) => {
-      if (!(event.target instanceof Node)) return;
-      if (rootRef.current?.contains(event.target)) return;
-      if (menuRef.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', close, true);
-    return () => document.removeEventListener('mousedown', close, true);
-  }, [open]);
+  const [nonce, setNonce] = useState(0);
+  const options = useMemo(
+    () => fields.map(field => ({
+      label: field.name,
+      value: field.id,
+      content: (
+        <span className="bitable-td-field-option">
+          <span className="bitable-td-field-option__icon" aria-hidden>{fieldTypeGlyph(field.type, 14)}</span>
+          <span className="bitable-td-field-option__text">{field.name}</span>
+        </span>
+      ),
+    })),
+    [fields],
+  );
 
   return (
     <div
-      ref={rootRef}
-      className={`bitable-dropdown-select__wrapper bitable-group-field-picker${open ? ' is-open' : ''}`}
-      style={{ marginLeft: 8, width: 'fit-content', maxWidth: '100%' }}
+      className="bitable-field-condition-tdesign-wrap"
+      onMouseDown={event => event.stopPropagation()}
     >
-      <div className="bitable-select-trigger__wrapper bitable-select-trigger__wrapper--fit-content">
-        <div
-          ref={triggerRef}
-          className="bitable-select-trigger__trigger"
-          onMouseDown={event => event.stopPropagation()}
-          onClick={() => {
-            if (disabled || !fields.length) return;
-            setOpen(current => !current);
-          }}
-        >
-          <span className="bitable-select-trigger__content">
-            <span className="bitable-select-trigger__placeholder">选择条件</span>
-          </span>
-          <span className="bitable-select-trigger__arrow">
-            <span className="universe-icon"><GlyphDownBold size={14} /></span>
-          </span>
-        </div>
-        {open && createPortal(
-          <div
-            ref={menuRef}
-            className="bitable-field-condition-picker__menu bitable-field-condition-picker__menu--portal"
-            role="listbox"
-            style={{
-              position: 'fixed',
-              top: position.top,
-              left: position.left,
-              width: 200,
-              maxHeight: position.maxHeight,
-              visibility: position.visibility,
-              zIndex: 10060,
-            }}
-            data-floating-panel="true"
-            data-no-marquee-selection="true"
-            onMouseDown={event => event.stopPropagation()}
-          >
-            <div className="bitable-field-condition-picker__search">
-              <span className="bitable-field-condition-picker__search-icon" aria-hidden><GlyphSearch /></span>
-              <input
-                ref={searchRef}
-                className="bitable-field-condition-picker__search-input"
-                type="text"
-                placeholder="搜索字段"
-                value={query}
-                onChange={event => setQuery(event.target.value)}
-                onMouseDown={event => event.stopPropagation()}
-              />
-            </div>
-            <div className="bitable-field-condition-picker__list">
-              {filteredFields.length ? filteredFields.map(field => (
-                <button
-                  key={field.id}
-                  type="button"
-                  role="option"
-                  className="bitable-dropdown-select__item"
-                  onMouseDown={event => {
-                    event.preventDefault();
-                    onSelect(field.id);
-                    setOpen(false);
-                  }}
-                >
-                  <span className="bitable-dropdown-select__item-content">
-                    <span className="bitable-dropdown-select__option-icon">{fieldTypeGlyph(field.type, 14)}</span>
-                    <span className="bitable-dropdown-select__option-text">{field.name}</span>
-                  </span>
-                </button>
-              )) : (
-                <div className="bitable-field-condition-picker__empty">无匹配字段</div>
-              )}
-            </div>
-          </div>,
-          document.body,
-        )}
-      </div>
+      <Select
+        key={nonce}
+        className="bitable-field-condition-tdesign-select"
+        size="small"
+        filterable
+        disabled={disabled || !fields.length}
+        placeholder="选择条件"
+        options={options}
+        popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+        onChange={value => {
+          if (value == null || value === '') return;
+          onSelect(String(value));
+          setNonce(current => current + 1);
+        }}
+      />
     </div>
   );
 }
@@ -4806,30 +4535,23 @@ function ToolbarQuickPanel({
                   onChange={operator => updateFilter(rule.id, { operator })}
                 />
                 {needsValue && (
-                  <div className="base-toolbar-panel__filter-value-wrap">
+                  <div className="base-toolbar-panel__filter-value-wrap" onMouseDown={event => event.stopPropagation()}>
                     <input
                       className="base-toolbar-panel__filter-value"
                       disabled={view.locked}
                       value={rule.value || ''}
                       placeholder="请输入"
                       onChange={event => updateFilter(rule.id, { value: event.target.value })}
-                      onMouseDown={event => event.stopPropagation()}
                     />
-                    {Boolean(rule.value?.trim()) && (
-                      <button
-                        type="button"
-                        className="base-toolbar-panel__filter-value-clear"
-                        aria-label="清除"
-                        disabled={view.locked}
-                        onMouseDown={event => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          updateFilter(rule.id, { value: '' });
-                        }}
-                      >
-                        ×
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="base-toolbar-panel__filter-value-clear"
+                      aria-label="清空"
+                      disabled={view.locked || !rule.value}
+                      onClick={() => updateFilter(rule.id, { value: '' })}
+                    >
+                      ×
+                    </button>
                   </div>
                 )}
                 <button
@@ -4894,97 +4616,6 @@ function ToolbarQuickPanel({
   );
 }
 
-function GallerySettings({
-  table,
-  view,
-  config,
-  panelRef,
-  onClose,
-  onConfig,
-  onTable,
-}: {
-  table: BaseTable;
-  view: BaseView;
-  config: GalleryViewConfig;
-  panelRef: RefObject<HTMLDivElement>;
-  onClose: () => void;
-  onConfig: (patch: Partial<GalleryViewConfig>) => void;
-  onTable: (update: (table: BaseTable) => BaseTable) => void;
-}) {
-  const attachmentFields = table.fields.filter(field => field.type === 'attachment');
-  return (
-    <aside ref={panelRef} className="base-settings" data-no-marquee-selection="true" data-floating-panel="true">
-      <header><strong>自定义卡片</strong><button type="button" onClick={onClose}>×</button></header>
-      <label>视图名称<input value={view.name} disabled={view.locked} onChange={event => onTable(current => updateView(current, view.id, item => ({ ...item, name: event.target.value })))} /></label>
-      <label>搜索记录<input disabled={view.locked} placeholder="搜索记录" value={String(config.search || '')} onChange={event => onConfig({ search: event.target.value })} /></label>
-      <label>封面字段
-        <select value={config.coverFieldId || ''} disabled={view.locked} onChange={event => onConfig({ coverFieldId: event.target.value || undefined })}>
-          <option value="">不设置封面</option>
-          {attachmentFields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-        </select>
-      </label>
-      {!attachmentFields.length && (
-        <div className="base-settings__hint">
-          当前没有附件字段，卡片将使用默认封面。
-          <button type="button" disabled={view.locked} onClick={() => onTable(current => {
-            const id = `fld_attachment_${Date.now().toString(36)}`;
-            const field: BaseField = { id, name: '附件', type: 'attachment' };
-            return {
-              ...current,
-              fields: [...current.fields, field],
-              records: current.records.map(record => ({ ...record, fields: { ...record.fields, [id]: [] } })),
-              views: current.views.map(item => item.id === view.id ? { ...item, config: { ...config, coverFieldId: id } } : item),
-            };
-          })}>创建附件字段</button>
-        </div>
-      )}
-      <div className="base-settings__row">
-        <label>封面展示<select disabled={view.locked} value={config.coverFit} onChange={event => onConfig({ coverFit: event.target.value as 'cover' | 'contain' })}><option value="cover">填充</option><option value="contain">完整显示</option></select></label>
-        <label>卡片尺寸<select disabled={view.locked} value={config.cardSize} onChange={event => onConfig({ cardSize: event.target.value as GalleryViewConfig['cardSize'] })}><option value="small">小</option><option value="medium">中</option><option value="large">大</option></select></label>
-      </div>
-      <label>卡片比例<select disabled={view.locked} value={config.cardAspectRatio} onChange={event => onConfig({ cardAspectRatio: event.target.value as GalleryViewConfig['cardAspectRatio'] })}><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="16:9">16:9</option><option value="auto">自动</option></select></label>
-      <label>标题字段<select disabled={view.locked} value={config.titleFieldId || table.primaryFieldId} onChange={event => onConfig({ titleFieldId: event.target.value })}>{table.fields.filter(field => field.type !== 'attachment').map(field => <option key={field.id} value={field.id}>{field.name}</option>)}</select></label>
-      <fieldset>
-        <legend>卡片显示字段</legend>
-        {table.fields.filter(field => field.id !== config.titleFieldId && field.id !== config.coverFieldId).map(field => (
-          <label className="base-check" key={field.id}>
-            <input type="checkbox" disabled={view.locked} checked={config.visibleFieldIds.includes(field.id)} onChange={event => onConfig({ visibleFieldIds: event.target.checked ? [...config.visibleFieldIds, field.id] : config.visibleFieldIds.filter(id => id !== field.id) })} />
-            {field.name}
-          </label>
-        ))}
-      </fieldset>
-      <div className="base-settings__row">
-        <label className="base-check"><input type="checkbox" disabled={view.locked} checked={config.showFieldNames} onChange={event => onConfig({ showFieldNames: event.target.checked })} />显示字段名</label>
-        <label className="base-check"><input type="checkbox" disabled={view.locked} checked={config.showEmptyFields} onChange={event => onConfig({ showEmptyFields: event.target.checked })} />显示空字段</label>
-      </div>
-      <label>字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
-        if (view.locked) return;
-        onTable(current => updateView(current, view.id, item => ({ ...item, sorts: event.target.value ? [{ fieldId: event.target.value, direction: item.sorts?.[0]?.direction || 'asc' }] : [] })));
-      }}>
-        <option value="">不排序</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-      </select></label>
-      {view.sorts?.length ? <button type="button" disabled={view.locked} className="base-settings__direction" onClick={() => {
-        if (view.locked) return;
-        onTable(current => updateView(current, view.id, item => ({ ...item, sorts: [{ ...item.sorts![0], direction: item.sorts![0].direction === 'asc' ? 'desc' : 'asc' }] })));
-      }}>{view.sorts[0].direction === 'asc' ? '升序' : '降序'}</button> : null}
-      <label>筛选字段
-        <select disabled={view.locked} value={view.filters?.[0]?.fieldId || ''} onChange={event => {
-        if (view.locked) return;
-        onTable(current => updateView(current, view.id, item => ({ ...item, filters: event.target.value ? [{ id: 'primary-filter', fieldId: event.target.value, operator: 'contains', value: item.filters?.[0]?.value || '' }] : [] })));
-      }}>
-        <option value="">不筛选</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-      </select></label>
-      {view.filters?.length ? <input disabled={view.locked} placeholder="包含内容" value={view.filters[0].value || ''} onChange={event => {
-        if (view.locked) return;
-        onTable(current => updateView(current, view.id, item => ({ ...item, filters: [{ ...item.filters![0], value: event.target.value }] })));
-      }} /> : null}
-      <footer>
-        <button type="button" onClick={() => onTable(current => updateView(current, view.id, item => ({ ...item, locked: !item.locked })))}>{view.locked ? '解锁视图' : '锁定视图'}</button>
-      </footer>
-    </aside>
-  );
-}
-
 function GanttSettings({
   table,
   view,
@@ -5003,41 +4634,106 @@ function GanttSettings({
   onTable: (update: (table: BaseTable) => BaseTable) => void;
 }) {
   const dateFields = table.fields.filter(field => field.type === 'date');
+  const titleOptions = table.fields
+    .filter(field => field.type !== 'attachment')
+    .map(field => ({ label: field.name, value: field.id }));
+  const dateOptions = dateFields.map(field => ({ label: field.name, value: field.id }));
+  const sortOptions = [
+    { label: '不排序', value: '' },
+    ...table.fields.map(field => ({ label: field.name, value: field.id })),
+  ];
+  const scaleOptions = [
+    { label: '周', value: 60 },
+    { label: '月', value: 40 },
+    { label: '季', value: 24 },
+  ];
+
   return (
-    <aside ref={panelRef} className="base-settings" data-no-marquee-selection="true" data-floating-panel="true">
+    <aside ref={panelRef} className="base-settings base-settings--tdesign" data-no-marquee-selection="true" data-floating-panel="true">
       <header><strong>甘特设置</strong><button type="button" onClick={onClose}>×</button></header>
-      <label>视图名称<input value={view.name} disabled={view.locked} onChange={event => onTable(current => updateView(current, view.id, item => ({ ...item, name: event.target.value })))} /></label>
-      <label>搜索记录<input disabled={view.locked} placeholder="搜索记录" value={String(config.search || '')} onChange={event => onConfig({ search: event.target.value })} /></label>
-      <label>任务名称字段
-        <select disabled={view.locked} value={config.titleFieldId || table.primaryFieldId} onChange={event => onConfig({ titleFieldId: event.target.value })}>
-          {table.fields.filter(field => field.type !== 'attachment').map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-        </select>
+      <label>
+        视图名称
+        <Input
+          size="small"
+          disabled={view.locked}
+          value={view.name}
+          onChange={value => onTable(current => updateView(current, view.id, item => ({ ...item, name: String(value ?? '') })))}
+        />
+      </label>
+      <label>
+        搜索记录
+        <Input
+          size="small"
+          disabled={view.locked}
+          placeholder="搜索记录"
+          value={String(config.search || '')}
+          onChange={value => onConfig({ search: String(value ?? '') })}
+        />
+      </label>
+      <label>
+        任务名称字段
+        <Select
+          size="small"
+          disabled={view.locked}
+          value={config.titleFieldId || table.primaryFieldId}
+          options={titleOptions}
+          popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+          onChange={value => onConfig({ titleFieldId: String(value ?? '') })}
+        />
       </label>
       <div className="base-settings__row">
-        <label>开始日期
-          <select disabled={view.locked} value={config.startDateFieldId || ''} onChange={event => onConfig({ startDateFieldId: event.target.value })}>
-            {dateFields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-          </select>
+        <label>
+          开始日期
+          <Select
+            size="small"
+            disabled={view.locked}
+            value={config.startDateFieldId || dateOptions[0]?.value || ''}
+            options={dateOptions}
+            popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+            onChange={value => onConfig({ startDateFieldId: String(value ?? '') })}
+          />
         </label>
-        <label>结束日期
-          <select disabled={view.locked} value={config.endDateFieldId || ''} onChange={event => onConfig({ endDateFieldId: event.target.value })}>
-            {dateFields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-          </select>
+        <label>
+          结束日期
+          <Select
+            size="small"
+            disabled={view.locked}
+            value={config.endDateFieldId || dateOptions[0]?.value || ''}
+            options={dateOptions}
+            popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+            onChange={value => onConfig({ endDateFieldId: String(value ?? '') })}
+          />
         </label>
       </div>
-      <label>时间刻度
-        <select disabled={view.locked} value={config.dayWidth} onChange={event => onConfig({ dayWidth: Number(event.target.value) })}>
-          <option value={60}>周</option>
-          <option value={40}>月</option>
-          <option value={24}>季</option>
-        </select>
+      <label>
+        时间刻度
+        <Select
+          size="small"
+          disabled={view.locked}
+          value={config.dayWidth}
+          options={scaleOptions}
+          popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+          onChange={value => onConfig({ dayWidth: Number(value) })}
+        />
       </label>
-      <label>字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
-        if (view.locked) return;
-        onTable(current => updateView(current, view.id, item => ({ ...item, sorts: event.target.value ? [{ fieldId: event.target.value, direction: item.sorts?.[0]?.direction || 'asc' }] : [] })));
-      }}>
-        <option value="">不排序</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-      </select></label>
+      <label>
+        字段
+        <Select
+          size="small"
+          disabled={view.locked}
+          value={view.sorts?.[0]?.fieldId || ''}
+          options={sortOptions}
+          popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+          onChange={value => {
+            if (view.locked) return;
+            const fieldId = String(value ?? '');
+            onTable(current => updateView(current, view.id, item => ({
+              ...item,
+              sorts: fieldId ? [{ fieldId, direction: item.sorts?.[0]?.direction || 'asc' }] : [],
+            })));
+          }}
+        />
+      </label>
       <footer>
         <button type="button" onClick={() => onTable(current => updateView(current, view.id, item => ({ ...item, locked: !item.locked })))}>{view.locked ? '解锁视图' : '锁定视图'}</button>
       </footer>
@@ -5056,14 +4752,13 @@ function HierarchySettingsPanel({
   panelRef: RefObject<HTMLDivElement>;
   onTable: (update: (table: BaseTable) => BaseTable) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const selectRef = useRef<HTMLDivElement>(null);
   const config = view.config as GridViewConfig;
   const relationFields = table.fields.filter(field => field.id !== table.primaryFieldId && field.type === 'relation');
   const selectedField = table.fields.find(field => field.id === config.parentFieldId)
     ?? relationFields.find(field => field.name === '父记录')
     ?? relationFields[0]
     ?? null;
+
   const createParentField = () => {
     if (view.locked) return;
     const id = `fld_relation_${Date.now().toString(36)}`;
@@ -5093,27 +4788,15 @@ function HierarchySettingsPanel({
           : item),
       };
     });
-    setOpen(false);
   };
+
   const selectField = (fieldId: string) => {
-    if (view.locked) return;
+    if (view.locked || !fieldId) return;
     onTable(current => updateView(current, view.id, item => ({
       ...item,
       config: { ...item.config, parentFieldId: fieldId },
     })));
-    setOpen(false);
   };
-
-  useEffect(() => {
-    if (!open) return;
-    const handlePointerDown = (event: globalThis.PointerEvent) => {
-      if (!(event.target instanceof Node)) return;
-      if (selectRef.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-    document.addEventListener('pointerdown', handlePointerDown, true);
-    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
-  }, [open]);
 
   return (
     <div
@@ -5131,129 +4814,32 @@ function HierarchySettingsPanel({
         </div>
         <div className="bitable-layout-row bitable-flex hierarchy-content-config hierarchy-content-config--clearable">
           <span className="hierarchy-field-title">选择父记录字段</span>
-          <div
-            ref={selectRef}
-            className={`ud__select hierarchy-field-select${open ? ' is-open' : ''}`}
-          >
-            <button
-              type="button"
-              className="ud__select__selector"
-              aria-label="选择父记录字段"
-              aria-expanded={open}
-              onClick={() => setOpen(current => !current)}
-              disabled={view.locked}
-            >
-              <span className="bitable-field-item">
-                <span className="bitable-field-icon" aria-hidden>
-                  <SlashGlyphBitableGrid size={14} fill="currentColor" />
-                </span>
-                <span className="bitable-field-name">{selectedField?.name || '父记录'}</span>
-              </span>
-              <span className="ud__select__selector__arrow" aria-hidden>
-                <SelGlyphChevronDown size={12} fill="currentColor" />
-              </span>
-            </button>
-            {open && (
-              <div className="hierarchy-field-select__menu">
-                {relationFields.map(field => (
-                  <button
-                    key={field.id}
-                    type="button"
-                    className={`hierarchy-field-select__option${selectedField?.id === field.id ? ' is-active' : ''}`}
-                    onMouseDown={event => {
-                      event.preventDefault();
-                      selectField(field.id);
-                    }}
-                  >
-                    <span className="bitable-field-icon" aria-hidden>
-                      <SlashGlyphBitableGrid size={14} fill="currentColor" />
-                    </span>
-                    <span>{field.name}</span>
-                    {selectedField?.id === field.id && <span className="hierarchy-field-select__check" aria-hidden>✓</span>}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="hierarchy-field-select__option"
-                  onMouseDown={event => {
-                    event.preventDefault();
-                    createParentField();
-                  }}
-                >
-                  <span aria-hidden>+</span>
-                  <span>新建父记录</span>
-                </button>
-              </div>
+          <Select
+            className="hierarchy-field-tdesign-select"
+            size="small"
+            disabled={view.locked}
+            value={selectedField?.id || ''}
+            options={relationFields.map(field => ({ label: field.name, value: field.id }))}
+            placeholder="父记录"
+            popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
+            panelBottomContent={(
+              <button
+                type="button"
+                className="hierarchy-field-tdesign-create"
+                disabled={view.locked}
+                onMouseDown={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  createParentField();
+                }}
+              >
+                + 新建父记录
+              </button>
             )}
-          </div>
+            onChange={value => selectField(String(value ?? ''))}
+          />
         </div>
       </div>
     </div>
-  );
-}
-
-function GridSettings({
-  table,
-  view,
-  panelRef,
-  onClose,
-  onTable,
-}: {
-  table: BaseTable;
-  view: BaseView;
-  panelRef: RefObject<HTMLDivElement>;
-  onClose: () => void;
-  onTable: (update: (table: BaseTable) => BaseTable) => void;
-}) {
-  const search = String((view.config as { search?: string }).search || '');
-  const hidden = new Set(view.hiddenFieldIds || []);
-  return (
-    <aside ref={panelRef} className="base-settings" data-no-marquee-selection="true" data-floating-panel="true">
-      <header><strong>视图设置</strong><button type="button" onClick={onClose}>×</button></header>
-      <label>视图名称<input value={view.name} disabled={view.locked} onChange={event => onTable(current => updateView(current, view.id, item => ({ ...item, name: event.target.value })))} /></label>
-      <label>搜索记录<input disabled={view.locked} placeholder="搜索记录" value={search} onChange={event => onTable(current => updateView(current, view.id, item => ({ ...item, config: { ...item.config, search: event.target.value } })))} /></label>
-      <fieldset>
-        <legend>显示字段</legend>
-        {table.fields.map(field => (
-          <label className="base-check" key={field.id}>
-            <input
-              type="checkbox"
-              disabled={view.locked || field.id === table.primaryFieldId}
-              checked={!hidden.has(field.id)}
-              onChange={event => onTable(current => updateView(current, view.id, item => {
-                const next = new Set(item.hiddenFieldIds || []);
-                if (event.target.checked) next.delete(field.id); else next.add(field.id);
-                return { ...item, hiddenFieldIds: Array.from(next) };
-              }))}
-            />
-            {field.name}
-          </label>
-        ))}
-      </fieldset>
-      <label>字段<select disabled={view.locked} value={view.sorts?.[0]?.fieldId || ''} onChange={event => {
-        if (view.locked) return;
-        onTable(current => updateView(current, view.id, item => ({ ...item, sorts: event.target.value ? [{ fieldId: event.target.value, direction: item.sorts?.[0]?.direction || 'asc' }] : [] })));
-      }}>
-        <option value="">不排序</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-      </select></label>
-      {view.sorts?.length ? <button type="button" disabled={view.locked} className="base-settings__direction" onClick={() => {
-        if (view.locked) return;
-        onTable(current => updateView(current, view.id, item => ({ ...item, sorts: [{ ...item.sorts![0], direction: item.sorts![0].direction === 'asc' ? 'desc' : 'asc' }] })));
-      }}>{view.sorts[0].direction === 'asc' ? '升序' : '降序'}</button> : null}
-      <label>筛选字段
-        <select disabled={view.locked} value={view.filters?.[0]?.fieldId || ''} onChange={event => {
-        if (view.locked) return;
-        onTable(current => updateView(current, view.id, item => ({ ...item, filters: event.target.value ? [{ id: 'primary-filter', fieldId: event.target.value, operator: 'contains', value: item.filters?.[0]?.value || '' }] : [] })));
-      }}>
-        <option value="">不筛选</option>{table.fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
-      </select></label>
-      {view.filters?.length ? <input disabled={view.locked} placeholder="包含内容" value={view.filters[0].value || ''} onChange={event => {
-        if (view.locked) return;
-        onTable(current => updateView(current, view.id, item => ({ ...item, filters: [{ ...item.filters![0], value: event.target.value }] })));
-      }} /> : null}
-      <footer>
-        <button type="button" onClick={() => onTable(current => updateView(current, view.id, item => ({ ...item, locked: !item.locked })))}>{view.locked ? '解锁视图' : '锁定视图'}</button>
-      </footer>
-    </aside>
   );
 }

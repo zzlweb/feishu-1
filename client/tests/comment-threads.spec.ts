@@ -135,7 +135,7 @@ test('deletes own comment and closes confirm dialog', async ({ page }) => {
         },
       });
     }
-    if (route.request().method() === 'PATCH') {
+    if (route.request().method() === 'PUT') {
       return route.fulfill({
         json: {
           code: 0,
@@ -209,6 +209,7 @@ test('removes orphaned comments when commented document text is deleted', async 
   };
 
   let deletedComment = false;
+  let savedDocument = false;
 
   await page.route('**/api/documents/comment-threads-e2e/comments/comment-on-text', route => {
     if (route.request().method() === 'DELETE') {
@@ -230,7 +231,8 @@ test('removes orphaned comments when commented document text is deleted', async 
     if (route.request().method() === 'GET') {
       return route.fulfill({ json: { code: 0, data: docWithHighlight } });
     }
-    if (route.request().method() === 'PATCH') {
+    if (route.request().method() === 'PUT') {
+      savedDocument = true;
       return route.fulfill({
         json: {
           code: 0,
@@ -256,6 +258,7 @@ test('removes orphaned comments when commented document text is deleted', async 
   await page.keyboard.press('Backspace');
 
   await expect(page.locator('.feishu-comment-highlight')).toHaveCount(0, { timeout: 3000 });
+  await expect.poll(() => savedDocument, { timeout: 5000 }).toBe(true);
   await expect.poll(() => deletedComment, { timeout: 5000 }).toBe(true);
   await expect(page.locator('.comment-panel__reply-content')).toHaveCount(0);
   await expect(page.locator('.comment-sidebar-positioned')).toBeHidden();

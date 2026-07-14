@@ -1,12 +1,10 @@
-import { valueText, type BaseRecord, type BaseTable, type CellValue, type GanttViewConfig } from '../model/bitableModel';
+import { Checkbox } from 'tdesign-react';
+import { parseDateCellValue, valueText, type BaseRecord, type BaseTable, type CellValue, type GanttViewConfig } from '../model/bitableModel';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function readDate(value: CellValue): Date | null {
-  const raw = valueText(value);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
-  const date = new Date(`${raw}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return parseDateCellValue(value);
 }
 
 function dateValue(date: Date) {
@@ -48,6 +46,7 @@ export interface BitableGanttViewProps {
   scrollToToday: () => void;
   scrollTimeline: (direction: 'left' | 'right') => void;
   addRecord: () => void;
+  locked?: boolean;
   scrollRef: React.RefObject<HTMLDivElement>;
 }
 
@@ -75,6 +74,7 @@ export function BitableGanttView({
   scrollToToday,
   scrollTimeline,
   addRecord,
+  locked = false,
   scrollRef,
 }: BitableGanttViewProps) {
   const isAllSelected = records.length > 0 && selectedIds.size === records.length;
@@ -109,7 +109,12 @@ export function BitableGanttView({
           <div className="base-gantt__header">
             <div className={`base-gantt__left-pane ${leftPanelCollapsed ? 'is-collapsed' : ''}`}>
               <div className="base-gantt__col base-gantt__col--checkbox">
-                <input type="checkbox" checked={isAllSelected} onChange={toggleAllRecordSelection} />
+                <Checkbox
+                  className="base-gantt-index-checkbox"
+                  checked={isAllSelected}
+                  onChange={() => toggleAllRecordSelection()}
+                  aria-label="全选"
+                />
               </div>
               <div className="base-gantt__col base-gantt__col--index">#</div>
               <div className="base-gantt__col base-gantt__col--name base-gantt__record-column">
@@ -161,7 +166,12 @@ export function BitableGanttView({
                 <div className="base-gantt__row" key={record.id}>
                   <div className={`base-gantt__left-pane ${leftPanelCollapsed ? 'is-collapsed' : ''}`}>
                     <div className="base-gantt__col base-gantt__col--checkbox">
-                      <input type="checkbox" checked={selectedIds.has(record.id)} onChange={() => toggleRecordSelection(record.id)} />
+                      <Checkbox
+                        className="base-gantt-index-checkbox"
+                        checked={selectedIds.has(record.id)}
+                        onChange={() => toggleRecordSelection(record.id)}
+                        aria-label={`选择第 ${index + 1} 行`}
+                      />
                     </div>
                     <div className="base-gantt__col base-gantt__col--index">{index + 1}</div>
                     <div className="base-gantt__col base-gantt__col--name base-gantt__record">
@@ -198,7 +208,7 @@ export function BitableGanttView({
                           left: daysBetween(ganttOrigin, start!) * config.dayWidth + 3,
                           width: (daysBetween(start!, end!) + 1) * config.dayWidth - 6,
                         }}
-                        onPointerDown={event => startGanttDrag(event, record, 'move')}
+                    onPointerDown={event => startGanttDrag(event, record, 'move')}
                         onPointerMove={moveGanttDrag}
                         onPointerUp={endGanttDrag}
                         onPointerCancel={endGanttDrag}
@@ -217,6 +227,7 @@ export function BitableGanttView({
                         type="button"
                         className="base-gantt__schedule"
                         style={{ left: daysBetween(ganttOrigin, today) * config.dayWidth + 5 }}
+                        disabled={locked}
                         onClick={() => scheduleRecordAt(record.id, today)}
                       >+ 设置排期</button>
                     )}
@@ -227,7 +238,7 @@ export function BitableGanttView({
 
             <div className="base-gantt__add-row base-gantt__row--add">
               <div className={`base-gantt__left-pane ${leftPanelCollapsed ? 'is-collapsed' : ''}`}>
-                <button type="button" className="base-gantt__quick-add-btn" onClick={() => addRecord()} title="快速添加记录">
+                <button type="button" className="base-gantt__quick-add-btn" disabled={locked} onClick={() => addRecord()} title="快速添加记录">
                   +
                 </button>
               </div>

@@ -81,6 +81,10 @@
       overflow: hidden;
       text-overflow: ellipsis;
       flex-shrink: 1;
+
+      &.is-error {
+        color: #d54941;
+      }
     }
 
     .header-meta-vsep {
@@ -131,8 +135,45 @@
     }
 
     .doc-header-search {
-      width: 220px;
+      width: 320px;
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+
+      .t-input__wrap {
+        flex: 1;
+        min-width: 0;
+      }
+    }
+
+    .doc-header-search__count {
+      min-width: 36px;
+      color: @text-secondary;
+      font-size: 12px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .doc-header-search__nav {
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      color: @text-secondary;
+      background: transparent;
+      cursor: pointer;
+
+      &:hover:not(:disabled) {
+        color: @text-primary;
+        background: @bg-hover;
+      }
+
+      &:disabled {
+        color: #c5c9ce;
+        cursor: default;
+      }
     }
 
     .header-left-divider {
@@ -461,6 +502,7 @@
     overflow: hidden;
     min-height: 0;
     position: relative;
+    container-type: size;
   }
 
   &.doc-page--comment-open {
@@ -1281,7 +1323,9 @@
   flex-shrink: 0;
   background-color: initial;
   z-index: 2;
-  max-height: 100vh;
+  height: 100cqh;
+  max-height: 100cqh;
+  overflow: hidden;
 
 
   &.docx-width-mode {
@@ -1295,9 +1339,10 @@
     flex: 1;
     padding: 12px 10px 16px 16px;
     padding-top: 54px;
-    max-height: 100vh;
+    height: 100%;
+    min-height: 0;
     overflow-x: hidden;
-    overflow-y: visible;
+    overflow-y: hidden;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -1350,8 +1395,8 @@
   }
 
   .catalogue__scroller {
+    flex: 1;
     min-height: 0;
-    max-height: calc(100vh - 82px);
     overflow-y: auto;
     overflow-x: hidden;
     outline: none;

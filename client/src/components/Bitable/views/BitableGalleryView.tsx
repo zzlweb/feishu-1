@@ -239,9 +239,8 @@ export function BitableGalleryView({
   const openRecordMenu = useCallback((event: ReactMouseEvent, recordId: string) => {
     event.preventDefault();
     event.stopPropagation();
-    onOpenRecord(recordId);
     setRecordMenu({ recordId, left: event.clientX, top: event.clientY });
-  }, [onOpenRecord]);
+  }, []);
 
   useEffect(() => {
     const surface = surfaceRef.current;
@@ -279,17 +278,19 @@ export function BitableGalleryView({
       ref={surfaceRef}
       className={`base-gallery-surface${dropActive ? ' is-drop-active' : ''}`}
       onDragOver={event => {
-        if (!event.dataTransfer.types.includes('Files')) return;
+        if (locked || !event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
         setDropActive(true);
       }}
       onDragLeave={() => setDropActive(false)}
-      onDrop={event => onDropFiles(event)}
+      onDrop={event => {
+        if (!locked) onDropFiles(event);
+      }}
     >
       {records.length === 0 ? (
         <div className="base-gallery-empty">
           <span>暂无记录</span>
-          <button type="button" onClick={() => addRecord()}>新建记录</button>
+          <button type="button" disabled={locked} onClick={() => addRecord()}>新建记录</button>
         </div>
       ) : (
         groups.map(group => (
@@ -317,9 +318,13 @@ export function BitableGalleryView({
                     selected={selectedIds.has(record.id)}
                     onOpenRecord={onOpenRecord}
                     onContextMenu={event => openRecordMenu(event, record.id)}
-                    onDragOver={event => event.preventDefault()}
-                    onDrop={event => onDropFiles(event, record.id)}
-                    showDelete={config.showRecordActions}
+                    onDragOver={event => {
+                      if (!locked) event.preventDefault();
+                    }}
+                    onDrop={event => {
+                      if (!locked) onDropFiles(event, record.id);
+                    }}
+                    showDelete={!locked && config.showRecordActions}
                     onDelete={event => {
                       event.stopPropagation();
                       removeRecords([record.id], true);
@@ -333,7 +338,7 @@ export function BitableGalleryView({
       )}
 
       {records.length > 0 ? (
-        <button type="button" className="base-gallery-add-record" onClick={() => addRecord()}>
+        <button type="button" className="base-gallery-add-record" disabled={locked} onClick={() => addRecord()}>
           + 添加记录
         </button>
       ) : null}

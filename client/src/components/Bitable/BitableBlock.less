@@ -13,6 +13,9 @@
   overflow: visible;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
   background: #fff;
+  /* 避免继承 ProseMirror 的 text 光标 */
+  cursor: default;
+  caret-color: transparent;
 
   /* 块选中时不显示蓝色描边（对齐飞书多维表格） */
   &.is-selected,
@@ -539,12 +542,20 @@
     color: #f54a45;
   }
 
+  .base-view-contextmenu button.is-danger:disabled {
+    color: #bbbfc4;
+  }
+
   .base-view-contextmenu button.is-danger:hover:not(:disabled) {
     background: #fff1f0;
   }
 
   .base-view-contextmenu button.is-danger svg {
     color: #f54a45;
+  }
+
+  .base-view-contextmenu button.is-danger:disabled svg {
+    color: #bbbfc4;
   }
 
   .base-view-contextmenu button svg {
@@ -791,7 +802,7 @@
   }
 
   &[data-base-view-type="grid"] .base-view-content {
-    min-height: 180px;
+    min-height: 0;
   }
 
   .base-gallery-surface {
@@ -1468,6 +1479,11 @@
     border: 0;
     background: transparent;
     pointer-events: auto;
+
+    /* 与看板一致：无需横滚时不占位，避免表格下方多出空白条 */
+    &:not(.is-active) {
+      display: none;
+    }
   }
 
   .base-grid-hscroll__track {
@@ -1519,6 +1535,7 @@
     image-rendering: pixelated;
     user-select: none;
     -webkit-user-drag: none;
+    cursor: default;
   }
 
   .base-grid-cell-editor {
@@ -1815,6 +1832,40 @@
     accent-color: #3370ff;
     cursor: pointer;
     flex-shrink: 0;
+  }
+
+  .base-grid-index-checkbox.t-checkbox {
+    width: auto;
+    height: auto;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+  }
+
+  .base-grid-index-checkbox.t-checkbox .t-checkbox__input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+  }
+
+  .base-grid-index-checkbox.t-checkbox .t-checkbox__label {
+    display: none;
+  }
+
+  .base-gantt-index-checkbox.t-checkbox {
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+  }
+
+  .base-gantt-index-checkbox.t-checkbox .t-checkbox__input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+  }
+
+  .base-gantt-index-checkbox.t-checkbox .t-checkbox__label {
+    display: none;
   }
 
   .base-grid-row-drag-handle {
@@ -4397,6 +4448,27 @@
     cursor: not-allowed;
   }
 
+  .bitable-card-config-tdesign-select {
+    width: 156px;
+  }
+
+  .bitable-card-config-tdesign-select .t-select__wrap,
+  .bitable-card-config-tdesign-select.t-select__wrap {
+    width: 156px;
+  }
+
+  .bitable-card-config-tdesign-select .t-input {
+    height: 30px;
+    min-height: 30px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  .bitable-card-config-tdesign-select .t-input__inner {
+    font-size: 13px;
+    line-height: 28px;
+  }
+
   .bitable-card-config-hidden-groups {
     align-items: flex-start;
   }
@@ -4912,7 +4984,7 @@
     color: #646a73;
   }
 
-  input:not([type=checkbox]),
+  input:not([type=checkbox]):not(.t-input__inner),
   select {
     box-sizing: border-box;
     width: 100%;
@@ -6188,8 +6260,8 @@
     font-size: 12px;
   }
 
-  .base-toolbar-panel input:not([type="checkbox"]),
-  .base-toolbar-panel select {
+  .base-toolbar-panel input:not([type="checkbox"]):not(.t-input__inner),
+  .base-toolbar-panel select:not(.t-select__input) {
     box-sizing: border-box;
     width: 100%;
     height: 32px;
@@ -6202,8 +6274,8 @@
     font-size: 13px;
   }
 
-  .base-toolbar-panel input:focus,
-  .base-toolbar-panel select:focus {
+  .base-toolbar-panel input:not(.t-input__inner):focus,
+  .base-toolbar-panel select:not(.t-select__input):focus {
     border-color: #3370ff;
     box-shadow: 0 0 0 2px rgba(51, 112, 255, .12);
   }
@@ -6278,13 +6350,13 @@
 
   .base-toolbar-panel__filter-row {
     display: grid;
-    grid-template-columns: 148px 108px minmax(120px, 1fr) 24px;
+    grid-template-columns: 140px 112px minmax(0, 1fr) 24px;
     align-items: center;
     gap: 8px;
   }
 
   .base-toolbar-panel__filter-row--no-value {
-    grid-template-columns: 148px 108px 24px;
+    grid-template-columns: 140px 112px 24px;
   }
 
   .base-filter-select {
@@ -6391,10 +6463,12 @@
   .base-toolbar-panel__filter-value-wrap {
     position: relative;
     min-width: 0;
+    width: 100%;
   }
 
   .base-toolbar-panel__filter-value {
     box-sizing: border-box;
+    display: block;
     width: 100%;
     height: 32px;
     padding: 0 28px 0 8px;
@@ -6404,11 +6478,26 @@
     background: #fff;
     outline: none;
     font-size: 13px;
+    line-height: 30px;
+  }
+
+  .base-toolbar-panel__filter-value::placeholder {
+    color: #8f959e;
+  }
+
+  .base-toolbar-panel__filter-value:hover:not(:disabled) {
+    border-color: #c7ccd1;
   }
 
   .base-toolbar-panel__filter-value:focus {
     border-color: #3370ff;
     box-shadow: 0 0 0 2px rgba(51, 112, 255, .12);
+  }
+
+  .base-toolbar-panel__filter-value:disabled {
+    color: #bbbfc4;
+    background: #f5f6f7;
+    cursor: not-allowed;
   }
 
   .base-toolbar-panel__filter-value-clear {
@@ -6744,6 +6833,143 @@
   top: auto;
   left: auto;
   margin: 0;
+}
+
+.bitable-card-config-select-popup .t-select-option {
+  font-size: 13px;
+}
+
+.bitable-td-select-popup .t-select-option {
+  font-size: 13px;
+}
+
+.bitable-td-dialog .bitable-td-dialog__body {
+  margin: 0;
+  color: #646a73;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.base-filter-tdesign-select-wrap {
+  min-width: 0;
+  width: 100%;
+}
+
+.base-filter-tdesign-select-wrap.base-toolbar-panel__filter-field-select,
+.base-filter-tdesign-select-wrap.base-toolbar-panel__filter-operator-select {
+  width: 100%;
+}
+
+.base-filter-tdesign-select,
+.base-filter-tdesign-select .t-select__wrap,
+.base-filter-tdesign-select .t-input__wrap,
+.base-filter-tdesign-select .t-input {
+  width: 100%;
+}
+
+.base-filter-tdesign-select .t-input {
+  height: 32px;
+  min-height: 32px;
+  border: 0;
+  background: #f5f6f7;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.base-filter-tdesign-select .t-input:hover {
+  background: #eff0f1;
+}
+
+.base-filter-tdesign-select.t-is-focused .t-input,
+.base-filter-tdesign-select .t-input--focused {
+  border: 1px solid #3370ff;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(51, 112, 255, .12);
+}
+
+.bitable-group-field-tdesign-select-wrap {
+  margin-left: 8px;
+  min-width: 120px;
+  max-width: 100%;
+}
+
+.bitable-group-field-tdesign-select,
+.bitable-group-field-tdesign-select .t-select__wrap {
+  width: 160px;
+  max-width: 100%;
+}
+
+.bitable-field-condition-tdesign-wrap {
+  margin-left: 8px;
+  width: 160px;
+}
+
+.bitable-field-condition-tdesign-select,
+.bitable-field-condition-tdesign-select .t-select__wrap {
+  width: 160px;
+}
+
+.bitable-td-field-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bitable-td-field-option__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: #646a73;
+}
+
+.bitable-td-field-option__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hierarchy-field-tdesign-select {
+  width: 180px;
+}
+
+.hierarchy-field-tdesign-select .t-select__wrap {
+  width: 180px;
+}
+
+.hierarchy-field-tdesign-create {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-top: 1px solid #e5e6eb;
+  background: #fff;
+  color: #1f2329;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hierarchy-field-tdesign-create:hover:not(:disabled) {
+  background: #f5f6f7;
+}
+
+.hierarchy-field-tdesign-create:disabled {
+  color: #bbbfc4;
+  cursor: not-allowed;
+}
+
+.base-settings--tdesign label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.base-settings--tdesign .t-select__wrap,
+.base-settings--tdesign .t-input__wrap {
+  width: 100%;
 }
 
 /* 挂到 body 的分组/排序/筛选条件下拉，须脱离 .feishu-base-block 作用域 */
@@ -7481,6 +7707,27 @@
   }
 }
 
+.base-b-field-td-input,
+.base-b-field-td-input .t-input__wrap {
+  width: 100%;
+}
+
+.base-b-field-option-search__td-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.base-b-field-option-search__td-input .t-input__wrap,
+.base-b-field-option-search__td-input .t-input {
+  width: 100%;
+  background: transparent;
+}
+
+.base-b-select-default-panel__td-search,
+.base-b-select-default-panel__td-search .t-input__wrap {
+  width: 100%;
+}
+
 .base-b-select-field-type {
   margin-bottom: 12px;
 }
@@ -7884,6 +8131,19 @@
   &::placeholder {
     color: #bbbfc4;
   }
+}
+
+.base-b-select-options__td-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.base-b-select-options__td-input .t-input__wrap {
+  width: 100%;
+}
+
+.base-b-select-options__ref .t-checkbox {
+  margin-right: 4px;
 }
 
 .base-b-select-options__remove {
