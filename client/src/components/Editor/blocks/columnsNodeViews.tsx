@@ -17,7 +17,7 @@ import {
   resolveColumnPaddingX,
   resolveColumnsGap,
 } from './columnsHelpers';
-import { useHoverFloatingGroup } from '../shared/floatingPanel';
+import { bindFloatingLayoutListeners, useHoverFloatingGroup } from '../shared/floatingPanel';
 
 const COLUMN_PLUS_OVERLAY_SELECTOR =
   '.slash-menu, .slash-submenu-portal, .slash-table-grid-flyout, .slash-columns-count-flyout, .feishu-columns-block__add-hover-wrap, .feishu-columns-block__add-btn, .feishu-columns-block__plus-menu-shell';
@@ -104,6 +104,25 @@ export function ColumnBlockNodeView({ editor, getPos, node }: NodeViewProps) {
       closeMenu();
     }
   }, [closeMenu, isColumnEmpty]);
+
+  useEffect(() => {
+    if (!menuOpen || !isColumnEmpty) return undefined;
+    const updatePosition = () => {
+      const button = plusRef.current;
+      if (!button?.isConnected) {
+        closeMenu();
+        return;
+      }
+      setMenuPos(computeColumnPlusMenuPosition(button.getBoundingClientRect()));
+    };
+    updatePosition();
+    const raf = window.requestAnimationFrame(updatePosition);
+    const cleanupLayout = bindFloatingLayoutListeners(updatePosition, plusRef.current);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      cleanupLayout();
+    };
+  }, [closeMenu, isColumnEmpty, menuOpen]);
 
   useEffect(() => () => cancelScheduledClose(), [cancelScheduledClose]);
 

@@ -22,7 +22,7 @@ import {
   applyEditorIndentIncrease,
   getEditorIndentUiState,
 } from '../Editor/blocks/blockIndent';
-import { isPointerWithinFloatingShell, useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../Editor/shared/floatingPanel';
+import { isPointerWithinFloatingShell, bindFloatingLayoutListeners, useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../Editor/shared/floatingPanel';
 import '../Editor/menus/ContextMenu.less';
 import '../Editor/menus/SlashMenu.less';
 
@@ -331,12 +331,10 @@ export default function BitableContextMenu({
 
     syncTriggerRect();
     const raf = window.requestAnimationFrame(syncTriggerRect);
-    window.addEventListener('resize', syncTriggerRect);
-    document.addEventListener('scroll', syncTriggerRect, true);
+    const cleanupLayout = bindFloatingLayoutListeners(syncTriggerRect, menuRef.current);
     return () => {
       window.cancelAnimationFrame(raf);
-      window.removeEventListener('resize', syncTriggerRect);
-      document.removeEventListener('scroll', syncTriggerRect, true);
+      cleanupLayout();
     };
   }, [activeFlyout?.kind, finalPos.x, finalPos.y, posVisible]);
 

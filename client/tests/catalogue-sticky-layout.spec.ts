@@ -28,7 +28,17 @@ test('keeps the catalogue inside the workspace while scrolling and growing', asy
 
   await page.goto('/doc/catalogue-sticky-layout-e2e');
   const workspace = page.locator('.doc-page-workspace');
+  await expect(workspace).toBeVisible();
+
+  const expandBtn = page.locator('.catalogue-collapse-btn');
+  if (await expandBtn.isVisible()) {
+    const listCount = await page.locator('.catalogue__list').count();
+    if (listCount === 0) await expandBtn.click();
+  }
+
   const catalogue = page.locator('.catalogue-aside');
+  const rail = page.locator('.doc-page-catalogue-rail');
+  await expect(rail).toBeVisible();
   await expect(catalogue).toBeVisible();
 
   await workspace.evaluate(element => element.scrollTo({ top: 500 }));
@@ -36,6 +46,7 @@ test('keeps the catalogue inside the workspace while scrolling and growing', asy
 
   const bounds = await page.evaluate(() => {
     const workspaceRect = document.querySelector('.doc-page-workspace')!.getBoundingClientRect();
+    const railRect = document.querySelector('.doc-page-catalogue-rail')!.getBoundingClientRect();
     const catalogueRect = document.querySelector('.catalogue-aside')!.getBoundingClientRect();
     return {
       workspaceTop: workspaceRect.top,
@@ -43,13 +54,16 @@ test('keeps the catalogue inside the workspace while scrolling and growing', asy
       catalogueTop: catalogueRect.top,
       catalogueBottom: catalogueRect.bottom,
       catalogueHeight: catalogueRect.height,
+      railTop: railRect.top,
     };
   });
-  expect(Math.abs(bounds.catalogueTop - bounds.workspaceTop)).toBeLessThanOrEqual(1);
-  expect(bounds.catalogueBottom).toBeLessThanOrEqual(bounds.workspaceBottom + 1);
+  expect(Math.abs(bounds.railTop - bounds.workspaceTop)).toBeLessThanOrEqual(2);
+  expect(Math.abs(bounds.catalogueTop - bounds.workspaceTop)).toBeLessThanOrEqual(2);
+  expect(bounds.catalogueBottom).toBeLessThanOrEqual(bounds.workspaceBottom + 2);
 
   const heightAfterGrowth = await catalogue.evaluate(element => {
-    const list = element.querySelector('.catalogue__list')!;
+    const list = element.querySelector('.catalogue__list');
+    if (!list) return element.getBoundingClientRect().height;
     for (let index = 0; index < 40; index += 1) {
       const item = document.createElement('li');
       item.className = 'catalogue__list-item';

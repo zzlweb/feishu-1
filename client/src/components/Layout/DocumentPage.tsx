@@ -5,6 +5,7 @@ import { addComment, deleteComment, getComments, getDocument, updateComment, upd
 import type { Comment, Document, HeadingItem } from '../../types';
 import { DOC_TITLE_CATALOGUE_ID } from '../../types';
 import Editor from '../Editor/Editor';
+import { FEISHU_LAYOUT_SCROLL_EVENT } from '../Editor/shared/floatingPanel';
 import Sidebar from './Sidebar';
 import DocumentHeader from './DocumentHeader';
 import CommentSidebar from './CommentSidebar';
@@ -240,6 +241,10 @@ export default function DocumentPage() {
       sidebarUserCollapsedRef.current = next;
       return next;
     });
+  }, []);
+
+  const handleWorkspaceScroll = useCallback(() => {
+    window.dispatchEvent(new CustomEvent(FEISHU_LAYOUT_SCROLL_EVENT));
   }, []);
 
   useEffect(() => {
@@ -553,7 +558,7 @@ export default function DocumentPage() {
     <div className={`doc-page${commentSidebarOpen ? ' doc-page--comment-open' : ''}`}>
       <DocumentHeader doc={doc} saveStatus={saveStatus} readOnly={readOnly} onReadOnlyChange={setReadOnly} />
       <div className={`doc-page-body${commentSidebarOpen ? ' doc-page-body--comment-open' : ''}`}>
-        <div className="doc-page-workspace" ref={mainScrollRef}>
+        <div className="doc-page-workspace" ref={mainScrollRef} onScroll={handleWorkspaceScroll}>
           {doc.cover_url && (
             <div className="doc-cover-strip">
               <div className="doc-cover-wrapper">

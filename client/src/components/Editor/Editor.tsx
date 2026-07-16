@@ -23,7 +23,7 @@ import ContextMenu from './menus/ContextMenu';
 import BitableContextMenu from '../Bitable/BitableContextMenu';
 import ImageContextMenu from './media/ImageContextMenu';
 import TableContextMenu from './tables/TableContextMenu';
-import { computeBlockPanelPosition, FLOATING_Z_INDEX, useHoverFloatingGroup } from './shared/floatingPanel';
+import { computeBlockPanelPosition, bindFloatingLayoutListeners, FLOATING_Z_INDEX, useHoverFloatingGroup } from './shared/floatingPanel';
 import { computeTableBlockMenuPosition } from './tables/tableMenu';
 import SlashMenu from './menus/SlashMenu';
 import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH, type ButtonActionType } from './menus/slashMenuConfig';
@@ -1330,12 +1330,7 @@ function LocalButtonBlockView({ node, updateAttributes, selected, editor, getPos
     };
 
     updatePlacement();
-    window.addEventListener('resize', updatePlacement);
-    window.addEventListener('scroll', updatePlacement, true);
-    return () => {
-      window.removeEventListener('resize', updatePlacement);
-      window.removeEventListener('scroll', updatePlacement, true);
-    };
+    return bindFloatingLayoutListeners(updatePlacement, previewButtonRef.current);
   }, [draftActionType, panelOpen]);
 
   const runButtonAction = async () => {
@@ -3871,13 +3866,7 @@ export default function Editor({
   useEffect(() => {
     if (!pageLinkDialogVisible || !editor) return;
     const reposition = () => setPageLinkPopPos(computePageLinkPopPosition(editor));
-    reposition();
-    window.addEventListener('resize', reposition);
-    document.addEventListener('scroll', reposition, true);
-    return () => {
-      window.removeEventListener('resize', reposition);
-      document.removeEventListener('scroll', reposition, true);
-    };
+    return bindFloatingLayoutListeners(reposition, editor.view.dom);
   }, [editor, pageLinkDialogVisible]);
 
   useEffect(() => {
@@ -3952,12 +3941,7 @@ export default function Editor({
       blockGutterHovered;
     if (!show) return;
     const handle = () => syncRowHighlightBandRef.current();
-    window.addEventListener('resize', handle);
-    document.addEventListener('scroll', handle, true);
-    return () => {
-      window.removeEventListener('resize', handle);
-      document.removeEventListener('scroll', handle, true);
-    };
+    return bindFloatingLayoutListeners(handle, blockDragRowRef.current);
   }, [
     readOnly,
     blockTools.visible,
@@ -4166,12 +4150,8 @@ export default function Editor({
       });
     };
     updatePos();
-    window.addEventListener('resize', updatePos);
-    document.addEventListener('scroll', updatePos, true);
-    return () => {
-      window.removeEventListener('resize', updatePos);
-      document.removeEventListener('scroll', updatePos, true);
-    };
+    const anchor = contextMenu?.variant === 'table' ? tableHandleRef.current : blockDragRowRef.current;
+    return bindFloatingLayoutListeners(updatePos, anchor);
   }, [contextMenu, readOnly]);
 
   useEffect(() => {
@@ -4185,13 +4165,22 @@ export default function Editor({
       );
     };
     updatePos();
-    window.addEventListener('resize', updatePos);
-    document.addEventListener('scroll', updatePos, true);
-    return () => {
-      window.removeEventListener('resize', updatePos);
-      document.removeEventListener('scroll', updatePos, true);
-    };
+    return bindFloatingLayoutListeners(updatePos, blockAddButtonRef.current);
   }, [slashMenuVisible, slashMenuFromPlus, readOnly]);
+
+  useEffect(() => {
+    if (!slashMenuVisible || slashMenuFromPlus || slashMenuFromTableCellPlus || readOnly || !editor) return;
+    const updatePos = () => {
+      const { from } = editor.state.selection;
+      const coords = editor.view.coordsAtPos(from);
+      setSlashMenuPos(prev => {
+        const next = { top: coords.bottom + 4, left: coords.left };
+        return prev.left === next.left && prev.top === next.top ? prev : next;
+      });
+    };
+    updatePos();
+    return bindFloatingLayoutListeners(updatePos, editor.view.dom);
+  }, [editor, readOnly, slashMenuFromPlus, slashMenuFromTableCellPlus, slashMenuVisible]);
 
   useEffect(() => {
     if (!slashMenuVisible || !slashMenuFromTableCellPlus || readOnly) return;

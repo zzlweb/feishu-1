@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Button, Checkbox, Input, Popup, Select, Switch, Upload } from 'tdesign-react';
 import { CalendarIcon } from 'tdesign-icons-react';
 import type { PopupProps } from 'tdesign-react';
-import { FLOATING_Z_INDEX } from '../../Editor/shared/floatingPanel';
+import { FLOATING_Z_INDEX, bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
 import { fieldTypeGlyph, isPreviewImage } from '../shared/BitableViewShared';
 import {
   DEFAULT_RECORD_OPERATOR,
@@ -302,6 +302,26 @@ function AttachmentUploadPopover({
     if (!open) return;
     popoverRef.current?.focus({ preventScroll: true });
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const updatePosition = () => {
+      const trigger = addButtonRef.current;
+      if (!trigger?.isConnected) {
+        closePanel();
+        return;
+      }
+      const boundary = modalBoundaryRef?.current?.getBoundingClientRect();
+      setPanelPosition(clampAttachmentPanelPosition(trigger.getBoundingClientRect(), boundary));
+    };
+    updatePosition();
+    const raf = window.requestAnimationFrame(updatePosition);
+    const cleanupLayout = bindFloatingLayoutListeners(updatePosition, addButtonRef.current);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      cleanupLayout();
+    };
+  }, [modalBoundaryRef, open]);
 
   useCardModalOutsideDismiss(open, closePanel, rootRef, target => {
     if (popoverRef.current?.contains(target)) return true;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { createPortal } from 'react-dom';
 import { valueText, getAttachments, selectCoverAttachment, type BaseField, type BaseRecord, type BaseTable, type GalleryViewConfig } from '../model/bitableModel';
 import { BitableCardField } from '../shared/BitableCardField';
+import { bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
 import { FileBadge, isPreviewImage, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
 
 const KANBAN_DOC_WIDTH = 860;
@@ -376,11 +377,14 @@ export function BitableKanbanView({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setCardMenu(null);
     };
+    const closeOnLayoutChange = () => setCardMenu(null);
     document.addEventListener('mousedown', handlePointerDown, true);
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown, true);
       window.removeEventListener('keydown', handleKeyDown);
+      cleanupLayout();
     };
   }, [cardMenu]);
 
@@ -395,11 +399,14 @@ export function BitableKanbanView({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setColumnMenu(null);
     };
+    const closeOnLayoutChange = () => setColumnMenu(null);
     document.addEventListener('mousedown', handlePointerDown, true);
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown, true);
       window.removeEventListener('keydown', handleKeyDown);
+      cleanupLayout();
     };
   }, [columnMenu]);
 

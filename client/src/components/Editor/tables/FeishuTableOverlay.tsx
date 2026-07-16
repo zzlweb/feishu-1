@@ -4,6 +4,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent as Re
 import { createPortal } from 'react-dom';
 import { SlashGlyphTable } from '../../../icons/slashMenuGlyphs';
 import { IconAddOutlined, IconDragOutlined } from '../../../icons/feishuDoc';
+import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
 import TableSelectionToolbar from '../toolbars/TableSelectionToolbar';
 import BlockGutterGlyph from '../blocks/BlockGutterGlyph';
 import { resolveTableCellHandle, type TableCellHandleState } from './tableCellHandle';
@@ -338,8 +339,7 @@ function FeishuTableOverlay({
     const onEditorUpdate = () => remeasureSoon();
     editor.on('update', onEditorUpdate);
     editor.on('selectionUpdate', onEditorUpdate);
-    window.addEventListener('resize', remeasureSoon);
-    document.addEventListener('scroll', remeasureSoon, true);
+    const cleanupLayout = bindFloatingLayoutListeners(remeasureSoon, tableHost);
     surface.addEventListener('scroll', remeasureSoon, { passive: true });
     return () => {
       if (remeasureFrameRef.current != null) {
@@ -349,9 +349,8 @@ function FeishuTableOverlay({
       ro.disconnect();
       editor.off('update', onEditorUpdate);
       editor.off('selectionUpdate', onEditorUpdate);
-      window.removeEventListener('resize', remeasureSoon);
-      document.removeEventListener('scroll', remeasureSoon, true);
       surface.removeEventListener('scroll', remeasureSoon);
+      cleanupLayout();
     };
   }, [editor, remeasure, remeasureSoon, tableHost]);
 
@@ -938,14 +937,14 @@ function FeishuTableOverlay({
     const mount = getTableChromeMountFromHost(tableHost);
     const onScroll = () => syncCellHandle();
     mount.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll, { passive: true });
+    const cleanupLayout = bindFloatingLayoutListeners(onScroll, tableHost);
     return () => {
       editor.off('selectionUpdate', onChange);
       editor.off('update', onChange);
       editor.off('focus', onChange);
       editor.off('blur', onChange);
       mount.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
+      cleanupLayout();
     };
   }, [editor, syncCellHandle, tableHost]);
 

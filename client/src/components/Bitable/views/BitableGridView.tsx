@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { Checkbox } from 'tdesign-react';
 import { valueText, buildRecordTreeMeta, buildGridDisplayRows, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, normalizeColorValue, textColorForBackground as readableTextColorForBackground, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridDisplayRow, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from '../model/bitableModel';
 import { createPortal } from 'react-dom';
 import type { Ref } from 'react';
 import { BITABLE_BLOCK_EXPAND_ALL } from '../BitableContextMenu';
 import { BitableGridCellExpand } from '../shared/BitableGridCellExpand';
+import { bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
 import { GridFieldHeader, GridFieldMenuIcon, BitableTooltip, attachmentCellLabel, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
 
 export interface GridFieldMenuPosition {
@@ -79,43 +80,109 @@ function computeFieldMenuViewportPosition(
   clientX: number,
   clientY: number,
   isPrimaryField: boolean,
+  menuHeight = 0,
 ) {
   const menuWidth = isPrimaryField ? FIELD_MENU_WIDTH_PRIMARY : FIELD_MENU_WIDTH;
   const margin = 8;
   let left = clientX - menuWidth + 28;
   left = Math.max(margin, Math.min(left, window.innerWidth - menuWidth - margin));
-  let top = clientY + 6;
-  if (top + FIELD_MENU_ESTIMATED_HEIGHT > window.innerHeight - margin) {
-    top = Math.max(margin, window.innerHeight - FIELD_MENU_ESTIMATED_HEIGHT - margin);
-  }
+  // 始终相对锚点：优先下方，下方不够再翻到上方，但 top 必须随 clientY 变化
+  const height = menuHeight > 0 ? menuHeight : FIELD_MENU_ESTIMATED_HEIGHT;
+  const below = clientY + 6;
+  const above = clientY - height - 6;
+  const spaceBelow = window.innerHeight - margin - below;
+  const spaceAbove = clientY - margin;
+  const top = spaceBelow < Math.min(height, 160) && spaceAbove > spaceBelow
+    ? Math.max(margin, above)
+    : below;
   return { left, top };
 }
 
-function GridFieldContextMenu({
-  menuRef,
+function resolveFieldMenuAnchorRect(fieldId: string, scope: HTMLElement | null) {
+  if (!scope) return null;
+  const anchors = scope.querySelectorAll<HTMLElement>(`.base-grid-field-chevron[data-field-id="${fieldId}"]`);
+  let best: DOMRect | null = null;
+  for (let i = 0; i < anchors.length; i += 1) {
+    const anchor = anchors[i];
+    if (!anchor?.isConnected) continue;
+    const rect = anchor.getBoundingClientRect();
+    if (rect.width <= 0 && rect.height <= 0) continue;
+    if (rect.bottom < -40 || rect.top > window.innerHeight + 40) continue;
+    if (rect.right < -40 || rect.left > window.innerWidth + 40) continue;
+    const fullyVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
+    const bestFullyVisible = best != null && best.top >= 0 && best.bottom <= window.innerHeight;
+    if (!best || (fullyVisible && !bestFullyVisible)) {
+      best = rect;
+    }
+  }
+  return best;
+}
+
+function GridFieldContextMenuPortal({
   field,
   isPrimaryField,
   canDelete,
-  left,
-  top,
+  scopeRef,
+  initialLeft,
+  initialTop,
   onAction,
+  onClose,
 }: {
-  menuRef: Ref<HTMLDivElement>;
   field: BaseField;
   isPrimaryField: boolean;
   canDelete: boolean;
-  left: number;
-  top: number;
+  scopeRef: RefObject<HTMLElement | null>;
+  initialLeft: number;
+  initialTop: number;
   onAction: (fieldId: string, action: GridFieldMenuAction) => void;
+  onClose: () => void;
 }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: initialLeft, top: initialTop });
+
+  useLayoutEffect(() => {
+    const sync = () => {
+      const scope = scopeRef.current?.closest<HTMLElement>('.feishu-bitable-block') ?? scopeRef.current;
+      const anchorRect = resolveFieldMenuAnchorRect(field.id, scope);
+      if (!anchorRect) {
+        onClose();
+        return;
+      }
+      const menuHeight = menuRef.current?.offsetHeight || 0;
+      const next = computeFieldMenuViewportPosition(
+        anchorRect.right,
+        anchorRect.bottom,
+        isPrimaryField,
+        menuHeight,
+      );
+      setPos(prev => (prev.left === next.left && prev.top === next.top ? prev : next));
+    };
+
+    sync();
+    let raf = 0;
+    let alive = true;
+    const loop = () => {
+      if (!alive) return;
+      sync();
+      raf = window.requestAnimationFrame(loop);
+    };
+    raf = window.requestAnimationFrame(loop);
+    const cleanupLayout = bindFloatingLayoutListeners(sync, scopeRef.current);
+    return () => {
+      alive = false;
+      window.cancelAnimationFrame(raf);
+      cleanupLayout();
+    };
+  }, [field.id, isPrimaryField, onClose, scopeRef]);
+
   const run = (action: GridFieldMenuAction) => onAction(field.id, action);
 
-  return (
+  return createPortal(
     <div
       ref={menuRef}
       id="bitable-contextmenu"
       className={`base-grid-field-menu base-grid-field-menu--portal bitable-contextmenu${isPrimaryField ? ' is-primary-field' : ''}`}
-      style={{ left, top }}
+      style={{ position: 'fixed', left: pos.left, top: pos.top, zIndex: 10051 }}
       data-no-marquee-selection="true"
       data-floating-panel="true"
       role="menu"
@@ -165,7 +232,8 @@ function GridFieldContextMenu({
           </button>
         </>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -197,10 +265,12 @@ function GridCellContextMenu({
   const menuWidth = 220;
   const menuHeight = deleteOnly ? 44 : 284;
   const margin = 8;
+  const minVisible = deleteOnly ? 44 : 120;
   const viewportWidth = typeof window === 'undefined' ? left + menuWidth + margin : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? top + menuHeight + margin : window.innerHeight;
   const fixedLeft = Math.max(margin, Math.min(left, viewportWidth - menuWidth - margin));
-  const fixedTop = Math.max(margin, Math.min(top, viewportHeight - menuHeight - margin));
+  // 相对传入的锚点 top 钳位，避免钉死在视口固定 Y
+  const fixedTop = Math.max(margin, Math.min(top, viewportHeight - minVisible - margin));
 
   const handleAboveChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -221,7 +291,7 @@ function GridCellContextMenu({
       ref={menuRef}
       id="bitable-contextmenu"
       className="b-menu bitable-noselect white J-bitable-container bitable-hover-scrollbar-sm bitable-contextmenu base-grid-cell-menu--portal"
-      style={{ left: fixedLeft, top: fixedTop, width: menuWidth, maxHeight: `calc(100vh - ${margin * 2}px)`, overflowY: 'auto' }}
+      style={{ position: 'fixed', left: fixedLeft, top: fixedTop, width: menuWidth, maxHeight: `calc(100vh - ${margin * 2}px)`, overflowY: 'auto', zIndex: 10080 }}
       onMouseDown={e => e.stopPropagation()}
     >
       <ul className="ud__menu ud__menu-root ud__menu-vertical ud-scrollbar" dir="ltr" role="menu" tabIndex={0} data-menu-list="true">
@@ -919,7 +989,6 @@ export function BitableGridView({
   const fieldMenuOpenAtRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const cellMenuRef = useRef<HTMLDivElement>(null);
   const selectEditorRef = useRef<HTMLDivElement>(null);
   const pendingCellFocusRef = useRef<{ recordId: string; fieldId: string; scrollAlign?: 'nearest' | 'end' } | null>(null);
@@ -1400,6 +1469,14 @@ export function BitableGridView({
   }, [selectEditor]);
 
   useEffect(() => {
+    if (!selectEditor) return undefined;
+    const updatePosition = () => {
+      setSelectEditor(current => (current ? { ...current } : current));
+    };
+    return bindFloatingLayoutListeners(updatePosition, canvasRef.current);
+  }, [selectEditor?.recordId, selectEditor?.fieldId, selectEditor?.top, selectEditor?.left]);
+
+  useEffect(() => {
     if (!cellContextMenu) return;
     const close = (event: globalThis.MouseEvent) => {
       if (!(event.target instanceof Node)) return;
@@ -1409,6 +1486,24 @@ export function BitableGridView({
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [cellContextMenu]);
+
+  useEffect(() => {
+    if (!cellContextMenu) return;
+    const updatePosition = () => {
+      setCellContextMenu(current => {
+        if (!current) return current;
+        const canvas = canvasRef.current;
+        if (!canvas || current.rowIndex < 0 || current.rowIndex >= gridRows.length) return null;
+        const canvasRect = canvas.getBoundingClientRect();
+        const left = Math.max(8, Math.min(canvasRect.left + INDEX_WIDTH - 2, window.innerWidth - 228));
+        const rowTop = canvasRect.top + HEADER_HEIGHT + current.rowIndex * ROW_HEIGHT;
+        const top = Math.max(8, Math.min(rowTop + 6, window.innerHeight - (current.deleteOnly ? 60 : 300)));
+        return current.left === left && current.top === top ? current : { ...current, left, top };
+      });
+    };
+    updatePosition();
+    return bindFloatingLayoutListeners(updatePosition, canvasRef.current);
+  }, [cellContextMenu?.recordId, cellContextMenu?.rowIndex, gridRows.length, scrollLeft, ROW_HEIGHT]);
 
   useEffect(() => {
     if (!selectionRange) return;
@@ -1739,7 +1834,7 @@ export function BitableGridView({
     });
   };
 
-  const fieldMenuPortalRoot = wrapRef.current?.closest<HTMLElement>('.feishu-bitable-block') ?? document.body;
+  const closeFieldMenu = useCallback(() => setFieldMenu(null), []);
 
   const clearSelectValue = (record: BaseRecord, field: BaseField, choiceId: string) => {
     if (field.type === 'single_select') {
@@ -3089,17 +3184,17 @@ export function BitableGridView({
         </div>
         </div>
       </div>
-      {fieldMenu && menuField && createPortal(
-        <GridFieldContextMenu
-          menuRef={menuRef}
+      {fieldMenu && menuField && (
+        <GridFieldContextMenuPortal
           field={menuField}
           isPrimaryField={menuField.id === table.primaryFieldId}
           canDelete={canRemoveMenuField}
-          left={fieldMenu.left}
-          top={fieldMenu.top}
+          scopeRef={wrapRef}
+          initialLeft={fieldMenu.left}
+          initialTop={fieldMenu.top}
           onAction={runFieldAction}
-        />,
-        fieldMenuPortalRoot,
+          onClose={closeFieldMenu}
+        />
       )}
       {cellContextMenu && createPortal(
         <GridCellContextMenu

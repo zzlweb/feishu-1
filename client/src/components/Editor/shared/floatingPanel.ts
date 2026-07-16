@@ -73,6 +73,79 @@ export function elementToFloatingRect(element: HTMLElement): FloatingPanelRect {
   };
 }
 
+const WORKSPACE_SCROLL_SELECTOR = '.doc-page-workspace';
+export const FEISHU_LAYOUT_SCROLL_EVENT = 'feishu-layout-scroll';
+
+function isScrollableElement(element: HTMLElement) {
+  const style = window.getComputedStyle(element);
+  const values = `${style.overflow} ${style.overflowX} ${style.overflowY}`;
+  if (!/(auto|scroll|overlay)/.test(values)) return false;
+  return element.scrollHeight > element.clientHeight + 1
+    || element.scrollWidth > element.clientWidth + 1;
+}
+
+/** 收集文档工作区及锚点祖先上的滚动容器；scroll 事件不冒泡，不能只监听 document。 */
+export function collectScrollContainers(anchor?: HTMLElement | null) {
+  const containers = new Set<HTMLElement>();
+
+  document.querySelectorAll<HTMLElement>(WORKSPACE_SCROLL_SELECTOR).forEach(el => {
+    containers.add(el);
+  });
+
+  let node: HTMLElement | null = anchor ?? null;
+  while (node) {
+    if (isScrollableElement(node)) containers.add(node);
+    node = node.parentElement;
+  }
+
+  if (anchor) {
+    anchor.closest<HTMLElement>('.feishu-bitable-block')?.querySelectorAll<HTMLElement>(
+      '.base-grid-shell, .base-view-content, .base-kanban__scroll, .feishu-table-host',
+    ).forEach(el => {
+      if (isScrollableElement(el)) containers.add(el);
+    });
+  }
+
+  return Array.from(containers);
+}
+
+/** 绑定浮层在滚动/resize 时的位置同步；覆盖 .doc-page-workspace 等实际滚动容器。 */
+export function bindFloatingLayoutListeners(
+  update: () => void,
+  anchor?: HTMLElement | null,
+  options?: { runImmediately?: boolean },
+) {
+  let raf = 0;
+  const scheduleUpdate = () => {
+    if (raf) window.cancelAnimationFrame(raf);
+    raf = window.requestAnimationFrame(() => {
+      raf = 0;
+      update();
+    });
+  };
+
+  const scrollTargets = collectScrollContainers(anchor);
+  scrollTargets.forEach(target => {
+    target.addEventListener('scroll', scheduleUpdate, { passive: true });
+  });
+  window.addEventListener(FEISHU_LAYOUT_SCROLL_EVENT, scheduleUpdate, { passive: true });
+  window.addEventListener('resize', scheduleUpdate, { passive: true });
+  document.addEventListener('wheel', scheduleUpdate, { passive: true, capture: true });
+  if (options?.runImmediately !== false) {
+    scheduleUpdate();
+  }
+
+  return () => {
+    if (raf) window.cancelAnimationFrame(raf);
+    scrollTargets.forEach(target => {
+      target.removeEventListener('scroll', scheduleUpdate);
+    });
+    window.removeEventListener(FEISHU_LAYOUT_SCROLL_EVENT, scheduleUpdate);
+    window.removeEventListener('resize', scheduleUpdate);
+    document.removeEventListener('wheel', scheduleUpdate, true);
+  };
+}
+
 export function computeAnchoredFloatingPosition(
   anchor: FloatingPanelRect,
   panelWidth: number,
@@ -192,13 +265,11 @@ export function useAnchoredFloatingPosition(
       ? new ResizeObserver(update)
       : null;
     if (panelRef.current) resizeObserver?.observe(panelRef.current);
-    window.addEventListener('resize', update);
-    document.addEventListener('scroll', update, true);
+    const cleanupLayout = bindFloatingLayoutListeners(update, anchorRef?.current);
     return () => {
       window.cancelAnimationFrame(raf);
       resizeObserver?.disconnect();
-      window.removeEventListener('resize', update);
-      document.removeEventListener('scroll', update, true);
+      cleanupLayout();
     };
   }, [
     anchorRef,
@@ -296,12 +367,10 @@ export function useAnchoredContextMenuPosition(
 
     update();
     const raf = window.requestAnimationFrame(update);
-    window.addEventListener('resize', update);
-    document.addEventListener('scroll', update, true);
+    const cleanupLayout = bindFloatingLayoutListeners(update, anchorRef?.current);
     return () => {
       window.cancelAnimationFrame(raf);
-      window.removeEventListener('resize', update);
-      document.removeEventListener('scroll', update, true);
+      cleanupLayout();
     };
   }, [anchorRef, panelRef, fallback.x, fallback.y, computePosition]);
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { bindFloatingLayoutListeners } from '../Editor/shared/floatingPanel';
 import { useNavigate } from 'react-router-dom';
 import { Button, Dialog, Input, Loading, MessagePlugin } from 'tdesign-react';
 import {
@@ -243,11 +244,14 @@ export default function DocumentList() {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setRowMenu(null);
     };
+    const closeOnLayoutChange = () => setRowMenu(null);
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
     return () => {
       document.removeEventListener('mousedown', handleClick);
       document.removeEventListener('keydown', handleKey);
+      cleanupLayout();
     };
   }, [rowMenu]);
 

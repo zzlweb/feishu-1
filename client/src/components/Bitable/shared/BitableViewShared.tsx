@@ -4,6 +4,7 @@ import * as React from 'react';
 import { SelGlyphChevronDown } from '../../../icons/selectionToolbarGlyphs';
 import { FieldLockGlyph, fieldTypeGlyph } from '../fields/bitableFieldTypeIcons';
 import { getAttachments, getMultiSelectChoices, valueText, findSelectChoice, formatCardDateValue, normalizeColorValue, textColorForBackground, type AttachmentValue, type BaseField, type BaseRecord, type CellValue } from '../model/bitableModel';
+import { bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
 import { BITABLE_TD_PORTAL_SELECTOR } from './bitableTdesign';
 
 export { FieldLockGlyph, fieldTypeGlyph };
@@ -235,6 +236,12 @@ export function useBitablePortalTooltip<T extends HTMLElement = HTMLElement>(def
 
   const hideTip = useCallback(() => setPos(null), []);
 
+  useEffect(() => {
+    if (!pos) return undefined;
+    // 滚动时隐藏；不能立即执行，否则刚显示就会被关掉
+    return bindFloatingLayoutListeners(hideTip, anchorRef.current, { runImmediately: false });
+  }, [hideTip, pos]);
+
   const bind = {
     ref: anchorRef,
     onMouseEnter: showTip,
@@ -343,6 +350,7 @@ export function GridFieldHeader({
       <button
         type="button"
         className={`base-grid-field-chevron${isMenuOpen ? ' is-open' : ''}`}
+        data-field-id={field.id}
         aria-label={`${field.name} 字段菜单`}
         aria-expanded={Boolean(isMenuOpen)}
         onClick={event => {

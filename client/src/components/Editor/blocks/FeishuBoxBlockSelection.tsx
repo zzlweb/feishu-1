@@ -7,6 +7,7 @@ import {
   useState,
   type RefObject,
 } from 'react';
+import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
 import {
   applyBoxSelectionToEditor,
   canStartBoxSelect,
@@ -435,12 +436,10 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, editorCo
     const resync = () => {
       if (selectedRef.current.length > 0) syncSelectionBands(selectedRef.current);
     };
-    window.addEventListener('resize', resync);
-    document.addEventListener('scroll', resync, true);
+    const cleanupLayout = bindFloatingLayoutListeners(resync, editor.view.dom);
     editor.on('update', resync);
     return () => {
-      window.removeEventListener('resize', resync);
-      document.removeEventListener('scroll', resync, true);
+      cleanupLayout();
       editor.off('update', resync);
     };
   }, [editor, syncSelectionBands]);

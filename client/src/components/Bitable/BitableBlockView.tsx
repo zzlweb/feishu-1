@@ -8,6 +8,7 @@ import { SlashGlyphBitableGrid, SlashGlyphGallery, SlashGlyphGantt, SlashGlyphKa
 import { BitableAddFieldPopover, BitableEditFieldPopover, buildNewFieldPayload, emptyDefaultValue, type CreateFieldInput, type UpdateFieldInput } from './fields/BitableAddFieldPopover';
 import { FieldLockGlyph, fieldTypeGlyph } from './fields/bitableFieldTypeIcons';
 import { BitableTooltip, useBitablePanelHoverHandlers } from './shared/BitableViewShared';
+import { bindFloatingLayoutListeners } from '../Editor/shared/floatingPanel';
 import { BITABLE_TD_PORTAL_SELECTOR, BITABLE_TD_SELECT_POPUP_PROPS } from './shared/bitableTdesign';
 import { parseJsonPayload } from '../../api/http';
 import {
@@ -544,14 +545,9 @@ function FloatingItemRowMenu({
   }, [anchor]);
 
   useLayoutEffect(() => {
-    updatePosition();
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
-    return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    };
-  }, [updatePosition]);
+    const cleanupLayout = bindFloatingLayoutListeners(updatePosition, anchor);
+    return cleanupLayout;
+  }, [anchor, updatePosition]);
 
   if (typeof document === 'undefined') return null;
 
@@ -863,8 +859,13 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       if (event.target.closest('.base-grid-field-menu')) return;
       setEditingFieldPanel(null);
     };
+    const closeOnLayoutChange = () => setEditingFieldPanel(null);
     document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      cleanupLayout();
+    };
   }, [editingFieldPanel]);
 
   useEffect(() => {
@@ -879,8 +880,13 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       if (event.target.closest('.base-grid-add-field-column')) return;
       setAddFieldPanel(null);
     };
+    const closeOnLayoutChange = () => setAddFieldPanel(null);
     document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      cleanupLayout();
+    };
   }, [addFieldPanel]);
 
   useEffect(() => {

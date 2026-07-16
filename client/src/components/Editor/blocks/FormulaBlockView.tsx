@@ -4,6 +4,7 @@ import 'katex/dist/katex.min.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MessagePlugin } from 'tdesign-react';
 import { copyCurrentBlockLink } from './blockLink';
+import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
 import { makeFeishuBlockId, readFeishuBlockId } from './feishuBlockId';
 
 function blockDomAttrs(attrs: Record<string, unknown> | null | undefined) {
@@ -101,13 +102,8 @@ export function FormulaBlockView({ node, updateAttributes, selected, editor, get
       setPanelPlacement(spaceBelow >= panelHeight || spaceBelow >= spaceAbove ? 'below' : 'above');
     };
 
-    updatePlacement();
-    window.addEventListener('resize', updatePlacement);
-    window.addEventListener('scroll', updatePlacement, true);
-    return () => {
-      window.removeEventListener('resize', updatePlacement);
-      window.removeEventListener('scroll', updatePlacement, true);
-    };
+    const cleanupLayout = bindFloatingLayoutListeners(updatePlacement, wrapperRef.current);
+    return cleanupLayout;
   }, [panelOpen]);
 
   const commitPanel = useCallback(() => {

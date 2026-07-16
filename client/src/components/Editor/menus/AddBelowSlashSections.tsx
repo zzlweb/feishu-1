@@ -1,4 +1,4 @@
-import { Fragment, useState, type CSSProperties } from 'react';
+import { Fragment, useEffect, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { IconChevronMenuEnd } from '../../../icons/feishuDoc';
 import { SLASH_SECTIONS, type SlashMenuItem } from './slashMenuConfig';
@@ -6,6 +6,7 @@ import TableGridPicker from '../tables/TableGridPicker';
 import ColumnsCountPicker from '../panels/ColumnsCountPicker';
 import TemplatePicker from './TemplatePicker';
 import ButtonTypePicker from '../panels/ButtonTypePicker';
+import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
 import { computeSubmenuFlyoutPosition } from './contextSubmenuFlyout';
 import {
   TEMPLATE_PICKER_LIST_HEIGHT,
@@ -40,6 +41,11 @@ export default function AddBelowSlashSections({
   const openSubmenu = (kind: 'tableGrid' | 'columnsCount' | 'templateList' | 'buttonType', el: HTMLElement) => {
     setActiveSubmenu({ kind, rect: el.getBoundingClientRect() });
   };
+
+  useEffect(() => {
+    if (!activeSubmenu) return undefined;
+    return bindFloatingLayoutListeners(() => setActiveSubmenu(null));
+  }, [activeSubmenu]);
 
   const submenuPosition = activeSubmenu
     ? computeSubmenuFlyoutPosition({

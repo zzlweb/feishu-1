@@ -38,7 +38,7 @@ import {
   computeSubmenuFlyoutPosition,
 } from '../menus/contextSubmenuFlyout';
 import { computeTableBlockMenuPosition, getActiveTableFlags } from './tableMenu';
-import { useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../shared/floatingPanel';
+import { useAnchoredContextMenuPosition, bindFloatingLayoutListeners, useHoverFloatingGroup } from '../shared/floatingPanel';
 import {
   distributeSelectedTableColumns,
   removeActiveTable,
@@ -197,12 +197,10 @@ export default function TableContextMenu({
 
     updateFlyouts();
     const raf = window.requestAnimationFrame(updateFlyouts);
-    window.addEventListener('resize', updateFlyouts);
-    document.addEventListener('scroll', updateFlyouts, true);
+    const cleanupLayout = bindFloatingLayoutListeners(updateFlyouts, menuRef.current);
     return () => {
       window.cancelAnimationFrame(raf);
-      window.removeEventListener('resize', updateFlyouts);
-      document.removeEventListener('scroll', updateFlyouts, true);
+      cleanupLayout();
     };
   }, [subMenu, finalPos.x, finalPos.y, posVisible]);
 

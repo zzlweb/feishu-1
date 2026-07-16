@@ -15,6 +15,7 @@ import TemplatePicker from './TemplatePicker';
 import ButtonTypePicker from '../panels/ButtonTypePicker';
 import { insertFeishuTable } from '../tables/tableInsert';
 import { insertFeishuColumns } from '../blocks/columnsInsert';
+import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
 import { computeSubmenuFlyoutPosition } from './contextSubmenuFlyout';
 import {
   TEMPLATE_PICKER_LIST_HEIGHT,
@@ -66,6 +67,11 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
   useEffect(() => {
     setActiveIdx(0);
   }, [query]);
+
+  useEffect(() => {
+    if (!activeSubmenu) return undefined;
+    return bindFloatingLayoutListeners(() => setActiveSubmenu(null));
+  }, [activeSubmenu]);
 
   useLayoutEffect(() => {
     if (variant === 'anchored') {

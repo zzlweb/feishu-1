@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
 import { DOMSerializer } from '@tiptap/pm/model';
@@ -22,7 +22,7 @@ import { getInsertBelowPosition, insertButtonBlockAt, insertSlashItemAt } from '
 import { insertFeishuColumnsAt } from '../blocks/columnsInsert';
 import { insertFeishuTableAt } from '../tables/tableInsert';
 import AddBelowSlashSections from '../menus/AddBelowSlashSections';
-import { isPointerWithinFloatingShell, useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../shared/floatingPanel';
+import { isPointerWithinFloatingShell, bindFloatingLayoutListeners, useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../shared/floatingPanel';
 import {
   dispatchImageBlockAction,
   getImageAlignFromEditor,
@@ -279,6 +279,40 @@ export default function ImageContextMenu({
   const openFlyout = (kind: 'align' | 'below' | 'imageEdit', triggerEl: HTMLElement) => {
     setActiveFlyout({ kind, rect: triggerEl.getBoundingClientRect() });
   };
+
+  const resolveFlyoutTriggerEl = (kind: 'align' | 'below' | 'imageEdit') =>
+    kind === 'align'
+      ? alignTriggerRef.current
+      : kind === 'imageEdit'
+        ? imageEditTriggerRef.current
+        : addBelowTriggerRef.current;
+
+  useLayoutEffect(() => {
+    if (!activeFlyout || !posVisible) return;
+
+    const syncTriggerRect = () => {
+      setActiveFlyout(prev => {
+        if (!prev) return prev;
+        const triggerEl = resolveFlyoutTriggerEl(prev.kind);
+        if (!triggerEl?.isConnected) return prev;
+        const nextRect = triggerEl.getBoundingClientRect();
+        const same =
+          prev.rect.top === nextRect.top
+          && prev.rect.left === nextRect.left
+          && prev.rect.right === nextRect.right
+          && prev.rect.bottom === nextRect.bottom;
+        return same ? prev : { ...prev, rect: nextRect };
+      });
+    };
+
+    syncTriggerRect();
+    const raf = window.requestAnimationFrame(syncTriggerRect);
+    const cleanupLayout = bindFloatingLayoutListeners(syncTriggerRect, menuRef.current);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      cleanupLayout();
+    };
+  }, [activeFlyout?.kind, finalPos.x, finalPos.y, posVisible]);
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;

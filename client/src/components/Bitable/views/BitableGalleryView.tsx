@@ -10,6 +10,7 @@ import {
   type GalleryViewConfig,
 } from '../model/bitableModel';
 import { BitableGalleryRecordContextMenu } from '../records/BitableGalleryRecordContextMenu';
+import { bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
 import { BitableCardField } from '../shared/BitableCardField';
 import { FileBadge, isPreviewImage } from '../shared/BitableViewShared';
 
@@ -228,11 +229,14 @@ export function BitableGalleryView({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closeRecordMenu();
     };
+    const closeOnLayoutChange = () => closeRecordMenu();
     window.addEventListener('mousedown', handlePointerDown);
     window.addEventListener('keydown', handleKeyDown);
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
     return () => {
       window.removeEventListener('mousedown', handlePointerDown);
       window.removeEventListener('keydown', handleKeyDown);
+      cleanupLayout();
     };
   }, [closeRecordMenu, recordMenu]);
 

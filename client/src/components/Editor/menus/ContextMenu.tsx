@@ -61,7 +61,7 @@ import {
   applyEditorIndentIncrease,
   getEditorIndentUiState,
 } from '../blocks/blockIndent';
-import { isPointerWithinFloatingShell, useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../shared/floatingPanel';
+import { isPointerWithinFloatingShell, bindFloatingLayoutListeners, useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../shared/floatingPanel';
 import { setHeadingLevel, setTextAlignment, toggleBlockStyle } from '../panels/panelActions';
 import './ContextMenu.less';
 import './SlashMenu.less';
@@ -360,12 +360,10 @@ export default function ContextMenu({
 
     syncTriggerRect();
     const raf = window.requestAnimationFrame(syncTriggerRect);
-    window.addEventListener('resize', syncTriggerRect);
-    document.addEventListener('scroll', syncTriggerRect, true);
+    const cleanupLayout = bindFloatingLayoutListeners(syncTriggerRect, menuRef.current);
     return () => {
       window.cancelAnimationFrame(raf);
-      window.removeEventListener('resize', syncTriggerRect);
-      document.removeEventListener('scroll', syncTriggerRect, true);
+      cleanupLayout();
     };
   }, [activeFlyout?.kind, finalPos.x, finalPos.y, posVisible]);
 
