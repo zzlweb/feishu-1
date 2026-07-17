@@ -108,18 +108,23 @@ function ImportResultPanel({
   const warnings = compactImportMessages(result.warnings);
   const unsupportedBlocks = compactUnsupportedBlocks(result.unsupported_blocks);
 
+  const quality = result.import_quality || 'fallback';
+
   return (
-    <div className={`feishu-import-result feishu-import-result--${result.import_quality || 'fallback'}`}>
+    <div className={`feishu-import-result feishu-import-result--${quality}`}>
       <div className="feishu-import-result__header">
         <span className="feishu-import-result__badge">
           {{
             full: '完整导入',
             partial: '部分导入',
             fallback: '兜底导入',
-          }[result.import_quality || 'fallback']}
+          }[quality]}
         </span>
         <strong>{result.document.title || '未命名文档'}</strong>
       </div>
+      {quality === 'fallback' ? (
+        <p className="feishu-import-result__fallback-hint">无法完整识别飞书结构</p>
+      ) : null}
       <div className="feishu-import-result__meta">
         来源：{result.source_name || '导入文档'}
         {result.asset_count ? ` · 资源 ${result.asset_count} 个` : ''}
@@ -302,7 +307,12 @@ export default function DocumentList() {
     try {
       const res = await importDocumentFile(file, CURRENT_USER);
       if (res.code === 0 && res.data?.document) {
-        void MessagePlugin.success('已导入为新文档，请确认导入详情');
+        const quality = res.data.import_quality || 'fallback';
+        if (quality === 'fallback') {
+          void MessagePlugin.warning('兜底导入：无法完整识别飞书结构，请查看导入详情');
+        } else {
+          void MessagePlugin.success('已导入为新文档，请确认导入详情');
+        }
         setFileImportResult(res.data);
       } else {
         void MessagePlugin.error(res.message || '导入失败');
@@ -344,12 +354,17 @@ export default function DocumentList() {
         saveAsTemplate: saveImportedAsTemplate,
       });
       if (res.code === 0 && res.data?.document) {
+        const quality = res.data.import_quality || 'fallback';
         const qualityText = {
           full: '完整导入',
           partial: '部分高保真导入',
           fallback: '兜底导入',
-        }[res.data.import_quality || 'fallback'];
-        void MessagePlugin.success(`${qualityText}成功，请确认导入详情`);
+        }[quality];
+        if (quality === 'fallback') {
+          void MessagePlugin.warning(`${qualityText}：无法完整识别飞书结构，请查看导入详情`);
+        } else {
+          void MessagePlugin.success(`${qualityText}成功，请确认导入详情`);
+        }
         setFeishuImportResult(res.data);
       } else {
         void MessagePlugin.error(res.message || '飞书导入失败');

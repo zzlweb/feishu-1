@@ -1,5 +1,17 @@
+import { createHash } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3000';
+
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const defaultCacheDir = path.join(
+  os.tmpdir(),
+  `feishu-doc-vite-${createHash('sha256').update(projectRoot).digest('hex').slice(0, 12)}`,
+);
 
 function resolveVendorChunk(id: string): string | undefined {
   const normalizedId = id.replace(/\\/g, '/');
@@ -30,6 +42,7 @@ function resolveVendorChunk(id: string): string | undefined {
 
 export default defineConfig({
   plugins: [react()],
+  cacheDir: process.env.VITE_CACHE_DIR || defaultCacheDir,
   build: {
     rollupOptions: {
       output: {
@@ -38,14 +51,14 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5176,
+    port: 5175,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:3000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
       '/static': {
-        target: 'http://127.0.0.1:3000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
     },
@@ -54,11 +67,11 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:3000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
       '/static': {
-        target: 'http://127.0.0.1:3000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
     },

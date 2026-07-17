@@ -710,7 +710,7 @@ export function createBaseTable(initialView: 'grid' | 'gallery' | 'gantt' | 'kan
     tableId,
     name: '看板',
     type: 'kanban',
-    config: createGalleryConfig(fields, titleId),
+    config: createKanbanConfig(fields, titleId),
     sorts: [],
     filters: [],
   };
@@ -794,7 +794,7 @@ function normalizeTable(raw: BaseTable): BaseTable {
           endDateFieldId: fields.some(field => field.id === config.endDateFieldId && field.type === 'date')
             ? config.endDateFieldId
             : defaults.endDateFieldId,
-          dayWidth: Math.max(24, Math.min(60, Number(config.dayWidth) || defaults.dayWidth)),
+          dayWidth: Math.max(12, Math.min(60, Number(config.dayWidth) || defaults.dayWidth)),
         },
       };
     }
@@ -810,6 +810,31 @@ function normalizeTable(raw: BaseTable): BaseTable {
         fields,
       );
       return { ...view, tableId, config: normalizedConfig, filters: view.filters || [], sorts: view.sorts || [] };
+    }
+    if (view.type === 'kanban') {
+      const config = view.config as Partial<GalleryViewConfig>;
+      const defaults = createKanbanConfig(fields, primaryFieldId);
+      const validGroup = fields.some(field => field.id === config.groupByFieldId && field.type === 'single_select');
+      const resolvedGroupBy = validGroup ? config.groupByFieldId : defaults.groupByFieldId;
+      const validCover = fields.some(field => field.id === config.coverFieldId && field.type === 'attachment');
+      return {
+        ...view,
+        tableId,
+        filters: view.filters || [],
+        sorts: view.sorts || [],
+        config: {
+          ...defaults,
+          ...config,
+          groupByFieldId: resolvedGroupBy,
+          coverFieldId: validCover ? config.coverFieldId : fields.find(field => field.type === 'attachment')?.id,
+          titleFieldId: fields.some(field => field.id === config.titleFieldId) ? config.titleFieldId : primaryFieldId,
+          visibleFieldIds: resolveGalleryVisibleFieldIds(fields, primaryFieldId, {
+            ...defaults,
+            ...config,
+            groupByFieldId: resolvedGroupBy,
+          } as GalleryViewConfig),
+        },
+      };
     }
     if (view.type !== 'gallery') return { ...view, tableId, config: view.config || {}, filters: view.filters || [], sorts: view.sorts || [] };
     const config = view.config as Partial<GalleryViewConfig>;
@@ -919,25 +944,47 @@ export function getActiveView(table: BaseTable) {
 }
 
 export function getGalleryConfig(table: BaseTable, view: BaseView): GalleryViewConfig {
-  const defaults = createGalleryConfig(table.fields, table.primaryFieldId);
+  const defaults = view.type === 'kanban'
+    ? createKanbanConfig(table.fields, table.primaryFieldId)
+    : createGalleryConfig(table.fields, table.primaryFieldId);
   const raw = view.type === 'gallery' || view.type === 'kanban'
     ? (view.config as GalleryViewConfig)
     : defaults;
   const merged: GalleryViewConfig = { ...defaults, ...raw };
   const validCover = table.fields.some(field => field.id === merged.coverFieldId && field.type === 'attachment');
+  const groupByFieldId = view.type === 'kanban'
+    ? (
+      (merged.groupByFieldId && table.fields.some(field => field.id === merged.groupByFieldId && field.type === 'single_select'))
+        ? merged.groupByFieldId
+        : resolveKanbanGroupFieldId(table.fields)
+    )
+    : merged.groupByFieldId;
   return {
     ...merged,
     coverFieldId: validCover ? merged.coverFieldId : table.fields.find(field => field.type === 'attachment')?.id,
     titleFieldId: table.fields.some(field => field.id === merged.titleFieldId) ? merged.titleFieldId : table.primaryFieldId,
-    visibleFieldIds: resolveGalleryVisibleFieldIds(table.fields, table.primaryFieldId, merged),
+    groupByFieldId,
+    visibleFieldIds: resolveGalleryVisibleFieldIds(table.fields, table.primaryFieldId, { ...merged, groupByFieldId }),
     showRecordActions: merged.showRecordActions ?? false,
   };
 }
 
 export function getGanttConfig(table: BaseTable, view: BaseView): GanttViewConfig {
-  return view.type === 'gantt'
-    ? view.config as GanttViewConfig
-    : createGanttConfig(table.fields, table.primaryFieldId);
+  const defaults = createGanttConfig(table.fields, table.primaryFieldId);
+  if (view.type !== 'gantt') return defaults;
+  const config = view.config as Partial<GanttViewConfig>;
+  return {
+    ...defaults,
+    ...config,
+    titleFieldId: table.fields.some(field => field.id === config.titleFieldId) ? config.titleFieldId : table.primaryFieldId,
+    startDateFieldId: table.fields.some(field => field.id === config.startDateFieldId && field.type === 'date')
+      ? config.startDateFieldId
+      : defaults.startDateFieldId,
+    endDateFieldId: table.fields.some(field => field.id === config.endDateFieldId && field.type === 'date')
+      ? config.endDateFieldId
+      : defaults.endDateFieldId,
+    dayWidth: Math.max(12, Math.min(60, Number(config.dayWidth) || defaults.dayWidth)),
+  };
 }
 
 export const RECORD_TREE_INDENT = 18;
@@ -1174,13 +1221,44 @@ export function fieldCellDisplayText(field: BaseField, value: CellValue): string
   return valueText(value);
 }
 
-function compareRecordsBySorts(a: BaseRecord, b: BaseRecord, sorts: SortRule[]): number {
+function compareCellValues(field: BaseField | undefined, aValue: CellValue, bValue: CellValue): number {
+  if (!field) return valueText(aValue).localeCompare(valueText(bValue), 'zh-CN', { numeric: true });
+  if (field.type === 'number') {
+    const a = Number(valueText(aValue));
+    const b = Number(valueText(bValue));
+    if (Number.isFinite(a) && Number.isFinite(b)) return a - b;
+    return (Number.isFinite(a) ? 0 : 1) - (Number.isFinite(b) ? 0 : 1);
+  }
+  if (field.type === 'date') {
+    const a = parseDateCellValue(aValue)?.getTime() ?? Number.NEGATIVE_INFINITY;
+    const b = parseDateCellValue(bValue)?.getTime() ?? Number.NEGATIVE_INFINITY;
+    return a - b;
+  }
+  if (field.type === 'checkbox') {
+    const a = Boolean(aValue) ? 1 : 0;
+    const b = Boolean(bValue) ? 1 : 0;
+    return a - b;
+  }
+  if (field.type === 'single_select' || field.type === 'multi_select') {
+    const choices = field.options?.choices ?? [];
+    const indexOf = (val: CellValue) => {
+      const ids = field.type === 'multi_select' ? normalizeMultiSelectIds(field, val) : [findSelectChoice(field, valueText(val))?.id].filter(Boolean) as string[];
+      let min = Number.MAX_SAFE_INTEGER;
+      for (const id of ids) {
+        const idx = choices.findIndex(choice => choice.id === id);
+        if (idx >= 0 && idx < min) min = idx;
+      }
+      return min === Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : min;
+    };
+    return indexOf(aValue) - indexOf(bValue);
+  }
+  return valueText(aValue).localeCompare(valueText(bValue), 'zh-CN', { numeric: true });
+}
+
+function compareRecordsBySorts(table: BaseTable, a: BaseRecord, b: BaseRecord, sorts: SortRule[]): number {
   for (const sort of sorts) {
-    const result = valueText(a.fields[sort.fieldId]).localeCompare(
-      valueText(b.fields[sort.fieldId]),
-      'zh-CN',
-      { numeric: true },
-    );
+    const field = table.fields.find(item => item.id === sort.fieldId);
+    const result = compareCellValues(field, a.fields[sort.fieldId], b.fields[sort.fieldId]);
     if (result) return sort.direction === 'asc' ? result : -result;
   }
   return 0;
@@ -1191,20 +1269,28 @@ export function filterRecordsForView(table: BaseTable, view: BaseView): BaseReco
   const activeFilters = (view.filters || []).filter(isFilterRuleActive);
   return table.records.filter(record => {
     if (search && !table.fields.some(field => {
-      const text = field.type === 'multi_select'
-        ? multiSelectDisplayText(field, record.fields[field.id])
-        : valueText(record.fields[field.id]);
+      const text = fieldCellDisplayText(field, record.fields[field.id]);
       return text.toLocaleLowerCase().includes(search);
     })) return false;
     return activeFilters.every(rule => {
       const field = table.fields.find(item => item.id === rule.fieldId);
-      const text = field?.type === 'multi_select'
-        ? multiSelectDisplayText(field, record.fields[rule.fieldId]).toLocaleLowerCase()
-        : valueText(record.fields[rule.fieldId]).toLocaleLowerCase();
+      // 统一用展示文案比较，让 single_select 存 id 时也能按选项名筛选。
+      const text = field ? fieldCellDisplayText(field, record.fields[rule.fieldId]).toLocaleLowerCase() : '';
       const needle = String(rule.value || '').trim().toLocaleLowerCase();
       if (rule.operator === 'is_empty') return !text;
       if (rule.operator === 'is_not_empty') return Boolean(text);
-      if (rule.operator === 'equals') return text === needle;
+      if (rule.operator === 'equals') {
+        if (text === needle) return true;
+        // single_select 存 id 时，筛选值可能是选项名或 id。
+        if (field?.type === 'single_select') {
+          const choice = findSelectChoice(field, rule.value || '');
+          if (choice) {
+            const raw = valueText(record.fields[rule.fieldId]);
+            return raw === choice.id || raw === choice.name;
+          }
+        }
+        return false;
+      }
       if (rule.operator === 'not_equals') return text !== needle;
       if (rule.operator === 'not_contains') return !text.includes(needle);
       return text.includes(needle);
@@ -1213,7 +1299,7 @@ export function filterRecordsForView(table: BaseTable, view: BaseView): BaseReco
 }
 
 /** 表格视图：先归一化树序，再仅在同级兄弟间排序，保证子记录紧跟父记录 */
-export function orderRecordsForTreeView(records: BaseRecord[], sorts: SortRule[] = []): BaseRecord[] {
+export function orderRecordsForTreeView(table: BaseTable, records: BaseRecord[], sorts: SortRule[] = []): BaseRecord[] {
   const normalized = normalizeRecordTreeOrder(records);
   if (!sorts.length) return normalized;
 
@@ -1229,7 +1315,7 @@ export function orderRecordsForTreeView(records: BaseRecord[], sorts: SortRule[]
   const result: BaseRecord[] = [];
   const walk = (parentKey: string | null) => {
     const siblings = childrenByParent.get(parentKey) || [];
-    siblings.sort((left, right) => compareRecordsBySorts(left, right, sorts));
+    siblings.sort((left, right) => compareRecordsBySorts(table, left, right, sorts));
     siblings.forEach(record => {
       result.push(record);
       walk(record.id);
@@ -1240,7 +1326,7 @@ export function orderRecordsForTreeView(records: BaseRecord[], sorts: SortRule[]
 }
 
 export function gridVisibleRecords(table: BaseTable, view: BaseView): BaseRecord[] {
-  return orderRecordsForTreeView(filterRecordsForView(table, view), getEffectiveSorts(view));
+  return orderRecordsForTreeView(table, filterRecordsForView(table, view), getEffectiveSorts(view));
 }
 
 export function resolveRecordInsertIndex(
@@ -1290,12 +1376,12 @@ export function insertRecordsIntoTable(
 export function visibleRecords(table: BaseTable, view: BaseView): BaseRecord[] {
   const filtered = filterRecordsForView(table, view);
   if (view.type === 'grid') {
-    return orderRecordsForTreeView(filtered, getEffectiveSorts(view));
+    return orderRecordsForTreeView(table, filtered, getEffectiveSorts(view));
   }
   const sorts = getEffectiveSorts(view);
   if (!sorts.length) return filtered;
   return filtered.map((record, index) => ({ record, index })).sort((a, b) => {
-    const result = compareRecordsBySorts(a.record, b.record, sorts);
+    const result = compareRecordsBySorts(table, a.record, b.record, sorts);
     return result || a.index - b.index;
   }).map(item => item.record);
 }
@@ -1450,19 +1536,43 @@ export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt' | '
   if (type === 'kanban') {
     let fields = table.fields;
     if (!fields.some(field => field.type === 'single_select')) {
-      const statusField = {
-        id: uid('fld_status'),
-        name: '任务状态',
-        type: 'single_select' as const,
-        options: {
-          choices: [
-            { id: 'todo', name: '未开始', color: '#dee8ff' },
-            { id: 'doing', name: '进行中', color: '#f8e6c2' },
-            { id: 'done', name: '已完成', color: '#c7effb' },
-          ],
-        },
-      };
-      fields = [...fields, statusField];
+      const statusTextField = fields.find(field => (
+        field.type === 'text' && /状态|status/i.test(field.name)
+      ));
+      const defaultChoices = [
+        { id: 'todo', name: '未开始', color: '#dee8ff' },
+        { id: 'doing', name: '进行中', color: '#f8e6c2' },
+        { id: 'done', name: '已完成', color: '#c7effb' },
+      ];
+      if (statusTextField) {
+        const uniqueNames = Array.from(new Set(
+          table.records
+            .map(record => valueText(record.fields[statusTextField.id]).trim())
+            .filter(Boolean),
+        ));
+        const choiceNames = uniqueNames.length
+          ? uniqueNames
+          : defaultChoices.map(choice => choice.name);
+        const palette = ['#dee8ff', '#f8e6c2', '#c7effb', '#d9f5d6', '#fde2e2'];
+        const choices = choiceNames.map((name, index) => ({
+          id: `opt_${index.toString(36)}`,
+          name,
+          color: palette[index % palette.length],
+        }));
+        fields = fields.map(field => (
+          field.id === statusTextField.id
+            ? { ...field, type: 'single_select' as const, options: { choices } }
+            : field
+        ));
+      } else {
+        const statusField = {
+          id: uid('fld_status'),
+          name: '任务状态',
+          type: 'single_select' as const,
+          options: { choices: defaultChoices },
+        };
+        fields = [...fields, statusField];
+      }
     }
     const view: BaseView = {
       id: uid('view_kanban'),
@@ -1473,13 +1583,26 @@ export function addView(table: BaseTable, type: 'grid' | 'gallery' | 'gantt' | '
       filters: [],
       sorts: [],
     };
+    const statusFieldId = (view.config as GalleryViewConfig).groupByFieldId;
+    const defaultStatus = statusFieldId
+      ? fields.find(field => field.id === statusFieldId)?.options?.choices?.[0]?.name || ''
+      : '';
     return {
       ...table,
       fields,
       records: table.records.map(record => ({
         ...record,
         fields: fields.reduce<Record<FieldId, CellValue>>((values, field) => {
-          values[field.id] = record.fields[field.id] ?? (field.type === 'attachment' ? [] : '');
+          const existing = record.fields[field.id];
+          if (existing != null && existing !== '') {
+            values[field.id] = existing;
+          } else if (field.type === 'attachment') {
+            values[field.id] = [];
+          } else if (field.id === statusFieldId && defaultStatus) {
+            values[field.id] = defaultStatus;
+          } else {
+            values[field.id] = existing ?? '';
+          }
           return values;
         }, {}),
       })),

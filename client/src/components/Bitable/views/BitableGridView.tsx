@@ -1180,8 +1180,9 @@ export function BitableGridView({
   }, [applyScrollLeft, maxScrollLeft]);
 
   const openAddFieldPanelAt = useCallback((anchor: { left: number; top: number }) => {
-    addField(anchor);
+    // 先滚到新增列再打开弹层，避免打开后布局滚动把面板关掉
     scrollToAddColumn();
+    addField(anchor);
   }, [addField, scrollToAddColumn]);
 
   const syncLayoutCaps = useCallback(() => {
@@ -1310,7 +1311,10 @@ export function BitableGridView({
   useEffect(() => {
     const block = wrapRef.current?.closest<HTMLElement>('.feishu-bitable-block');
     if (!block) return;
-    const onExpandAll = () => setCollapsedRecordIds(new Set());
+    const onExpandAll = () => {
+      setCollapsedRecordIds(new Set());
+      setCollapsedGroupKeys(new Set());
+    };
     block.addEventListener(BITABLE_BLOCK_EXPAND_ALL, onExpandAll);
     return () => block.removeEventListener(BITABLE_BLOCK_EXPAND_ALL, onExpandAll);
   }, []);
@@ -2403,7 +2407,7 @@ export function BitableGridView({
       else setSelectEditor(current => current ? { ...current, query: '' } : current);
       return;
     }
-    changeCell(selectEditor.recordId, selectEditor.fieldId, choice.name);
+    changeCell(selectEditor.recordId, selectEditor.fieldId, choice.id);
     if (closeEditor) setSelectEditor(null);
   };
 
@@ -3140,7 +3144,7 @@ export function BitableGridView({
                   {filteredSelectChoices.map(choice => {
                     const selected = selectField?.type === 'multi_select' && selectRecord
                       ? getSelectValues(selectRecord, selectField).includes(choice.id)
-                      : choice.name === selectEditor.value;
+                      : choice.id === selectEditor.value || choice.name === selectEditor.value;
                     return (
                       <button
                         key={choice.id}

@@ -573,12 +573,15 @@ export default function DocumentPage() {
           )}
           <CommentSidebarTrackContext.Provider value={commentTrackHost}>
           <div className="doc-page-workspace-inner">
-            <main className="doc-page-main" ref={pageMainRef}>
-              <div
-                className={`doc-page-catalogue-rail${sidebarCollapsed ? ' doc-page-catalogue-rail--collapsed' : ''}`}
-                aria-hidden={!showOutlineSidebar}
-              >
-                {showOutlineSidebar && (
+            <main
+              className={`doc-page-main${showOutlineSidebar ? '' : ' doc-page-main--no-catalogue'}`}
+              ref={pageMainRef}
+            >
+              {showOutlineSidebar && (
+                <div
+                  className={`doc-page-catalogue-rail${sidebarCollapsed ? ' doc-page-catalogue-rail--collapsed' : ''}`}
+                  aria-hidden={!showOutlineSidebar}
+                >
                   <Sidebar
                     documentTitle={catalogueTitleDisplay}
                     headings={headings}
@@ -589,8 +592,8 @@ export default function DocumentPage() {
                     collapsedHeadingIds={collapsedHeadingIds}
                     onToggleHeadingCollapse={handleToggleHeadingCollapse}
                   />
-                )}
-              </div>
+                </div>
+              )}
 
               <Editor
                 documentId={doc.id}

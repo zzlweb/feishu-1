@@ -15,7 +15,7 @@ import TemplatePicker from './TemplatePicker';
 import ButtonTypePicker from '../panels/ButtonTypePicker';
 import { insertFeishuTable } from '../tables/tableInsert';
 import { insertFeishuColumns } from '../blocks/columnsInsert';
-import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
+import { bindFloatingLayoutListeners, FLOATING_Z_INDEX } from '../shared/floatingPanel';
 import { computeSubmenuFlyoutPosition } from './contextSubmenuFlyout';
 import {
   TEMPLATE_PICKER_LIST_HEIGHT,
@@ -70,7 +70,12 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
 
   useEffect(() => {
     if (!activeSubmenu) return undefined;
-    return bindFloatingLayoutListeners(() => setActiveSubmenu(null));
+    // 滚动/缩放时关闭子菜单；禁止 runImmediately，否则一打开就被立刻关掉
+    return bindFloatingLayoutListeners(
+      () => setActiveSubmenu(null),
+      undefined,
+      { runImmediately: false },
+    );
   }, [activeSubmenu]);
 
   useLayoutEffect(() => {
@@ -279,7 +284,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
             position: 'fixed',
             left: submenuPosition.left,
             top: submenuPosition.top,
-            zIndex: 10030,
+            zIndex: FLOATING_Z_INDEX.docSubmenu,
             overflow: activeSubmenu.kind === 'templateList' ? 'visible' : undefined,
           }}
           onMouseEnter={onMouseEnter}

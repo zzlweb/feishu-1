@@ -24,12 +24,15 @@ import BitableContextMenu from '../Bitable/BitableContextMenu';
 import ImageContextMenu from './media/ImageContextMenu';
 import TableContextMenu from './tables/TableContextMenu';
 import { computeBlockPanelPosition, bindFloatingLayoutListeners, FLOATING_Z_INDEX, useHoverFloatingGroup } from './shared/floatingPanel';
+import { CONTEXT_MENU_SHELL_SELECTORS } from './shared/FloatingMenuShell';
 import { computeTableBlockMenuPosition } from './tables/tableMenu';
 import SlashMenu from './menus/SlashMenu';
 import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH, type ButtonActionType } from './menus/slashMenuConfig';
 import SelectionBubble from './toolbars/SelectionBubble';
 import ImageBlockToolbar from './media/ImageBlockToolbar';
 import ImageCropOverlay from './media/ImageCropOverlay';
+import ImageResizeHandles from './media/ImageResizeHandles';
+import ImageViewer from './media/ImageViewer';
 import { useImageBlockInteractions } from './media/useImageBlockInteractions';
 import { getActiveImageCropSession } from './media/imageCropSession';
 import { normalizeImageAlign, type ImageAlign } from './media/imageBlockUtils';
@@ -46,9 +49,14 @@ import { DashboardChartBlock } from './blocks/DashboardChartBlock';
 import { BlockIndent } from './blocks/blockIndent';
 import { copyCurrentBlockLink, scrollToBlockFromHash } from './blocks/blockLink';
 import { resolveListItemHighlightRect } from './blocks/blockDom';
-import { normalizeHorizontalRulesOutOfLists } from './blocks/blockOperations';
+import { getBlockAtPos, normalizeHorizontalRulesOutOfLists } from './blocks/blockOperations';
 import { resolveInlineBlockElementFromEditor, syncEditorSelectionToAnchoredBlock } from './blocks/blockAnchorSelection';
-import { moveDraggableBlock, resolveBlockDomAtPoint, resolveDraggableBlockPos } from './blocks/feishuBlockDrag';
+import {
+  moveDraggableBlock,
+  resolveBlockDomAtPoint,
+  resolveDraggableBlockPos,
+  type BlockDragPlacement,
+} from './blocks/feishuBlockDrag';
 import { FeishuBlockBackspace } from './blocks/feishuBlockBackspace';
 import { FeishuBoxSelectionKeyboard } from './blocks/feishuBoxSelectionKeyboard';
 import {
@@ -86,6 +94,7 @@ const Help = wrapIcon(HelpCircleIcon);
 const lowlight = createLowlight(common);
 const MEDIA_UPLOAD_EVENT = 'feishu-media-upload-action';
 const MEDIA_UPLOAD_MAX_SIZE = 200 * 1024 * 1024;
+const IMAGE_UPLOAD_MAX_SIZE = 20 * 1024 * 1024;
 const BLOCKED_FILE_EXTENSIONS = new Set(['exe', 'bat', 'cmd', 'sh', 'msi', 'com', 'scr', 'ps1']);
 const mediaUploadFiles = new Map<string, { file: File; objectUrl?: string; controller?: AbortController }>();
 
@@ -434,6 +443,7 @@ function createPendingMediaNode(file: File) {
 function validateDroppedFile(file: File): string | null {
   const extension = getFileExtension(file.name);
   if (BLOCKED_FILE_EXTENSIONS.has(extension)) return '出于安全原因，暂不支持上传该类型文件';
+  if (classifyMediaFile(file) === 'image' && file.size > IMAGE_UPLOAD_MAX_SIZE) return '图片超过 20MB 限制';
   if (file.size > MEDIA_UPLOAD_MAX_SIZE) return '文件超过 200MB 限制';
   return null;
 }
@@ -576,8 +586,8 @@ function isPlusMenuHoverBridgeTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest(PLUS_MENU_HOVER_BRIDGE_SELECTOR));
 }
 
-const CONTEXT_MENU_SHELL_SELECTOR =
-  '.context-menu, .context-submenu-flyout, .context-add-below-flyout, .docx-menu-wrapper.image-context-menu, .docx-menu-wrapper.bitable-context-menu';
+// 与 FloatingMenuShell.CONTEXT_MENU_SHELL_SELECTORS 保持一致，避免悬停 bridge 误关菜单。
+const CONTEXT_MENU_SHELL_SELECTOR = CONTEXT_MENU_SHELL_SELECTORS.join(', ');
 
 function isPointerInContextMenuShell(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest(CONTEXT_MENU_SHELL_SELECTOR));
@@ -729,14 +739,21 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
     captionRef,
     imageRef,
     showCaption,
+    displayWidth,
+    hasCrop,
     isCropping,
+    isViewerOpen,
     cropRect,
     setCropRect,
     focusCaption,
     toggleCrop,
     handleBoundsChange,
     setAlign,
+    setDisplayWidth,
     setNodeSelection,
+    openViewer,
+    closeViewer,
+    resetImage,
   } = useImageBlockInteractions({
     editor,
     getPos,
@@ -749,7 +766,6 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
     if (!id || node.attrs.blockId === id) return;
     updateAttributes({ blockId: id });
   };
-
   return (
     <NodeViewWrapper
       className={`feishu-image-block-wrap feishu-image-block-wrap--${align}${selected ? ' is-selected' : ''}${isCropping ? ' is-cropping' : ''}`}
@@ -763,12 +779,21 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
         onAlignChange={setAlign}
         onCaptionClick={focusCaption}
         onCropClick={toggleCrop}
+        onResetClick={resetImage}
         isCropping={isCropping}
+        hasCrop={hasCrop}
         documentId={(editor as any).__documentId}
         blockId={blockId}
         onEnsureBlockId={ensureBlockId}
       />
-      <div className={`feishu-image-block${selected ? ' is-selected' : ''}`}>
+      <div
+        className={`feishu-image-block${selected ? ' is-selected' : ''}`}
+        style={displayWidth ? { width: displayWidth } : undefined}
+        onDoubleClick={event => {
+          event.stopPropagation();
+          openViewer();
+        }}
+      >
         <img
           ref={imageRef}
           className="feishu-image"
@@ -776,7 +801,20 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
           alt={node.attrs.alt || ''}
           title={node.attrs.title || undefined}
           draggable={false}
+          onLoad={event => {
+            const { naturalWidth, naturalHeight } = event.currentTarget;
+            if (
+              naturalWidth > 0
+              && naturalHeight > 0
+              && (node.attrs.naturalWidth !== naturalWidth || node.attrs.naturalHeight !== naturalHeight)
+            ) {
+              updateAttributes({ naturalWidth, naturalHeight });
+            }
+          }}
         />
+        {selected && !isCropping && (
+          <ImageResizeHandles imageRef={imageRef} onResizeEnd={setDisplayWidth} />
+        )}
         {isCropping && src && (
           <ImageCropOverlay
             imageRef={imageRef}
@@ -787,17 +825,32 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
         )}
       </div>
       {showCaption && (
-        <input
+        <textarea
           ref={captionRef}
           className="feishu-media-caption"
           placeholder="添加描述"
+          rows={Math.max(1, String(node.attrs.caption || '').split('\n').length)}
           value={node.attrs.caption || ''}
           onChange={e => updateAttributes({ caption: e.target.value })}
           onBlur={e => {
             if (!e.target.value.trim()) updateAttributes({ captionVisible: false });
           }}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
           onMouseDown={e => e.stopPropagation()}
           data-no-marquee-selection="true"
+        />
+      )}
+      {isViewerOpen && (
+        <ImageViewer
+          src={src}
+          alt={String(node.attrs.alt || '')}
+          fileName={String(node.attrs.title || node.attrs.alt || 'image')}
+          onClose={closeViewer}
         />
       )}
     </NodeViewWrapper>
@@ -829,6 +882,29 @@ const FeishuImage = Image.extend({
           return { 'data-caption-visible': 'true' };
         },
       },
+      originalSrc: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-original-src') || '',
+        renderHTML: attributes => attributes.originalSrc ? { 'data-original-src': attributes.originalSrc } : {},
+      },
+      displayWidth: {
+        default: null,
+        parseHTML: element => {
+          const value = Number(element.getAttribute('data-display-width'));
+          return Number.isFinite(value) && value > 0 ? value : null;
+        },
+        renderHTML: attributes => attributes.displayWidth ? { 'data-display-width': attributes.displayWidth } : {},
+      },
+      naturalWidth: {
+        default: null,
+        parseHTML: element => Number(element.getAttribute('data-natural-width')) || null,
+        renderHTML: attributes => attributes.naturalWidth ? { 'data-natural-width': attributes.naturalWidth } : {},
+      },
+      naturalHeight: {
+        default: null,
+        parseHTML: element => Number(element.getAttribute('data-natural-height')) || null,
+        renderHTML: attributes => attributes.naturalHeight ? { 'data-natural-height': attributes.naturalHeight } : {},
+      },
     };
   },
   addNodeView() {
@@ -858,14 +934,21 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
     captionRef,
     imageRef,
     showCaption,
+    displayWidth,
+    hasCrop,
     isCropping,
+    isViewerOpen,
     cropRect,
     setCropRect,
     focusCaption,
     toggleCrop,
     handleBoundsChange,
     setAlign,
+    setDisplayWidth,
     setNodeSelection,
+    openViewer,
+    closeViewer,
+    resetImage,
   } = useImageBlockInteractions({
     editor,
     getPos,
@@ -874,6 +957,7 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
     src,
     isLocalFileBlock: true,
     uploadId: String(attrs.uploadId || ''),
+    fileName: String(attrs.name || 'image'),
   });
   const retryUpload = () => {
     window.dispatchEvent(new CustomEvent(MEDIA_UPLOAD_EVENT, { detail: { action: 'retry', uploadId: attrs.uploadId } }));
@@ -898,7 +982,6 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
     if (attrs.id !== id) patch.id = id;
     if (Object.keys(patch).length) updateAttributes(patch);
   };
-
   return (
     <NodeViewWrapper
       as="div"
@@ -935,17 +1018,47 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
           onAlignChange={setAlign}
           onCaptionClick={focusCaption}
           onCropClick={toggleCrop}
+          onResetClick={resetImage}
           isCropping={isCropping}
+          hasCrop={hasCrop}
           documentId={(editor as any).__documentId}
           blockId={blockId}
           onEnsureBlockId={ensureBlockId}
         />
       )}
       {viewMode === 'preview' && canPreview && (
-        <div ref={mediaPreviewRef} className={`feishu-media-preview feishu-media-preview--${kind}`} data-no-marquee-selection="true">
+        <div
+          ref={mediaPreviewRef}
+          className={`feishu-media-preview feishu-media-preview--${kind}`}
+          data-no-marquee-selection="true"
+          style={kind === 'image' && displayWidth ? { width: displayWidth } : undefined}
+          onDoubleClick={kind === 'image' ? event => {
+            event.stopPropagation();
+            openViewer();
+          } : undefined}
+        >
           {kind === 'image' && (
             <>
-              <img ref={imageRef} className="feishu-media-preview__image" src={src} alt={attrs.name || 'image'} draggable={false} />
+              <img
+                ref={imageRef}
+                className="feishu-media-preview__image"
+                src={src}
+                alt={attrs.name || 'image'}
+                draggable={false}
+                onLoad={event => {
+                  const { naturalWidth, naturalHeight } = event.currentTarget;
+                  if (
+                    naturalWidth > 0
+                    && naturalHeight > 0
+                    && (attrs.naturalWidth !== naturalWidth || attrs.naturalHeight !== naturalHeight)
+                  ) {
+                    updateAttributes({ naturalWidth, naturalHeight });
+                  }
+                }}
+              />
+              {selected && !isCropping && (
+                <ImageResizeHandles imageRef={imageRef} onResizeEnd={setDisplayWidth} />
+              )}
               {isCropping && src && (
                 <ImageCropOverlay
                   imageRef={imageRef}
@@ -1044,17 +1157,32 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
         </div>
       ) : null}
       {kind === 'image' && showCaption && (
-        <input
+        <textarea
           ref={captionRef}
           className="feishu-media-caption"
           placeholder="添加描述"
+          rows={Math.max(1, String(attrs.caption || '').split('\n').length)}
           value={attrs.caption || ''}
           onChange={e => updateAttributes({ caption: e.target.value })}
           onBlur={e => {
             if (!e.target.value.trim()) updateAttributes({ captionVisible: false });
           }}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
           onMouseDown={e => e.stopPropagation()}
           data-no-marquee-selection="true"
+        />
+      )}
+      {kind === 'image' && isViewerOpen && (
+        <ImageViewer
+          src={src}
+          alt={String(attrs.name || 'image')}
+          fileName={String(attrs.name || 'image')}
+          onClose={closeViewer}
         />
       )}
     </NodeViewWrapper>
@@ -1085,6 +1213,13 @@ const LocalFileBlock = TiptapNode.create({
       errorMessage: { default: '' },
       displayWidth: { default: null },
       displayHeight: { default: null },
+      naturalWidth: { default: null },
+      naturalHeight: { default: null },
+      originalUrl: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-original-url') || '',
+        renderHTML: attributes => attributes.originalUrl ? { 'data-original-url': attributes.originalUrl } : {},
+      },
       caption: { default: '' },
       captionVisible: {
         default: false,
@@ -1780,6 +1915,7 @@ const LocalDocNavBlock = TiptapNode.create({
 });
 
 const EMBED_KIND_META: Record<string, { icon: string; title: string; desc: string }> = {
+	link: { icon: '↗', title: '链接', desc: '网页链接' },
   bitable: { icon: '▦', title: '多维表格', desc: '表格视图' },
   kanban: { icon: '▤', title: '看板', desc: '多维表格看板视图' },
   gantt: { icon: '↔', title: '甘特图', desc: '多维表格甘特视图' },
@@ -1796,6 +1932,10 @@ const EMBED_KIND_META: Record<string, { icon: string; title: string; desc: strin
   file: { icon: '⇩', title: '文件', desc: '文件上传状态' },
   embed: { icon: '+', title: '内容块', desc: '' },
 };
+
+function embedTextAttribute(element: Element, attribute: string, selector: string) {
+  return (element.getAttribute(attribute) || element.querySelector(selector)?.textContent || '').trim();
+}
 
 function taskBlockTitleFromElement(element: Element) {
   const rawTitle = element.getAttribute('data-title') || element.querySelector('.feishu-task-block__title')?.textContent || '';
@@ -1902,13 +2042,14 @@ const LocalFeishuTaskBlock = TiptapNode.create({
 });
 
 function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
+  const [editing, setEditing] = useState(false);
   const kind = String(node.attrs.kind || 'embed');
   const meta = EMBED_KIND_META[kind] || EMBED_KIND_META.embed;
-  const title = node.attrs.title || meta.title;
-  const desc = node.attrs.desc || meta.desc;
+  const title = String(node.attrs.title || '').trim() || meta.title;
+  const desc = String(node.attrs.desc || '').trim() || meta.desc;
   const href = node.attrs.href || '';
   const normalizedHref = normalizeBlockUrl(href);
-  const isEditing = selected && editor.isEditable;
+  const isEditing = editing && selected && editor.isEditable;
   const actionText = kind === 'group' || kind === 'chat_card' ? '加入' : '打开';
   const selectThisBlock = (event: React.MouseEvent) => {
     if ((event.target as Element).closest('input, button, a')) return;
@@ -1917,6 +2058,10 @@ function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos 
       editor.chain().focus().setNodeSelection(pos).run();
     }
   };
+
+  useEffect(() => {
+    if (!selected) setEditing(false);
+  }, [selected]);
 
   if (kind === 'feishu-block-35') {
     const taskTitle = title && title !== '飞书任务' ? title : (desc && desc !== 'block_type 35' ? desc : '描述');
@@ -1956,7 +2101,7 @@ function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos 
       onMouseDown={selectThisBlock}
     >
       <div className="feishu-local-card__icon">{meta.icon}</div>
-      <div className="feishu-local-card__body">
+      <div className="feishu-local-card__body" onDoubleClick={() => editor.isEditable && setEditing(true)}>
         {isEditing ? (
           <>
             <input
@@ -2005,15 +2150,13 @@ const LocalEmbedBlock = TiptapNode.create({
       title: {
         default: '内容块',
         parseHTML: element =>
-          element.getAttribute('data-title')
-          || element.querySelector('.feishu-task-block__title')?.textContent
-          || element.querySelector('.feishu-local-card__title')?.textContent
+          embedTextAttribute(element, 'data-title', '.feishu-task-block__title, .feishu-local-card__title')
           || '内容块',
         renderHTML: attributes => ({ 'data-title': attributes.title }),
       },
       desc: {
         default: '',
-        parseHTML: element => element.getAttribute('data-desc') || element.querySelector('.feishu-local-card__desc')?.textContent || '',
+        parseHTML: element => embedTextAttribute(element, 'data-desc', '.feishu-local-card__desc'),
         renderHTML: attributes => ({ 'data-desc': attributes.desc }),
       },
       kind: {
@@ -2327,6 +2470,7 @@ function getBlockToolsAnchorTop(
   if (
     blockEl.classList.contains('feishu-image-block-wrap')
     || blockEl.classList.contains('feishu-file-block--image')
+    || blockEl.classList.contains('feishu-file-block--video-preview')
   ) {
     return rr.top + 20 - areaRectTop;
   }
@@ -2523,6 +2667,7 @@ export default function Editor({
   const [slashQuery, setSlashQuery] = useState('');
   const [slashMenuFromPlus, setSlashMenuFromPlus] = useState(false);
   const [slashMenuFromTableCellPlus, setSlashMenuFromTableCellPlus] = useState(false);
+  const tableCellSlashAnchorRef = useRef<HTMLElement | null>(null);
   const [pageLinkDialogVisible, setPageLinkDialogVisible] = useState(false);
   const [pageLinkPopPos, setPageLinkPopPos] = useState({ top: 0, left: 0 });
   const [pageLinkText, setPageLinkText] = useState('');
@@ -2602,7 +2747,12 @@ export default function Editor({
   const [plusHovered, setPlusHovered] = useState(false);
   const [blockGutterHovered, setBlockGutterHovered] = useState(false);
   const [rowHighlightBand, setRowHighlightBand] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
-  const [blockDragIndicator, setBlockDragIndicator] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [blockDragIndicator, setBlockDragIndicator] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height?: number;
+  } | null>(null);
   const blockDragPreviewRef = useRef<HTMLElement | null>(null);
   const blockDragStateRef = useRef<{
     source: HTMLElement;
@@ -2610,7 +2760,7 @@ export default function Editor({
     startY: number;
     dragging: boolean;
     dropTarget: HTMLElement | null;
-    placement: 'before' | 'after';
+    placement: BlockDragPlacement;
   } | null>(null);
 
   const setBlockGutterHoveredState = useCallback((value: boolean) => {
@@ -3341,7 +3491,7 @@ export default function Editor({
     revealBlockToolsFromInfo,
   ]);
 
-  const beginBlockDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>, sourceOverride?: HTMLElement) => {
+  const beginBlockDrag = useCallback((event: React.PointerEvent<HTMLButtonElement> | PointerEvent, sourceOverride?: HTMLElement) => {
     if (!editor || readOnly) return;
     const source = sourceOverride ?? activeBlockElRef.current;
     if (!source?.isConnected || !resolveDraggableBlockPos(editor, source)) return;
@@ -3407,9 +3557,12 @@ export default function Editor({
       const areaRect = area.getBoundingClientRect();
       const columnContent = getColumnContentFromBlock(target);
       const indicatorRect = columnContent?.isConnected ? columnContent.getBoundingClientRect() : targetRect;
-      const placement = clientY < targetRect.top + targetRect.height / 2 ? 'before' : 'after';
+
+      const placement: BlockDragPlacement = clientY < targetRect.top + targetRect.height / 2 ? 'before' : 'after';
+
       dragState.dropTarget = target;
       dragState.placement = placement;
+
       setBlockDragIndicator({
         top: (placement === 'before' ? targetRect.top : targetRect.bottom) - areaRect.top,
         left: columnContent?.isConnected ? indicatorRect.left - areaRect.left : 0,
@@ -3797,9 +3950,13 @@ export default function Editor({
       setSlashMenuFromPlus(false);
       setSlashMenuFromTableCellPlus(true);
       setSlashQuery('');
+      const anchor = (ev as CustomEvent<{ anchorEl?: HTMLElement }>).detail?.anchorEl ?? null;
+      tableCellSlashAnchorRef.current = anchor;
+      const baseX = typeof detail.x === 'number' ? detail.x : 0;
+      const baseY = typeof detail.y === 'number' ? detail.y : 0;
       setSlashMenuPos({
-        left: typeof detail.x === 'number' ? detail.x : 0,
-        top: typeof detail.y === 'number' ? detail.y : 0,
+        left: anchor ? anchor.getBoundingClientRect().right + 8 : baseX,
+        top: anchor ? anchor.getBoundingClientRect().bottom + 4 : baseY,
       });
       setSlashMenuVisible(true);
       editor.commands.focus();
@@ -4109,20 +4266,22 @@ export default function Editor({
     if (!editor || !row?.isConnected) return;
     try {
       const pos = editor.view.posAtDOM(row, 0);
-      const node = editor.state.doc.nodeAt(pos);
-      if (!node?.isBlock) {
+      const block = getBlockAtPos(editor, pos);
+      if (!block) {
         (editor as any).__plusInsertRange = null;
         editor.commands.focus();
         return;
       }
-      // 空段落：用 + 替换当前块；多维表格等非空/原子块：在块后插入，避免误删
-      const isEmptyParagraph = node.type.name === 'paragraph' && node.content.size === 0;
+      // 空段落：用 + 替换当前块；非空/原子块：在块后插入，避免误删
+      const isEmptyParagraph =
+        block.node.type.name === 'paragraph'
+        && block.node.textContent.trim().length === 0;
       if (isEmptyParagraph) {
-        (editor as any).__plusInsertRange = { from: pos, to: pos + node.nodeSize };
-        editor.chain().focus(Math.min(pos + 1, editor.state.doc.content.size)).run();
+        (editor as any).__plusInsertRange = { from: block.from, to: block.to };
+        editor.chain().focus(Math.min(block.from + 1, editor.state.doc.content.size)).run();
         return;
       }
-      const insertAt = pos + node.nodeSize;
+      const insertAt = block.to;
       (editor as any).__plusInsertRange = { from: insertAt, to: insertAt };
       editor.chain().focus().setTextSelection(Math.min(insertAt, editor.state.doc.content.size)).run();
     } catch {
@@ -4198,22 +4357,33 @@ export default function Editor({
         closeSlashMenu();
       }, 160);
     };
+    const updatePos = () => {
+      const anchor = tableCellSlashAnchorRef.current;
+      if (!anchor || !anchor.isConnected) return;
+      const rect = anchor.getBoundingClientRect();
+      setSlashMenuPos(prev => {
+        const next = { top: rect.bottom + 4, left: rect.right + 8 };
+        return prev.left === next.left && prev.top === next.top ? prev : next;
+      });
+    };
     const handlePointerMove = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) {
         scheduleClose();
         return;
       }
-      if (target.closest('.slash-menu, .slash-submenu-portal, .feishu-table-chrome__cell-handle')) {
+      if (target.closest('.slash-menu, .slash-submenu-portal, .feishu-table-chrome__cell-handle, .context-menu, .context-submenu-flyout, .slash-table-grid-flyout')) {
         cancelClose();
         return;
       }
       scheduleClose();
     };
     document.addEventListener('pointermove', handlePointerMove, true);
+    const cleanupLayout = bindFloatingLayoutListeners(updatePos, tableCellSlashAnchorRef.current ?? undefined);
     return () => {
       cancelClose();
       document.removeEventListener('pointermove', handlePointerMove, true);
+      cleanupLayout();
     };
   }, [closeSlashMenu, readOnly, slashMenuFromTableCellPlus, slashMenuVisible]);
 
@@ -4501,6 +4671,7 @@ export default function Editor({
                   top: blockDragIndicator.top,
                   left: blockDragIndicator.left,
                   width: blockDragIndicator.width,
+                  height: blockDragIndicator.height,
                 }}
               />
             )}

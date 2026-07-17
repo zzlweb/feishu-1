@@ -161,7 +161,12 @@ router.post('/import-url', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     const message = err instanceof Error ? err.message : '导入失败';
-    res.status(400).json({ code: -1, message });
+    const errorCode = err && typeof err === 'object' && typeof err.code === 'string' ? err.code : undefined;
+    res.status(400).json({
+      code: -1,
+      message,
+      ...(errorCode ? { error_code: errorCode } : {}),
+    });
   }
 });
 

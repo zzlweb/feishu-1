@@ -4,6 +4,9 @@ import { MessagePlugin } from 'tdesign-react';
 import {
   IMAGE_BLOCK_ACTION_EVENT,
   applyCropFromImageElement,
+  downloadImageSource,
+  getImageDisplayWidth,
+  getImageOriginalSource,
   isNearlyFullCrop,
   shouldShowImageCaption,
   type CropRect,
@@ -22,6 +25,7 @@ interface UseImageBlockInteractionsOptions {
   src: string;
   isLocalFileBlock?: boolean;
   uploadId?: string;
+  fileName?: string;
 }
 
 export function useImageBlockInteractions({
@@ -32,15 +36,20 @@ export function useImageBlockInteractions({
   src,
   isLocalFileBlock = false,
   uploadId = '',
+  fileName = 'image',
 }: UseImageBlockInteractionsOptions) {
-  const captionRef = useRef<HTMLInputElement>(null);
+  const captionRef = useRef<HTMLTextAreaElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const cropRectRef = useRef<CropRect | null>(null);
   const boundsRef = useRef<RenderedImageBounds>({ x: 0, y: 0, width: 0, height: 0 });
   const isApplyingCropRef = useRef(false);
   const [isCropping, setIsCropping] = useState(false);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const showCaption = shouldShowImageCaption(attrs);
+  const displayWidth = getImageDisplayWidth(attrs);
+  const originalSource = getImageOriginalSource(attrs, isLocalFileBlock);
+  const hasCrop = Boolean(originalSource);
 
   const setCropRectState = useCallback((next: CropRect | null) => {
     cropRectRef.current = next;
@@ -79,8 +88,13 @@ export function useImageBlockInteractions({
     try {
       const nextSrc = await applyCropFromImageElement(img, crop, bounds.width, bounds.height, src, { uploadId });
       const patch: Record<string, unknown> = isLocalFileBlock
-        ? { url: nextSrc, previewUrl: nextSrc, localObjectUrl: '' }
-        : { src: nextSrc };
+        ? {
+            url: nextSrc,
+            previewUrl: nextSrc,
+            localObjectUrl: '',
+            originalUrl: originalSource || src,
+          }
+        : { src: nextSrc, originalSrc: originalSource || src };
       updateAttributes(patch);
       setIsCropping(false);
       setCropRectState(null);
@@ -91,7 +105,7 @@ export function useImageBlockInteractions({
     } finally {
       isApplyingCropRef.current = false;
     }
-  }, [cancelCrop, isLocalFileBlock, setCropRectState, src, updateAttributes, uploadId]);
+  }, [cancelCrop, isLocalFileBlock, originalSource, setCropRectState, src, updateAttributes, uploadId]);
 
   const toggleCrop = useCallback(async () => {
     if (!src) {
@@ -117,6 +131,23 @@ export function useImageBlockInteractions({
   }, [handleCropConfirm, isCropping, setCropRectState, src]);
 
   const setAlign = (align: ImageAlign) => updateAttributes({ align });
+  const setDisplayWidth = (width: number) => updateAttributes({ displayWidth: Math.max(80, Math.round(width)) });
+  const openViewer = () => {
+    if (src) setIsViewerOpen(true);
+  };
+  const closeViewer = () => setIsViewerOpen(false);
+  const download = () => downloadImageSource(src, fileName);
+  const resetImage = useCallback(() => {
+    if (!originalSource) {
+      cancelCrop();
+      return;
+    }
+    const patch: Record<string, unknown> = isLocalFileBlock
+      ? { url: originalSource, previewUrl: originalSource, originalUrl: '' }
+      : { src: originalSource, originalSrc: '' };
+    updateAttributes(patch);
+    cancelCrop();
+  }, [cancelCrop, isLocalFileBlock, originalSource, updateAttributes]);
 
   const handleBoundsChange = useCallback((bounds: RenderedImageBounds) => {
     boundsRef.current = bounds;
@@ -161,6 +192,9 @@ export function useImageBlockInteractions({
       if (selection.from !== pos) return;
       if (detail.action === 'crop') toggleCrop();
       if (detail.action === 'focusCaption') focusCaption();
+      if (detail.action === 'reset') resetImage();
+      if (detail.action === 'preview') openViewer();
+      if (detail.action === 'download') download();
     };
     window.addEventListener(IMAGE_BLOCK_ACTION_EVENT, onAction as EventListener);
     return () => window.removeEventListener(IMAGE_BLOCK_ACTION_EVENT, onAction as EventListener);
@@ -170,7 +204,10 @@ export function useImageBlockInteractions({
     captionRef,
     imageRef,
     showCaption,
+    displayWidth,
+    hasCrop,
     isCropping,
+    isViewerOpen,
     cropRect,
     setCropRect: setCropRectState,
     focusCaption,
@@ -179,6 +216,11 @@ export function useImageBlockInteractions({
     handleCropConfirm,
     handleBoundsChange,
     setAlign,
+    setDisplayWidth,
     setNodeSelection,
+    openViewer,
+    closeViewer,
+    download,
+    resetImage,
   };
 }

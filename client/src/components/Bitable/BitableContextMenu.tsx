@@ -1,5 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { createPortal } from 'react-dom';
+import { Fragment, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { Editor } from '@tiptap/react';
 import { DOMSerializer } from '@tiptap/pm/model';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
@@ -22,7 +21,12 @@ import {
   applyEditorIndentIncrease,
   getEditorIndentUiState,
 } from '../Editor/blocks/blockIndent';
-import { isPointerWithinFloatingShell, bindFloatingLayoutListeners, useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../Editor/shared/floatingPanel';
+import { bindFloatingLayoutListeners } from '../Editor/shared/floatingPanel';
+import {
+  CONTEXT_MENU_SHELL_SELECTORS,
+  FloatingMenuPortal,
+  useFloatingMenuShell,
+} from '../Editor/shared/FloatingMenuShell';
 import '../Editor/menus/ContextMenu.less';
 import '../Editor/menus/SlashMenu.less';
 
@@ -229,77 +233,40 @@ export default function BitableContextMenu({
   const addBelowTriggerRef = useRef<HTMLDivElement>(null);
   const addBelowFlyoutRef = useRef<HTMLDivElement>(null);
   const indentFlyoutRef = useRef<HTMLDivElement>(null);
-  const { finalPos, posVisible } = useAnchoredContextMenuPosition(anchorRef, menuRef, { x, y });
   const [activeFlyout, setActiveFlyout] = useState<{ kind: 'indent' | 'below'; rect: DOMRect } | null>(null);
   const indentUi = getEditorIndentUiState(editor);
 
-  useEffect(() => {
-    const isWithinShell = (target: Node) => {
-      if (menuRef.current?.contains(target)) return true;
-      if (indentFlyoutRef.current?.contains(target)) return true;
-      if (addBelowFlyoutRef.current?.contains(target)) return true;
-      if (target instanceof Element && target.closest('.context-submenu-flyout, .context-add-below-flyout, .docx-menu-wrapper')) {
-        return true;
-      }
-      return false;
-    };
+  const dismissByHover = () => {
+    setActiveFlyout(null);
+    (onHoverDismiss ?? onClose)();
+  };
 
-    const handleClick = (e: MouseEvent) => {
-      if (e.button !== 0) return;
-      const t = e.target as Node;
-      if (isWithinShell(t)) return;
-      if (anchorRef?.current?.contains(t)) return;
-      onClose();
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('mousedown', handleClick);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [anchorRef, onClose]);
+  const {
+    finalPos,
+    posVisible,
+    keepHoverAlive,
+    scheduleClose,
+    containsTarget,
+  } = useFloatingMenuShell({
+    fallback: { x, y },
+    panelRef: menuRef,
+    anchorRef,
+    onClose,
+    onHoverDismiss: dismissByHover,
+    onMouseEnterCancel,
+    hoverRefs: [indentTriggerRef, addBelowTriggerRef, indentFlyoutRef, addBelowFlyoutRef],
+    hoverSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+    insideSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+  });
 
   const alignSelectionToBlockAnchor = () =>
     syncEditorSelectionToAnchoredBlock(editor, blockAnchorRef?.current ?? null);
 
-  const dismissByHover = () => {
-    (onHoverDismiss ?? onClose)();
-  };
-
-  const hoverGroup = useHoverFloatingGroup({
-    refs: [menuRef, indentTriggerRef, addBelowTriggerRef, indentFlyoutRef, addBelowFlyoutRef, anchorRef],
-    selectors: [
-      '.docx-menu-wrapper',
-      '.context-submenu-flyout',
-      '.context-add-below-flyout',
-      '.slash-table-grid-flyout',
-      '.slash-columns-count-flyout',
-    ],
-    closeDelay: 160,
-    onClose: () => {
-      setActiveFlyout(null);
-      dismissByHover();
-    },
-  });
-
-  const pointerStillInShell = (next: EventTarget | null): boolean =>
-    hoverGroup.containsTarget(next) || isPointerWithinFloatingShell(next, [menuRef, anchorRef], [
-      '.docx-menu-wrapper',
-      '.context-submenu-flyout',
-      '.context-add-below-flyout',
-    ]);
+  const pointerStillInShell = (next: EventTarget | null): boolean => containsTarget(next);
 
   const handleShellMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    hoverGroup.scheduleClose(e.relatedTarget);
-  };
-
-  const keepHoverAlive = () => {
-    hoverGroup.cancelClose();
-    onMouseEnterCancel?.();
+    scheduleClose(e.relatedTarget);
   };
 
   const openFlyout = (kind: 'indent' | 'below', triggerEl: HTMLElement) => {
@@ -308,7 +275,7 @@ export default function BitableContextMenu({
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    hoverGroup.scheduleClose(e.relatedTarget);
+    scheduleClose(e.relatedTarget);
   };
 
   useLayoutEffect(() => {
@@ -636,12 +603,13 @@ export default function BitableContextMenu({
     </div>
   );
 
-  return createPortal(
-    <Fragment>
-      {menuPanel}
-      {activeFlyout?.kind === 'indent' && flyoutPosition && indentFlyoutPanel}
-      {activeFlyout?.kind === 'below' && flyoutPosition && addBelowFlyoutPanel}
-    </Fragment>,
-    document.body,
+  return (
+    <FloatingMenuPortal>
+      <Fragment>
+        {menuPanel}
+        {activeFlyout?.kind === 'indent' && flyoutPosition && indentFlyoutPanel}
+        {activeFlyout?.kind === 'below' && flyoutPosition && addBelowFlyoutPanel}
+      </Fragment>
+    </FloatingMenuPortal>
   );
 }

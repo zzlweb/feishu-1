@@ -1,0 +1,196 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "baseline-server-build",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"server",
+				"run",
+				"build"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "baseline-server-tests",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"server",
+				"test"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "baseline-client-build",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"run",
+				"build"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "baseline-client-e2e",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"run",
+				"test:e2e"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "baseline-client-e2e-final",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"run",
+				"test:e2e",
+				"--",
+				"--workers=4"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "baseline-client-e2e-compact",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"run",
+				"test:e2e",
+				"--",
+				"--workers=4",
+				"--reporter=line"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "recheck-grid-e2e",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"run",
+				"test:e2e",
+				"--",
+				"tests/bitable-grid.spec.ts",
+				"--workers=1",
+				"--grep",
+				"grid filter group sort"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "recheck-public-block-e2e",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"run",
+				"test:e2e",
+				"--",
+				"tests/feishu-public-samples.spec.ts",
+				"--workers=1",
+				"--grep",
+				"non-bitable Feishu blocks"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "recheck-public-samples-e2e",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"run",
+				"test:e2e",
+				"--",
+				"tests/feishu-public-samples.spec.ts",
+				"--workers=4",
+				"--reporter=line"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "install-client-vitest",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"install",
+				"--save-dev",
+				"vitest@^2.1.9"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "client-unit-tests",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"run",
+				"test:unit"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "client-full-stack-e2e",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"--prefix",
+				"client",
+				"run",
+				"test:e2e:full-stack"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		}
+	]
+}

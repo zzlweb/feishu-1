@@ -12,7 +12,7 @@ import {
 import { BitableGalleryRecordContextMenu } from '../records/BitableGalleryRecordContextMenu';
 import { bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
 import { BitableCardField } from '../shared/BitableCardField';
-import { FileBadge, isPreviewImage } from '../shared/BitableViewShared';
+import { FileBadge, isPreviewImage, syncBitableDocAlign } from '../shared/BitableViewShared';
 
 export interface BitableGalleryGroup {
   key: string;
@@ -39,18 +39,15 @@ export interface BitableGalleryViewProps {
   onShareRecord: (recordId: string) => void;
   onCopyRecordLink: (recordId: string) => void;
   onDuplicateRecord: (recordId: string) => void;
-  onOpenRecord: (recordId: string) => void;
+  onOpenRecord: (
+    recordId: string,
+    modifiers?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean },
+  ) => void;
   onOpenComment: (recordId: string) => void;
 }
 
 function syncGalleryBleed(block: HTMLElement) {
-  const editorContainer = block.closest<HTMLElement>('.editor-container');
-  if (editorContainer) {
-    const paddingLeft = Number.parseFloat(getComputedStyle(editorContainer).paddingLeft) || 0;
-    block.style.setProperty('--bitable-doc-align-shift', `${paddingLeft}px`);
-  } else {
-    block.style.setProperty('--bitable-doc-align-shift', '0px');
-  }
+  syncBitableDocAlign(block);
   block.style.setProperty('--bitable-block-shift', '0px');
 }
 
@@ -127,7 +124,10 @@ function GalleryCard({
   table: BaseTable;
   config: GalleryViewConfig;
   selected: boolean;
-  onOpenRecord: (recordId: string) => void;
+  onOpenRecord: (
+    recordId: string,
+    modifiers?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean },
+  ) => void;
   onContextMenu: (event: ReactMouseEvent) => void;
   onDrop: (event: DragEvent) => void;
   onDragOver: (event: DragEvent) => void;
@@ -148,7 +148,11 @@ function GalleryCard({
       onMouseDown={stopPointer}
       onClick={event => {
         event.stopPropagation();
-        onOpenRecord(record.id);
+        onOpenRecord(record.id, {
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+        });
       }}
       onContextMenu={onContextMenu}
       onDragOver={onDragOver}
@@ -232,7 +236,7 @@ export function BitableGalleryView({
     const closeOnLayoutChange = () => closeRecordMenu();
     window.addEventListener('mousedown', handlePointerDown);
     window.addEventListener('keydown', handleKeyDown);
-    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange, undefined, { runImmediately: false });
     return () => {
       window.removeEventListener('mousedown', handlePointerDown);
       window.removeEventListener('keydown', handleKeyDown);

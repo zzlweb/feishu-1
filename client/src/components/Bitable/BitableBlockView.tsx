@@ -7,7 +7,11 @@ import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
 import { SlashGlyphBitableGrid, SlashGlyphGallery, SlashGlyphGantt, SlashGlyphKanban } from '../../icons/slashMenuGlyphs';
 import { BitableAddFieldPopover, BitableEditFieldPopover, buildNewFieldPayload, emptyDefaultValue, type CreateFieldInput, type UpdateFieldInput } from './fields/BitableAddFieldPopover';
 import { FieldLockGlyph, fieldTypeGlyph } from './fields/bitableFieldTypeIcons';
-import { BitableTooltip, useBitablePanelHoverHandlers } from './shared/BitableViewShared';
+import {
+  BitableTooltip,
+  useBitablePanelHoverHandlers,
+  useBitableToolbarPortalStyle,
+} from './shared/BitableViewShared';
 import { bindFloatingLayoutListeners } from '../Editor/shared/floatingPanel';
 import { BITABLE_TD_PORTAL_SELECTOR, BITABLE_TD_SELECT_POPUP_PROPS } from './shared/bitableTdesign';
 import { parseJsonPayload } from '../../api/http';
@@ -66,6 +70,7 @@ import { BitableGanttView } from './views/BitableGanttView';
 import { BitableKanbanView } from './views/BitableKanbanView';
 import { BitableGridView, type GridFieldMenuAction, type GridFieldMenuPosition } from './views/BitableGridView';
 import { BitableRecordCommentPanel } from './records/BitableRecordCommentPanel';
+import { syncBitableDocAlign } from './shared/BitableViewShared';
 import { BitableRecordCardModal } from './records/BitableRecordCardModal';
 import { createSelectChoice } from './fields/BitableSelectFieldEditor';
 
@@ -367,7 +372,7 @@ function ViewSidebarMenu({
               <button
                 type="button"
                 className={`base-view-sidebar__more${contextMenuViewId === view.id ? ' is-open' : ''}`}
-                aria-label="鏇村鎿嶄綔"
+                aria-label="更多操作"
                 onMouseDown={event => {
                   event.stopPropagation();
                   event.preventDefault();
@@ -688,6 +693,11 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
   const toolbarPanelRef = useRef<HTMLDivElement>(null);
+  const filterToolAnchorRef = useRef<HTMLSpanElement>(null);
+  const groupToolAnchorRef = useRef<HTMLSpanElement>(null);
+  const sortToolAnchorRef = useRef<HTMLSpanElement>(null);
+  const filterFloatAnchorRef = useRef<HTMLDivElement>(null);
+  const sortFloatAnchorRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const viewContextMenuRef = useRef<HTMLDivElement>(null);
   const fieldPanelAnchorRef = useRef<HTMLSpanElement>(null);
@@ -715,6 +725,10 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     const next = event.relatedTarget;
     if (next instanceof Node && viewHoverZoneRef.current?.contains(next)) return;
     if (next instanceof Element && next.closest('.block-inline-tools, .block-drag-row')) return;
+    // 工具栏面板挂 body，移入面板时不要隐藏 viewbar，否则按钮区闪隐并连带假 leave。
+    if (next instanceof Element && next.closest('.base-toolbar-panel--portal, .bitable-group-panel--portal, .bitable-sort-panel--portal, .bitable-toolbar__group-menu--portal')) {
+      return;
+    }
     if (blockRef.current?.classList.contains('is-block-gutter-active')) return;
     hideViewTools();
   }, [hideViewTools]);
@@ -795,16 +809,17 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     const block = blockRef.current;
     const parent = block?.parentElement;
     if (!block || !parent) return;
-    const measureAnchorWidth = () => {
+    const measureLayout = () => {
+      syncBitableDocAlign(block);
       block.style.setProperty('--bitable-anchor-width', `${Math.max(860, parent.clientWidth)}px`);
     };
-    measureAnchorWidth();
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measureAnchorWidth) : null;
+    measureLayout();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measureLayout) : null;
     ro?.observe(parent);
-    window.addEventListener('resize', measureAnchorWidth);
+    window.addEventListener('resize', measureLayout);
     return () => {
       ro?.disconnect();
-      window.removeEventListener('resize', measureAnchorWidth);
+      window.removeEventListener('resize', measureLayout);
     };
   }, []);
 
@@ -823,7 +838,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       setShowViewMenu(false);
       setShowSettings(false);
       setViewContextMenuId(null);
-      if (!(event.target instanceof Element) || !event.target.closest('.base-field-panel, .bitable-field, .base-viewbar__tool-anchor, .base-toolbar-panel, .bitable-group-panel, .bitable-sort-panel, .bitable-toolbar__group-menu, .base-viewbar__tool')) {
+      if (!(event.target instanceof Element) || !event.target.closest('.base-field-panel, .bitable-field, .base-settings, .base-viewbar__tool-anchor, .bitable-float-toolbar-btn-wrapper, .base-toolbar-panel, .bitable-group-panel, .bitable-sort-panel, .bitable-toolbar__group-menu, .base-viewbar__tool, .base-toolbar-panel--portal, .bitable-group-panel--portal, .bitable-sort-panel--portal')) {
         setActiveToolbarPanel(null);
       }
     };
@@ -861,7 +876,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     };
     const closeOnLayoutChange = () => setEditingFieldPanel(null);
     document.addEventListener('mousedown', close);
-    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
+    // 勿 runImmediately：挂载时立刻触发会把刚打开的弹层关掉
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange, undefined, { runImmediately: false });
     return () => {
       document.removeEventListener('mousedown', close);
       cleanupLayout();
@@ -882,7 +898,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     };
     const closeOnLayoutChange = () => setAddFieldPanel(null);
     document.addEventListener('mousedown', close);
-    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
+    // 勿 runImmediately：挂载时立刻触发会把刚打开的「新增字段」弹层关掉
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange, undefined, { runImmediately: false });
     return () => {
       document.removeEventListener('mousedown', close);
       cleanupLayout();
@@ -1044,14 +1061,21 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     setShowSettings(false);
     setCommentPanelOpen(false);
     const opening = activeToolbarPanel !== panel;
+    // 先打开面板，再异步补默认筛选条件，避免 mutate 重渲染触发假 mouseleave 立刻关掉面板。
+    setActiveToolbarPanel(current => current === panel ? null : panel);
     if (opening && panel === 'filter' && !activeView.locked && !(activeView.filters || []).length && table.fields[0]) {
       const firstFieldId = table.fields[0].id;
-      mutate(current => updateView(current, activeView.id, view => ({
-        ...view,
-        filters: [{ id: `filter_${Date.now().toString(36)}`, fieldId: firstFieldId, operator: 'equals', value: '' }],
-      })));
+      window.setTimeout(() => {
+        mutate(current => {
+          const view = current.views.find(item => item.id === activeView.id);
+          if (!view || (view.filters || []).length) return current;
+          return updateView(current, activeView.id, item => ({
+            ...item,
+            filters: [{ id: `filter_${Date.now().toString(36)}`, fieldId: firstFieldId, operator: 'equals', value: '' }],
+          }));
+        });
+      }, 0);
     }
-    setActiveToolbarPanel(current => current === panel ? null : panel);
   };
 
   const resolveCommentRecordId = useCallback(() => {
@@ -1595,6 +1619,55 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     return field.id;
   };
 
+  const ensureGanttDateFields = () => {
+    const existing = tableRef.current.fields.filter(field => field.type === 'date');
+    if (existing.length >= 2) {
+      const startId = existing[0].id;
+      const endId = existing[1].id;
+      setGanttConfig({ startDateFieldId: startId, endDateFieldId: endId });
+      return { startDateFieldId: startId, endDateFieldId: endId };
+    }
+    const stamp = Date.now().toString(36);
+    const additions: BaseField[] = [];
+    if (existing.length === 0) {
+      additions.push(
+        { id: `fld_start_date_${stamp}`, name: '开始日期', type: 'date' },
+        { id: `fld_end_date_${stamp}`, name: '结束日期', type: 'date' },
+      );
+    } else {
+      additions.push({ id: `fld_end_date_${stamp}`, name: '结束日期', type: 'date' });
+    }
+    const startId = existing[0]?.id || additions[0].id;
+    const endId = existing.length >= 1 ? additions[0].id : additions[1].id;
+    mutate(current => {
+      const fields = [...current.fields, ...additions];
+      return {
+        ...current,
+        fields,
+        records: current.records.map(record => ({
+          ...record,
+          fields: {
+            ...record.fields,
+            ...Object.fromEntries(additions.map(field => [field.id, ''])),
+          },
+        })),
+        views: current.views.map(view => (
+          view.type === 'gantt'
+            ? {
+              ...view,
+              config: {
+                ...getGanttConfig({ ...current, fields }, view),
+                startDateFieldId: startId,
+                endDateFieldId: endId,
+              },
+            }
+            : view
+        )),
+      };
+    });
+    return { startDateFieldId: startId, endDateFieldId: endId };
+  };
+
   const uploadAttachment = (recordId: string, file: File, requestedFieldId?: string) => {
     const fieldId = requestedFieldId || galleryConfig.coverFieldId || ensureAttachmentField();
     const localUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : '';
@@ -1694,6 +1767,38 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     setSelectedIds(new Set([recordId]));
   };
 
+  const selectGalleryRecord = (
+    recordId: string,
+    modifiers?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean },
+  ) => {
+    const additive = Boolean(modifiers?.ctrlKey || modifiers?.metaKey);
+    const range = Boolean(modifiers?.shiftKey);
+    if (range) {
+      const anchorId = selectionAnchorRef.current || recordId;
+      const anchorIndex = records.findIndex(record => record.id === anchorId);
+      const targetIndex = records.findIndex(record => record.id === recordId);
+      if (anchorIndex < 0 || targetIndex < 0) {
+        setSelectedIds(new Set([recordId]));
+        selectionAnchorRef.current = recordId;
+        return;
+      }
+      const [from, to] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+      setSelectedIds(new Set(records.slice(from, to + 1).map(record => record.id)));
+      return;
+    }
+    if (additive) {
+      setSelectedIds(current => {
+        const next = new Set(current);
+        if (next.has(recordId)) next.delete(recordId);
+        else next.add(recordId);
+        return next;
+      });
+      selectionAnchorRef.current = recordId;
+      return;
+    }
+    openGalleryRecord(recordId);
+  };
+
   const renderGallery = () => (
     <BitableGalleryView
       table={table}
@@ -1714,7 +1819,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       onShareRecord={() => openToolbarPanel('share')}
       onCopyRecordLink={copyRecordLink}
       onDuplicateRecord={duplicateRecord}
-      onOpenRecord={openGalleryRecord}
+      onOpenRecord={selectGalleryRecord}
       onOpenComment={recordId => openCommentPanel(recordId)}
     />
   );
@@ -1998,6 +2103,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       addRecord={() => addRecord()}
       locked={activeView.locked}
       scrollRef={ganttScrollRef}
+      onEnsureDateFields={ensureGanttDateFields}
     />
   );
 
@@ -2075,9 +2181,13 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           fields: current.fields.map(item => item.id === field.id
             ? { ...item, options: { ...item.options, choices: choices.map(option => option.id === choiceId ? { ...option, name: nextName } : option) } }
             : item),
-          records: current.records.map(record => valueText(record.fields[field.id]) === choice.name
-            ? withUpdatedValue(record, field.id, nextName, field.name)
-            : record),
+          // 重命名选项时把存旧 name 的记录迁移为 option id（id 稳定，重命名不影响值）。
+          records: current.records.map(record => {
+            const v = valueText(record.fields[field.id]);
+            return (v === choice.id || v === choice.name)
+              ? withUpdatedValue(record, field.id, choice.id, field.name)
+              : record;
+          }),
         };
       });
     };
@@ -2093,9 +2203,12 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           fields: current.fields.map(item => item.id === field.id
             ? { ...item, options: { ...item.options, choices: choices.filter(option => option.id !== choiceId) } }
             : item),
-          records: current.records.map(record => valueText(record.fields[field.id]) === choice.name
-            ? withUpdatedValue(record, field.id, '', field.name)
-            : record),
+          records: current.records.map(record => {
+            const v = valueText(record.fields[field.id]);
+            return (v === choice.id || v === choice.name)
+              ? withUpdatedValue(record, field.id, '', field.name)
+              : record;
+          }),
         };
       });
     };
@@ -2387,14 +2500,26 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                     </span>
                   </button>
                 </BitableTooltip>
-                {showSettings && (activeView.type === 'gallery' || activeView.type === 'kanban') && (
-                  <GalleryFieldCustomizePanel
-                    variant={activeView.type === 'kanban' ? 'kanban' : 'gallery'}
+                {showSettings && activeView.type === 'gallery' && (
+                  <GallerySettings
                     panelRef={settingsRef}
                     table={table}
                     view={activeView}
                     config={galleryConfig}
-                    onConfig={activeView.type === 'kanban' ? setKanbanConfig : setGalleryConfig}
+                    onClose={() => setShowSettings(false)}
+                    onConfig={setGalleryConfig}
+                    onTable={mutate}
+                    onEnsureAttachmentField={ensureAttachmentField}
+                  />
+                )}
+                {showSettings && activeView.type === 'kanban' && (
+                  <GalleryFieldCustomizePanel
+                    variant="kanban"
+                    panelRef={settingsRef}
+                    table={table}
+                    view={activeView}
+                    config={galleryConfig}
+                    onConfig={setKanbanConfig}
                     onEditField={editField}
                     onDeleteField={removeField}
                     onReorderFields={reorderFields}
@@ -2467,6 +2592,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             )}
             <div className="bitable-float-toolbar-btn-filter">
               <div
+                ref={filterFloatAnchorRef}
                 className={`bitable-float-toolbar-btn-wrapper${activeToolbarPanel === 'filter' ? ' is-panel-open' : ''}`}
                 {...filterPanelHover}
               >
@@ -2490,6 +2616,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                     view={activeView}
                     records={records}
                     panelRef={toolbarPanelRef}
+                    portalAnchorRef={filterFloatAnchorRef}
+                    panelHoverProps={filterPanelHover}
                     onClose={() => setActiveToolbarPanel(null)}
                     onTable={mutate}
                   />
@@ -2498,6 +2626,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             </div>
             <div className="bitable-float-toolbar-btn-sort">
               <div
+                ref={sortFloatAnchorRef}
                 className={`bitable-float-toolbar-btn-wrapper${activeToolbarPanel === 'sort' ? ' is-panel-open' : ''}`}
                 {...sortPanelHover}
               >
@@ -2517,6 +2646,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 {activeToolbarPanel === 'sort' && (
                   <SortConfigPanel
                     panelRef={toolbarPanelRef}
+                    portalAnchorRef={sortFloatAnchorRef}
+                    panelHoverProps={sortPanelHover}
                     table={table}
                     view={activeView}
                     onTable={mutate}
@@ -2620,10 +2751,12 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 onClose={() => setShowSettings(false)}
                 onConfig={setGanttConfig}
                 onTable={mutate}
+                onEnsureDateFields={ensureGanttDateFields}
               />
             )}
           </span>
           <span
+            ref={filterToolAnchorRef}
             className={`base-viewbar__tool-anchor${activeToolbarPanel === 'filter' ? ' is-panel-open' : ''}`}
             {...filterPanelHover}
           >
@@ -2637,12 +2770,15 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 view={activeView}
                 records={records}
                 panelRef={toolbarPanelRef}
+                portalAnchorRef={filterToolAnchorRef}
+                panelHoverProps={filterPanelHover}
                 onClose={() => setActiveToolbarPanel(null)}
                 onTable={mutate}
               />
             )}
           </span>
           <span
+            ref={groupToolAnchorRef}
             className={`base-viewbar__tool-anchor${activeToolbarPanel === 'group' ? ' is-panel-open' : ''}`}
             {...groupPanelHover}
           >
@@ -2655,6 +2791,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             {activeToolbarPanel === 'group' && activeView.type === 'grid' && (
               <GridGroupConfigPanel
                 panelRef={toolbarPanelRef}
+                portalAnchorRef={groupToolAnchorRef}
+                panelHoverProps={groupPanelHover}
                 table={table}
                 view={activeView}
                 onTable={mutate}
@@ -2667,12 +2805,15 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 view={activeView}
                 records={records}
                 panelRef={toolbarPanelRef}
+                portalAnchorRef={groupToolAnchorRef}
+                panelHoverProps={groupPanelHover}
                 onClose={() => setActiveToolbarPanel(null)}
                 onTable={mutate}
               />
             )}
           </span>
           <span
+            ref={sortToolAnchorRef}
             className={`base-viewbar__tool-anchor${activeToolbarPanel === 'sort' ? ' is-panel-open' : ''}`}
             {...sortPanelHover}
           >
@@ -2685,6 +2826,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
             {activeToolbarPanel === 'sort' && (
               <SortConfigPanel
                 panelRef={toolbarPanelRef}
+                portalAnchorRef={sortToolAnchorRef}
+                panelHoverProps={sortPanelHover}
                 table={table}
                 view={activeView}
                 onTable={mutate}
@@ -2824,6 +2967,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           onUploadAttachment={(recordId, fieldId, files) => {
             files.forEach(file => uploadAttachment(recordId, file, fieldId));
           }}
+          onAddComment={addRecordComment}
         />,
         document.body,
       )}
@@ -3056,7 +3200,7 @@ function FieldConfigPanel({
                   <button
                     type="button"
                     className={`base-view-sidebar__more${fieldMoreId === field.id ? ' is-open' : ''}`}
-                    aria-label="鏇村鎿嶄綔"
+                    aria-label="更多操作"
                     onMouseDown={event => {
                       event.stopPropagation();
                       event.preventDefault();
@@ -4115,27 +4259,39 @@ function GridGroupPanelContent({
 
 function GridGroupConfigPanel({
   panelRef,
+  portalAnchorRef,
+  panelHoverProps,
   table,
   view,
   onTable,
 }: {
   panelRef: RefObject<HTMLDivElement>;
+  portalAnchorRef?: RefObject<HTMLElement | null>;
+  panelHoverProps?: { onMouseEnter?: () => void; onMouseLeave?: (event: MouseEvent<HTMLElement>) => void };
   table: BaseTable;
   view: BaseView;
   onTable: (update: (table: BaseTable) => BaseTable) => void;
 }) {
-  return (
+  const portal = Boolean(portalAnchorRef);
+  const groupRuleCount = resolveGridGroupRules(view).length;
+  const portalWidth = groupRuleCount > 0 ? 480 : 320;
+  const portalStyle = useBitableToolbarPortalStyle(portal, portalAnchorRef, panelRef, portalWidth, groupRuleCount > 0 ? 320 : 160);
+  const panel = (
     <div
       ref={panelRef}
-      className="bitable-group b-ud-scrollbar bitable-group-panel"
+      className={`bitable-group b-ud-scrollbar bitable-group-panel${portal ? ' bitable-group-panel--portal' : ''}${groupRuleCount === 0 ? ' bitable-group-panel--empty' : ''}`}
       data-e2e="bitable-group-config-panel"
       data-no-marquee-selection="true"
       data-floating-panel="true"
+      style={portalStyle}
       onMouseDown={event => event.stopPropagation()}
+      onMouseEnter={panelHoverProps?.onMouseEnter}
+      onMouseLeave={panelHoverProps?.onMouseLeave}
     >
       <GridGroupPanelContent table={table} view={view} onTable={onTable} />
     </div>
   );
+  return portal ? createPortal(panel, document.body) : panel;
 }
 
 function ViewGroupMenuPanel({
@@ -4221,27 +4377,39 @@ function KanbanGroupMenuPanel(props: {
 
 function SortConfigPanel({
   panelRef,
+  portalAnchorRef,
+  panelHoverProps,
   table,
   view,
   onTable,
 }: {
   panelRef: RefObject<HTMLDivElement>;
+  portalAnchorRef?: RefObject<HTMLElement | null>;
+  panelHoverProps?: { onMouseEnter?: () => void; onMouseLeave?: (event: MouseEvent<HTMLElement>) => void };
   table: BaseTable;
   view: BaseView;
   onTable: (update: (table: BaseTable) => BaseTable) => void;
 }) {
-  return (
+  const portal = Boolean(portalAnchorRef);
+  const sortCount = (view.sorts || []).length;
+  const portalWidth = sortCount > 0 ? 480 : 360;
+  const portalStyle = useBitableToolbarPortalStyle(portal, portalAnchorRef, panelRef, portalWidth, sortCount > 0 ? 320 : 180);
+  const panel = (
     <div
       ref={panelRef}
-      className="bitable-group b-ud-scrollbar bitable-sort-panel"
+      className={`bitable-group b-ud-scrollbar bitable-sort-panel${portal ? ' bitable-sort-panel--portal' : ''}${sortCount === 0 ? ' bitable-sort-panel--empty' : ''}`}
       data-e2e="bitable-sort-config-panel"
       data-no-marquee-selection="true"
       data-floating-panel="true"
+      style={portalStyle}
       onMouseDown={event => event.stopPropagation()}
+      onMouseEnter={panelHoverProps?.onMouseEnter}
+      onMouseLeave={panelHoverProps?.onMouseLeave}
     >
       <SortPanelContent table={table} view={view} onTable={onTable} />
     </div>
   );
+  return portal ? createPortal(panel, document.body) : panel;
 }
 
 function SortPanelContent({
@@ -4441,6 +4609,8 @@ function ToolbarQuickPanel({
   view,
   records,
   panelRef,
+  portalAnchorRef,
+  panelHoverProps,
   onClose,
   onTable,
 }: {
@@ -4449,10 +4619,21 @@ function ToolbarQuickPanel({
   view: BaseView;
   records: BaseRecord[];
   panelRef: RefObject<HTMLDivElement>;
+  portalAnchorRef?: RefObject<HTMLElement | null>;
+  panelHoverProps?: { onMouseEnter?: () => void; onMouseLeave?: (event: MouseEvent<HTMLElement>) => void };
   onClose: () => void;
   onTable: (update: (table: BaseTable) => BaseTable) => void;
 }) {
   const filters = view.filters || [];
+  const portal = Boolean(portalAnchorRef);
+  const portalWidth = panel === 'filter' || panel === 'group' || panel === 'sort' ? 480 : panel === 'share' || panel === 'comment' ? 240 : 280;
+  const portalStyle = useBitableToolbarPortalStyle(
+    portal,
+    portalAnchorRef,
+    panelRef,
+    portalWidth,
+    panel === 'filter' ? 160 : 280,
+  );
 
   const updateCurrentView = (update: (current: BaseView) => BaseView) => {
     if (view.locked) return;
@@ -4491,15 +4672,19 @@ function ToolbarQuickPanel({
   const panelClassName = [
     'base-toolbar-panel',
     `base-toolbar-panel--${panel}`,
+    portal ? 'base-toolbar-panel--portal' : '',
   ].filter(Boolean).join(' ');
 
-  return (
+  const panelNode = (
     <div
       ref={panelRef}
       className={panelClassName}
       data-no-marquee-selection="true"
       data-floating-panel="true"
+      style={portalStyle}
       onMouseDown={event => event.stopPropagation()}
+      onMouseEnter={panelHoverProps?.onMouseEnter}
+      onMouseLeave={panelHoverProps?.onMouseLeave}
     >
       {panel !== 'filter' && !(panel === 'group' && view.type === 'grid') && panel !== 'sort' && (
         <header>
@@ -4525,6 +4710,12 @@ function ToolbarQuickPanel({
               <div
                 className={`base-toolbar-panel__filter-row${needsValue ? '' : ' base-toolbar-panel__filter-row--no-value'}`}
                 key={rule.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: needsValue ? '140px 112px minmax(0, 1fr) 24px' : '140px 112px 24px',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
               >
                 <FilterPanelSelect
                   className="base-toolbar-panel__filter-field-select"
@@ -4620,6 +4811,179 @@ function ToolbarQuickPanel({
       )}
     </div>
   );
+
+  return portal ? createPortal(panelNode, document.body) : panelNode;
+}
+
+function GallerySettings({
+  panelRef,
+  table,
+  view,
+  config,
+  onClose,
+  onConfig,
+  onTable,
+  onEnsureAttachmentField,
+}: {
+  panelRef: RefObject<HTMLDivElement>;
+  table: BaseTable;
+  view: BaseView;
+  config: GalleryViewConfig;
+  onClose: () => void;
+  onConfig: (patch: Partial<GalleryViewConfig>) => void;
+  onTable: (update: (table: BaseTable) => BaseTable) => void;
+  onEnsureAttachmentField: () => string;
+}) {
+  const attachmentFields = table.fields.filter(field => field.type === 'attachment');
+  const groupFields = table.fields.filter(field => (
+    field.type === 'text' || field.type === 'single_select' || field.type === 'number'
+  ));
+  const filterFieldId = view.filters?.[0]?.fieldId || '';
+  const filterValue = view.filters?.[0]?.value || '';
+
+  const updateFilters = (fieldId: string, value: string) => {
+    if (view.locked) return;
+    onTable(current => updateView(current, view.id, item => ({
+      ...item,
+      filters: fieldId
+        ? [{ id: item.filters?.[0]?.id || `filter_${Date.now().toString(36)}`, fieldId, operator: 'contains', value }]
+        : [],
+    })));
+  };
+
+  return (
+    <aside
+      ref={panelRef}
+      className="base-settings base-settings--gallery"
+      data-no-marquee-selection="true"
+      data-floating-panel="true"
+      onMouseDown={event => event.stopPropagation()}
+    >
+      <header>
+        <strong>画册设置</strong>
+        <button type="button" onClick={onClose}>×</button>
+      </header>
+
+      <label>
+        封面字段
+        <select
+          disabled={view.locked || attachmentFields.length === 0}
+          value={config.coverFieldId || ''}
+          onChange={event => onConfig({ coverFieldId: event.target.value || undefined })}
+        >
+          <option value="">未选择</option>
+          {attachmentFields.map(field => (
+            <option key={field.id} value={field.id}>{field.name}</option>
+          ))}
+        </select>
+      </label>
+
+      {attachmentFields.length === 0 && (
+        <div className="base-settings__hint">
+          当前没有附件字段
+          <button
+            type="button"
+            disabled={view.locked}
+            onClick={() => {
+              const fieldId = onEnsureAttachmentField();
+              onConfig({ coverFieldId: fieldId });
+            }}
+          >
+            创建附件字段
+          </button>
+        </div>
+      )}
+
+      <label>
+        卡片尺寸
+        <select
+          disabled={view.locked}
+          value={config.cardSize || 'medium'}
+          onChange={event => onConfig({ cardSize: event.target.value as GalleryViewConfig['cardSize'] })}
+        >
+          <option value="small">小</option>
+          <option value="medium">中</option>
+          <option value="large">大</option>
+        </select>
+      </label>
+
+      <label>
+        封面比例
+        <select
+          disabled={view.locked}
+          value={config.cardAspectRatio || '4:3'}
+          onChange={event => onConfig({
+            cardAspectRatio: event.target.value as GalleryViewConfig['cardAspectRatio'],
+          })}
+        >
+          <option value="1:1">1:1</option>
+          <option value="4:3">4:3</option>
+          <option value="16:9">16:9</option>
+          <option value="auto">自动</option>
+        </select>
+      </label>
+
+      <label>
+        分组字段
+        <select
+          disabled={view.locked}
+          value={config.groupByFieldId || ''}
+          onChange={event => onConfig({ groupByFieldId: event.target.value || undefined })}
+        >
+          <option value="">不分组</option>
+          {groupFields.map(field => (
+            <option key={field.id} value={field.id}>{field.name}</option>
+          ))}
+        </select>
+      </label>
+
+      <label>
+        筛选字段
+        <select
+          disabled={view.locked}
+          value={filterFieldId}
+          onChange={event => updateFilters(event.target.value, filterValue)}
+        >
+          <option value="">不筛选</option>
+          {table.fields.map(field => (
+            <option key={field.id} value={field.id}>{field.name}</option>
+          ))}
+        </select>
+      </label>
+
+      <label>
+        筛选内容
+        <input
+          disabled={view.locked || !filterFieldId}
+          placeholder="包含内容"
+          value={filterValue}
+          onChange={event => updateFilters(filterFieldId, event.target.value)}
+        />
+      </label>
+
+      <label>
+        搜索记录
+        <input
+          disabled={view.locked}
+          placeholder="搜索记录"
+          value={config.search || ''}
+          onChange={event => onConfig({ search: event.target.value })}
+        />
+      </label>
+
+      <footer>
+        <button
+          type="button"
+          onClick={() => onTable(current => updateView(current, view.id, item => ({
+            ...item,
+            locked: !item.locked,
+          })))}
+        >
+          {view.locked ? '解锁视图' : '锁定视图'}
+        </button>
+      </footer>
+    </aside>
+  );
 }
 
 function GanttSettings({
@@ -4630,6 +4994,7 @@ function GanttSettings({
   onClose,
   onConfig,
   onTable,
+  onEnsureDateFields,
 }: {
   table: BaseTable;
   view: BaseView;
@@ -4638,6 +5003,7 @@ function GanttSettings({
   onClose: () => void;
   onConfig: (patch: Partial<GanttViewConfig>) => void;
   onTable: (update: (table: BaseTable) => BaseTable) => void;
+  onEnsureDateFields: () => { startDateFieldId: string; endDateFieldId: string };
 }) {
   const dateFields = table.fields.filter(field => field.type === 'date');
   const titleOptions = table.fields
@@ -4652,10 +5018,17 @@ function GanttSettings({
     { label: '周', value: 60 },
     { label: '月', value: 40 },
     { label: '季', value: 24 },
+    { label: '年', value: 12 },
   ];
 
   return (
-    <aside ref={panelRef} className="base-settings base-settings--tdesign" data-no-marquee-selection="true" data-floating-panel="true">
+    <aside
+      ref={panelRef}
+      className="base-settings base-settings--tdesign base-settings--gantt"
+      data-no-marquee-selection="true"
+      data-floating-panel="true"
+      onMouseDown={event => event.stopPropagation()}
+    >
       <header><strong>甘特设置</strong><button type="button" onClick={onClose}>×</button></header>
       <label>
         视图名称
@@ -4687,12 +5060,27 @@ function GanttSettings({
           onChange={value => onConfig({ titleFieldId: String(value ?? '') })}
         />
       </label>
+      {dateFields.length === 0 && (
+        <div className="base-settings__hint">
+          当前没有日期字段
+          <button
+            type="button"
+            disabled={view.locked}
+            onClick={() => {
+              const ids = onEnsureDateFields();
+              onConfig({ startDateFieldId: ids.startDateFieldId, endDateFieldId: ids.endDateFieldId });
+            }}
+          >
+            创建日期字段
+          </button>
+        </div>
+      )}
       <div className="base-settings__row">
         <label>
           开始日期
           <Select
             size="small"
-            disabled={view.locked}
+            disabled={view.locked || dateOptions.length === 0}
             value={config.startDateFieldId || dateOptions[0]?.value || ''}
             options={dateOptions}
             popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
@@ -4703,7 +5091,7 @@ function GanttSettings({
           结束日期
           <Select
             size="small"
-            disabled={view.locked}
+            disabled={view.locked || dateOptions.length === 0}
             value={config.endDateFieldId || dateOptions[0]?.value || ''}
             options={dateOptions}
             popupProps={BITABLE_TD_SELECT_POPUP_PROPS}
@@ -4723,7 +5111,7 @@ function GanttSettings({
         />
       </label>
       <label>
-        字段
+        排序字段
         <Select
           size="small"
           disabled={view.locked}

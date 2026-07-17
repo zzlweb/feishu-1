@@ -48,6 +48,7 @@ export interface BitableGanttViewProps {
   addRecord: () => void;
   locked?: boolean;
   scrollRef: React.RefObject<HTMLDivElement>;
+  onEnsureDateFields?: () => void;
 }
 
 export function BitableGanttView({
@@ -76,12 +77,14 @@ export function BitableGanttView({
   addRecord,
   locked = false,
   scrollRef,
+  onEnsureDateFields,
 }: BitableGanttViewProps) {
   const isAllSelected = records.length > 0 && selectedIds.size === records.length;
+  const hasScheduleFields = Boolean(config.startDateFieldId && config.endDateFieldId);
 
   const timelineControls = (
     <div className="base-gantt__timeline-controls">
-      <div className="base-gantt__scale">
+      <div className="base-gantt__scale" role="group" aria-label="时间刻度">
         <button type="button" className={config.dayWidth >= 55 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 60 })}>周</button>
         <button type="button" className={config.dayWidth >= 35 && config.dayWidth < 55 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 40 })}>月</button>
         <button type="button" className={config.dayWidth >= 20 && config.dayWidth < 35 ? 'is-active' : ''} onClick={() => setGanttConfig({ dayWidth: 24 })}>季</button>
@@ -104,7 +107,21 @@ export function BitableGanttView({
         </div>
       </div>
 
-      <div className="base-gantt__scroll" ref={scrollRef}>
+      {!hasScheduleFields ? (
+        <div className="base-gantt__empty" data-testid="gantt-empty-state">
+          <strong>暂无日期字段</strong>
+          <p>甘特图需要开始日期与结束日期字段，才能显示时间轴上的任务条。</p>
+          <button
+            type="button"
+            disabled={locked || !onEnsureDateFields}
+            onClick={() => onEnsureDateFields?.()}
+          >
+            创建日期字段
+          </button>
+        </div>
+      ) : null}
+
+      <div className={`base-gantt__scroll${hasScheduleFields ? '' : ' is-empty-hidden'}`} ref={scrollRef}>
         <div className="base-gantt__container" style={{ minWidth: 'max-content', position: 'relative', ['--gantt-day-width' as string]: `${config.dayWidth}px` }}>
           <div className="base-gantt__header">
             <div className={`base-gantt__left-pane ${leftPanelCollapsed ? 'is-collapsed' : ''}`}>

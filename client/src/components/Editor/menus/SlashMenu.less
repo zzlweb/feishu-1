@@ -1,14 +1,10 @@
-@primary: #3370ff;
-@text-primary: #1f2329;
-@text-secondary: #8f959e;
-@bg-white: #ffffff;
-@bg-hover: #f5f6f7;
-@border-light: #e8e9eb;
-@font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+@import '../../../styles/feishu-tokens.less';
+
+@text-secondary: @text-placeholder;
 
 .slash-menu-feishu {
   position: fixed;
-  z-index: 9999;
+  z-index: var(--z-doc-menu, @z-doc-menu);
   box-sizing: border-box;
   width: min(252px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);

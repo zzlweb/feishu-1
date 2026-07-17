@@ -1,5 +1,4 @@
 import { Fragment, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
 import {
   FormatVerticalAlignCenterIcon,
@@ -8,6 +7,7 @@ import {
   IndentRightIcon,
   IndentLeftIcon,
 } from 'tdesign-icons-react';
+import { MessagePlugin } from 'tdesign-react';
 import { wrapIcon } from '../../../icons/wrap';
 import {
   ContextGlyphCut,
@@ -22,6 +22,7 @@ import {
 import { SlashGlyphSync } from '../../../icons/slashMenuGlyphs';
 import { IconChevronMenuEnd } from '../../../icons/feishuDoc';
 import { getInsertBelowPosition, insertBelowSlashItem, insertButtonBlockAt } from '../menus/insertBelowBlocks';
+import { getCurrentBlockRange, serializeRangeToHtml } from '../menus/ContextMenu';
 import { getActiveTableContext, insertFeishuTableAt } from './tableInsert';
 import { insertFeishuColumnsAt } from '../blocks/columnsInsert';
 import AddBelowSlashSections from '../menus/AddBelowSlashSections';
@@ -38,7 +39,12 @@ import {
   computeSubmenuFlyoutPosition,
 } from '../menus/contextSubmenuFlyout';
 import { computeTableBlockMenuPosition, getActiveTableFlags } from './tableMenu';
-import { useAnchoredContextMenuPosition, bindFloatingLayoutListeners, useHoverFloatingGroup } from '../shared/floatingPanel';
+import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
+import {
+  CONTEXT_MENU_SHELL_SELECTORS,
+  FloatingMenuPortal,
+  useFloatingMenuShell,
+} from '../shared/FloatingMenuShell';
 import {
   distributeSelectedTableColumns,
   removeActiveTable,
@@ -98,12 +104,30 @@ export default function TableContextMenu({
   const [subMenu, setSubMenu] = useState<string | null>(null);
   const [indentFlyoutPos, setIndentFlyoutPos] = useState<{ top: number; left: number } | null>(null);
   const [addBelowFlyoutPos, setAddBelowFlyoutPos] = useState<{ top: number; left: number } | null>(null);
-  const { finalPos, posVisible } = useAnchoredContextMenuPosition(
+
+  const dismissByHover = () => {
+    setSubMenu(null);
+    (onHoverDismiss ?? onClose)();
+  };
+
+  const {
+    finalPos,
+    posVisible,
+    keepHoverAlive,
+    scheduleClose,
+    containsTarget,
+  } = useFloatingMenuShell({
+    fallback: { x, y },
+    panelRef: menuRef,
     anchorRef,
-    menuRef,
-    { x, y },
-    computeTableBlockMenuPosition,
-  );
+    onClose,
+    onHoverDismiss: dismissByHover,
+    onMouseEnterCancel,
+    hoverRefs: [indentTriggerRef, addBelowTriggerRef, indentFlyoutRef, addBelowFlyoutRef],
+    hoverSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+    insideSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+    computePosition: computeTableBlockMenuPosition,
+  });
 
   const tableFlags = getActiveTableFlags(editor);
   const indentUi = getEditorIndentUiState(editor);
@@ -112,44 +136,16 @@ export default function TableContextMenu({
   const alignSelectionToBlockAnchor = () =>
     syncEditorSelectionToAnchoredBlock(editor, blockAnchorRef?.current ?? null);
 
-  const dismissByHover = () => {
-    (onHoverDismiss ?? onClose)();
-  };
-
-  const hoverGroup = useHoverFloatingGroup({
-    refs: [menuRef, indentTriggerRef, addBelowTriggerRef, indentFlyoutRef, addBelowFlyoutRef, anchorRef],
-    selectors: [
-      '.feishu-table-chrome',
-      '.context-menu',
-      '.context-submenu-flyout',
-      '.context-add-below-flyout',
-      '.slash-table-grid-flyout',
-      '.slash-columns-count-flyout',
-    ],
-    closeDelay: 160,
-    onClose: () => {
-      setSubMenu(null);
-      dismissByHover();
-    },
-  });
-
-  const pointerStillInShell = (next: EventTarget | null): boolean => {
-    return hoverGroup.containsTarget(next);
-  };
+  const pointerStillInShell = (next: EventTarget | null): boolean => containsTarget(next);
 
   const handleShellMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    hoverGroup.scheduleClose(e.relatedTarget);
+    scheduleClose(e.relatedTarget);
   };
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    hoverGroup.scheduleClose(e.relatedTarget);
-  };
-
-  const keepHoverAlive = () => {
-    hoverGroup.cancelClose();
-    onMouseEnterCancel?.();
+    scheduleClose(e.relatedTarget);
   };
 
   useLayoutEffect(() => {
@@ -228,6 +224,32 @@ export default function TableContextMenu({
     onClose();
   };
 
+  const handleShare = async () => {
+    await navigator.clipboard.writeText(window.location.href);
+    void MessagePlugin.success('分享链接已复制');
+    onClose();
+  };
+
+  const handleSaveTemplate = async () => {
+    alignSelectionToBlockAnchor();
+    const { from, to } = getCurrentBlockRange(editor);
+    const html = serializeRangeToHtml(editor, from, to);
+    const title = editor.state.doc.textBetween(from, to, ' ').trim().slice(0, 30) || '表格模板';
+    try {
+      const res = await fetch('/api/documents/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content: html, author: (editor as any).__author || '张正亮' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.code === 0) void MessagePlugin.success('已保存为模板');
+      else void MessagePlugin.error(json.message || '保存模板失败');
+    } catch (err) {
+      void MessagePlugin.error(err instanceof Error ? err.message : '保存模板失败');
+    }
+    onClose();
+  };
+
   const setAlign = (value: string) => {
     alignSelectionToBlockAnchor();
     setTextAlignment(editor, value as 'left' | 'center' | 'right');
@@ -270,9 +292,7 @@ export default function TableContextMenu({
   const submenuIconStroke = { strokeWidth: 2.75 };
 
   const indentFlyout =
-    subMenu === 'indent' &&
-    indentFlyoutPos &&
-    createPortal(
+    subMenu === 'indent' && indentFlyoutPos ? (
       <div
         ref={indentFlyoutRef}
         className="context-submenu-flyout context-align-flyout"
@@ -323,14 +343,11 @@ export default function TableContextMenu({
           </span>
           <span className="context-align-label">减少缩进</span>
         </button>
-      </div>,
-      document.body,
-    );
+      </div>
+    ) : null;
 
   const addBelowFlyout =
-    subMenu === 'addBelow' &&
-    addBelowFlyoutPos &&
-    createPortal(
+    subMenu === 'addBelow' && addBelowFlyoutPos ? (
       <div
         ref={addBelowFlyoutRef}
         className="slash-menu slash-menu-feishu context-add-below-flyout"
@@ -348,8 +365,8 @@ export default function TableContextMenu({
         onMouseLeave={handleFlyoutMouseLeave}
         onMouseDown={e => e.preventDefault()}
       >
-      <AddBelowSlashSections
-        onPickItem={(sectionTitle, item) => {
+        <AddBelowSlashSections
+          onPickItem={(sectionTitle, item) => {
             alignSelectionToBlockAnchor();
             insertBelowSlashItem(editor, sectionTitle, item);
             onClose();
@@ -375,9 +392,8 @@ export default function TableContextMenu({
             onClose();
           }}
         />
-      </div>,
-      document.body,
-    );
+      </div>
+    ) : null;
 
   const menuPanel = (
     <div
@@ -445,13 +461,13 @@ export default function TableContextMenu({
 
         <div className="context-menu-divider" />
 
-        <button type="button" className="context-menu-item" onClick={onClose}>
+        <button type="button" className="context-menu-item" onClick={() => void handleShare()}>
           <span className="context-menu-icon">
             <ContextGlyphShare size={18} fill={ICON_MUTED} />
           </span>
           <span style={{ flex: 1 }}>分享</span>
         </button>
-        <button type="button" className="context-menu-item" onClick={onClose}>
+        <button type="button" className="context-menu-item" onClick={() => void handleSaveTemplate()}>
           <span className="context-menu-icon">
             <ContextGlyphTemplate size={18} fill={ICON_MUTED} />
           </span>
@@ -516,12 +532,13 @@ export default function TableContextMenu({
       </div>
   );
 
-  return createPortal(
-    <Fragment>
-      {menuPanel}
-      {indentFlyout}
-      {addBelowFlyout}
-    </Fragment>,
-    document.body,
+  return (
+    <FloatingMenuPortal>
+      <Fragment>
+        {menuPanel}
+        {indentFlyout}
+        {addBelowFlyout}
+      </Fragment>
+    </FloatingMenuPortal>
   );
 }

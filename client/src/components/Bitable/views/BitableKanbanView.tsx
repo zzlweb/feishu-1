@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { valueText, getAttachments, selectCoverAttachment, type BaseField, type BaseRecord, type BaseTable, type GalleryViewConfig } from '../model/bitableModel';
+import { findSelectChoice, valueText, getAttachments, selectCoverAttachment, type BaseField, type BaseRecord, type BaseTable, type GalleryViewConfig } from '../model/bitableModel';
 import { BitableCardField } from '../shared/BitableCardField';
 import { bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
+import { syncBitableDocAlign } from '../shared/BitableViewShared';
 import { FileBadge, isPreviewImage, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
 
 const KANBAN_DOC_WIDTH = 860;
@@ -79,13 +80,7 @@ function resolveKanbanContentWidth(columnCount: number): number {
 }
 
 function syncKanbanDocAlign(block: HTMLElement) {
-  const editorContainer = block.closest<HTMLElement>('.editor-container');
-  if (editorContainer) {
-    const paddingLeft = Number.parseFloat(getComputedStyle(editorContainer).paddingLeft) || 0;
-    block.style.setProperty('--bitable-doc-align-shift', `${paddingLeft}px`);
-  } else {
-    block.style.setProperty('--bitable-doc-align-shift', '0px');
-  }
+  syncBitableDocAlign(block);
   block.style.setProperty('--bitable-kanban-width', `${KANBAN_DOC_WIDTH}px`);
 }
 
@@ -180,14 +175,16 @@ export function BitableKanbanView({
 
   const recordsByStatus = useMemo(() => {
     const grouped = new Map<string, BaseRecord[]>();
-    choices.forEach(choice => grouped.set(choice.name, []));
+    choices.forEach(choice => grouped.set(choice.id, []));
     records.forEach(record => {
-      const status = valueText(record.fields[statusField?.id || '']);
-      if (!grouped.has(status)) grouped.set(status, []);
-      grouped.get(status)?.push(record);
+      const raw = valueText(record.fields[statusField?.id || '']);
+      // 统一按选项 id 归组，兼容旧数据里存的 name。
+      const key = statusField ? (findSelectChoice(statusField, raw)?.id ?? raw) : raw;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)?.push(record);
     });
     return grouped;
-  }, [choices, records, statusField?.id]);
+  }, [choices, records, statusField]);
 
   const visibleFieldIds = config.visibleFieldIds.filter(fieldId => fieldId !== statusField?.id && fieldId !== table.primaryFieldId);
   const orderedChoices = useMemo(() => {
@@ -206,7 +203,7 @@ export function BitableKanbanView({
       !(config.hiddenGroupIds || []).includes(choice.id)
       && (
         config.showEmptyGroups !== false
-        || (recordsByStatus.get(choice.name)?.length ?? 0) > 0
+        || (recordsByStatus.get(choice.id)?.length ?? 0) > 0
         || (config.visibleEmptyGroupIds || []).includes(choice.id)
       )
     )),
@@ -379,7 +376,8 @@ export function BitableKanbanView({
     };
     const closeOnLayoutChange = () => setCardMenu(null);
     document.addEventListener('mousedown', handlePointerDown, true);
-    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
+    // 勿 runImmediately：挂载时立刻触发会把刚打开的菜单关掉
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange, undefined, { runImmediately: false });
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown, true);
@@ -401,7 +399,7 @@ export function BitableKanbanView({
     };
     const closeOnLayoutChange = () => setColumnMenu(null);
     document.addEventListener('mousedown', handlePointerDown, true);
-    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange, undefined, { runImmediately: false });
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown, true);
@@ -555,22 +553,22 @@ export function BitableKanbanView({
           }}
         >
           {visibleChoices.map(choice => {
-            const columnRecords = recordsByStatus.get(choice.name) ?? [];
+            const columnRecords = recordsByStatus.get(choice.id) ?? [];
             const isRenaming = renamingChoiceId === choice.id;
             const isColumnMenuOpen = columnMenu?.choiceId === choice.id;
 
             return (
               <section
                 key={choice.id}
-                className={`base-kanban__column${dropStatus === choice.name ? ' is-drop-target' : ''}`}
+                className={`base-kanban__column${dropStatus === choice.id ? ' is-drop-target' : ''}`}
                 style={{ ['--kanban-accent' as string]: choice.color }}
                 onDragOver={event => {
                   if (locked) return;
                   event.preventDefault();
-                  setDropStatus(choice.name);
+                  setDropStatus(choice.id);
                 }}
-                onDragLeave={() => setDropStatus(current => current === choice.name ? null : current)}
-                onDrop={event => onCardDrop(event, choice.name)}
+                onDragLeave={() => setDropStatus(current => current === choice.id ? null : current)}
+                onDrop={event => onCardDrop(event, choice.id)}
                 role="listitem"
               >
                 <header className="base-kanban__column-header">
@@ -603,7 +601,7 @@ export function BitableKanbanView({
                         className="base-kanban__column-action"
                         aria-label={`在 ${choice.name} 下新建记录`}
                         disabled={locked}
-                        onClick={() => addRecordToColumn(choice.name)}
+                        onClick={() => addRecordToColumn(choice.id)}
                       >
                         +
                       </button>
@@ -669,29 +667,31 @@ export function BitableKanbanView({
                             <KanbanCardCover record={record} config={config} />
                           </div>
                         ) : null}
-                        <strong className={`base-kanban__card-title${rawTitle ? '' : ' is-empty'}`}>{title}</strong>
-                        {timeText ? (
-                          <div className="base-kanban__card-time">
-                            <span aria-hidden>▣</span>
-                            <span>{timeText}</span>
-                          </div>
-                        ) : null}
-                        {visibleFieldIds.map(fieldId => {
-                          const field = table.fields.find(item => item.id === fieldId);
-                          if (!field) return null;
-                          if (field.name === '时间') return null;
-                          const value = record.fields[fieldId];
-                          return (
-                            <BitableCardField
-                              key={field.id}
-                              field={field}
-                              value={value}
-                              showFieldName={config.showFieldNames}
-                              showEmptyValue={config.showEmptyFields}
-                              variant="kanban"
-                            />
-                          );
-                        })}
+                        <div className="base-kanban__card-body">
+                          <strong className={`base-kanban__card-title${rawTitle ? '' : ' is-empty'}`}>{title}</strong>
+                          {timeText ? (
+                            <div className="base-kanban__card-time">
+                              <span aria-hidden>▣</span>
+                              <span>{timeText}</span>
+                            </div>
+                          ) : null}
+                          {visibleFieldIds.map(fieldId => {
+                            const field = table.fields.find(item => item.id === fieldId);
+                            if (!field) return null;
+                            if (field.name === '时间') return null;
+                            const value = record.fields[fieldId];
+                            return (
+                              <BitableCardField
+                                key={field.id}
+                                field={field}
+                                value={value}
+                                showFieldName={config.showFieldNames}
+                                showEmptyValue={config.showEmptyFields}
+                                variant="kanban"
+                              />
+                            );
+                          })}
+                        </div>
                       </article>
                     );
                   })}
@@ -703,7 +703,7 @@ export function BitableKanbanView({
                     className="base-kanban__column-add"
                     aria-label={`在 ${choice.name} 下添加记录`}
                     disabled={locked}
-                    onClick={() => addRecordToColumn(choice.name)}
+                    onClick={() => addRecordToColumn(choice.id)}
                   >
                     + 新建任务
                   </button>
@@ -750,7 +750,7 @@ export function BitableKanbanView({
           <button type="button" disabled={locked} onClick={() => { moveGroup(columnMenuChoice.id, -1); setColumnMenu(null); }}>左移分组</button>
           <button type="button" disabled={locked} onClick={() => { moveGroup(columnMenuChoice.id, 1); setColumnMenu(null); }}>右移分组</button>
           <button type="button" disabled={locked} onClick={() => hideGroup(columnMenuChoice.id)}>隐藏分组</button>
-          <button type="button" disabled={locked} onClick={() => { addRecordToColumn(columnMenuChoice.name); setColumnMenu(null); }}>新建记录</button>
+          <button type="button" disabled={locked} onClick={() => { addRecordToColumn(columnMenuChoice.id); setColumnMenu(null); }}>新建记录</button>
           <button type="button" className="is-danger" disabled={locked} onClick={() => { deleteGroup(columnMenuChoice.id); setColumnMenu(null); }}>删除分组</button>
         </div>,
         document.body,

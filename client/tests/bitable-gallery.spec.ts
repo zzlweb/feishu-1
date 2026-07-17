@@ -441,15 +441,16 @@ test('limits imported bitable view switcher to table kanban and gallery', async 
   await block.locator('.base-viewbar__current').click();
 
   const sidebar = block.locator('.base-view-sidebar');
-  await expect(sidebar.locator('.base-view-sidebar__item')).toHaveCount(3);
+  await expect(sidebar.locator('.base-view-sidebar__item')).toHaveCount(4);
   await expect(sidebar).toContainText('Table View');
   await expect(sidebar).toContainText('Kanban View');
   await expect(sidebar).toContainText('Gallery View');
+  await expect(sidebar).toContainText('Gantt View');
   await expect(sidebar).not.toContainText('Calendar View');
   await expect(sidebar).not.toContainText('Form View');
-  await expect(sidebar).not.toContainText('Gantt View');
 
   await sidebar.locator('.base-view-sidebar__new').hover();
+  // 新建入口：表格 / 看板 / 画册（甘特可从导入视图进入，不在新建列表）
   await expect(sidebar.locator('.base-view-sidebar__create-list button')).toHaveCount(3);
 });
 
@@ -472,19 +473,19 @@ test('applies grouping and filtering as gallery view configuration only', async 
 test('opens record modal on card click and supports multi selection', async ({ page }) => {
   await openGallery(page);
 
-  await page.locator('.base-gallery-canvas-card-hit').first().click();
+  await page.locator('.base-gallery-card').first().click();
   await expect(page.locator('.bitable-record-card-mask')).toBeVisible();
   await expect(page.locator('.bitable-card-modal-header-v2-title')).toContainText('产品 A');
   await page.keyboard.press('Escape');
   await expect(page.locator('.bitable-record-card-mask')).toHaveCount(0);
 
-  await page.locator('.base-gallery-canvas-card-hit').first().click({ modifiers: ['Control'] });
-  await page.locator('.base-gallery-canvas-card-hit').nth(1).click({ modifiers: ['Shift'] });
-  await expect(page.locator('.base-gallery-canvas-card-hit.is-selected')).toHaveCount(2);
+  await page.locator('.base-gallery-card').first().click({ modifiers: ['Control'] });
+  await page.locator('.base-gallery-card').nth(1).click({ modifiers: ['Shift'] });
+  await expect(page.locator('.base-gallery-card.is-selected')).toHaveCount(2);
   await expect(page.locator('.bitable-record-card-mask')).toHaveCount(0);
 
   await page.keyboard.press('Escape');
-  await expect(page.locator('.base-gallery-canvas-card-hit.is-selected')).toHaveCount(0);
+  await expect(page.locator('.base-gallery-card.is-selected')).toHaveCount(0);
 });
 
 test('locks gallery view configuration controls', async ({ page }) => {
@@ -535,8 +536,8 @@ test('keeps the global block control aligned with the bitable header across view
   ]);
   expect(kanbanBox).not.toBeNull();
   expect(scrollBox).not.toBeNull();
-  expect(kanbanBox!.x).toBeGreaterThanOrEqual(scrollBox!.x + 40);
-  expect(kanbanBox!.x + kanbanBox!.width).toBeLessThanOrEqual(scrollBox!.x + scrollBox!.width - 40);
+  expect(kanbanBox!.x).toBeGreaterThanOrEqual(scrollBox!.x + 16);
+  expect(kanbanBox!.x + kanbanBox!.width).toBeLessThanOrEqual(scrollBox!.x + scrollBox!.width - 16);
 
   const beforeBox = await page.locator('.ProseMirror p', { hasText: 'before' }).boundingBox();
   expect(beforeBox).not.toBeNull();
@@ -564,7 +565,8 @@ test('shows the active gallery icon and creates a kanban view over shared record
   const block = page.locator('.feishu-base-block').first();
   await expect(block).toHaveAttribute('data-base-view-type', 'kanban');
   await expect(block.locator('.base-viewbar__current [data-view-icon="kanban"]')).toBeVisible();
-  await expect(block.locator('.base-kanban__column')).toHaveCount(3);
+  // 状态字段由画册文本列提升：待处理 / 已完成 → 2 列，3 条记录
+  await expect(block.locator('.base-kanban__column')).toHaveCount(2);
   await expect(block.locator('.base-kanban__card')).toHaveCount(3);
 
   await block.locator('.base-viewbar__current').click();

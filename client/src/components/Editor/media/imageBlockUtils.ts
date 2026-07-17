@@ -4,7 +4,7 @@ import { getMediaUploadFile } from './mediaUploadRegistry';
 
 export type ImageAlign = 'left' | 'center' | 'right';
 
-export type ImageBlockAction = 'crop' | 'focusCaption';
+export type ImageBlockAction = 'crop' | 'focusCaption' | 'reset' | 'preview' | 'download';
 
 export interface CropRect {
   x: number;
@@ -34,6 +34,30 @@ export function normalizeImageAlign(raw: unknown): ImageAlign {
 export function shouldShowImageCaption(attrs: Record<string, unknown>): boolean {
   if (attrs.captionVisible === true || attrs.captionVisible === 'true') return true;
   return String(attrs.caption || '').trim().length > 0;
+}
+
+export function getImageDisplayWidth(attrs: Record<string, unknown>): number | null {
+  const value = Number(attrs.displayWidth);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+export function getImageOriginalSource(
+  attrs: Record<string, unknown>,
+  isLocalFileBlock: boolean,
+): string {
+  const value = isLocalFileBlock ? attrs.originalUrl : attrs.originalSrc;
+  return typeof value === 'string' ? value : '';
+}
+
+export function downloadImageSource(src: string, fileName = 'image') {
+  if (!src) return;
+  const anchor = document.createElement('a');
+  anchor.href = src;
+  anchor.download = fileName || 'image';
+  anchor.rel = 'noreferrer';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 export function isImageBlockNode(node: { type: { name: string }; attrs: Record<string, unknown> }): boolean {

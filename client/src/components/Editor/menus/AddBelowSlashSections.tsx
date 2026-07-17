@@ -44,7 +44,11 @@ export default function AddBelowSlashSections({
 
   useEffect(() => {
     if (!activeSubmenu) return undefined;
-    return bindFloatingLayoutListeners(() => setActiveSubmenu(null));
+    return bindFloatingLayoutListeners(
+      () => setActiveSubmenu(null),
+      undefined,
+      { runImmediately: false },
+    );
   }, [activeSubmenu]);
 
   const submenuPosition = activeSubmenu

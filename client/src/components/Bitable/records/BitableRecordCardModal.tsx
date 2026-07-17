@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Checkbox, Input, Popup, Select, Switch, Upload } from 'tdesign-react';
+import { Button, Checkbox, Input, Select, Switch, Upload } from 'tdesign-react';
 import { CalendarIcon } from 'tdesign-icons-react';
 import type { PopupProps } from 'tdesign-react';
 import { FLOATING_Z_INDEX, bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
@@ -13,6 +13,7 @@ import {
   formatCardDateValue,
   getAttachments,
   normalizeColorValue,
+  normalizeMultiSelectIds,
   textColorForBackground,
   valueText,
   type AttachmentValue,
@@ -38,6 +39,7 @@ export interface BitableRecordCardModalProps {
   onDelete?: (recordId: string) => void;
   onAddField?: () => void;
   onUploadAttachment?: (recordId: string, fieldId: string, files: File[]) => void;
+  onAddComment?: (recordId: string, content: string) => void;
 }
 
 function fieldPlaceholder(field: BaseField) {
@@ -47,30 +49,72 @@ function fieldPlaceholder(field: BaseField) {
   return '请输入内容';
 }
 
-/** 卡片弹层 z-index 为 10060，TDesign 浮层需挂到 body 并抬高层级 */
+/** 遮罩/白卡为 bitableModal；子浮层挂 body 并用 bitableMenu 压在遮罩之上 */
 const CARD_MODAL_POPUP_PROPS: PopupProps = {
   attach: () => document.body,
-  zIndex: FLOATING_Z_INDEX.bitableModal,
+  zIndex: FLOATING_Z_INDEX.bitableMenu,
 };
 
 const ATTACHMENT_PANEL_WIDTH = 360;
 const ATTACHMENT_PANEL_HEIGHT = 240;
+const DATE_PANEL_WIDTH = 280;
+const DATE_PANEL_HEIGHT = 360;
 const CARD_MODAL_POPUP_MARGIN = 12;
 
-function clampAttachmentPanelPosition(trigger: DOMRect, boundary?: DOMRect | null) {
-  let left = trigger.right - ATTACHMENT_PANEL_WIDTH;
+function clampCardModalPanelPosition(
+  trigger: DOMRect,
+  panelWidth: number,
+  panelHeight: number,
+  boundary?: DOMRect | null,
+  preferRightAlign = false,
+) {
+  let left = preferRightAlign ? trigger.right - panelWidth : trigger.left;
   let top = trigger.bottom + 4;
   const minLeft = boundary ? boundary.left + CARD_MODAL_POPUP_MARGIN : CARD_MODAL_POPUP_MARGIN;
   const maxLeft = boundary
-    ? boundary.right - ATTACHMENT_PANEL_WIDTH - CARD_MODAL_POPUP_MARGIN
-    : window.innerWidth - ATTACHMENT_PANEL_WIDTH - CARD_MODAL_POPUP_MARGIN;
+    ? boundary.right - panelWidth - CARD_MODAL_POPUP_MARGIN
+    : window.innerWidth - panelWidth - CARD_MODAL_POPUP_MARGIN;
   const minTop = boundary ? boundary.top + CARD_MODAL_POPUP_MARGIN : CARD_MODAL_POPUP_MARGIN;
   const maxTop = boundary
-    ? boundary.bottom - ATTACHMENT_PANEL_HEIGHT - CARD_MODAL_POPUP_MARGIN
-    : window.innerHeight - ATTACHMENT_PANEL_HEIGHT - CARD_MODAL_POPUP_MARGIN;
-  left = Math.max(minLeft, Math.min(left, maxLeft));
-  top = Math.max(minTop, Math.min(top, maxTop));
+    ? boundary.bottom - panelHeight - CARD_MODAL_POPUP_MARGIN
+    : window.innerHeight - panelHeight - CARD_MODAL_POPUP_MARGIN;
+  left = Math.max(minLeft, Math.min(left, Math.max(minLeft, maxLeft)));
+  top = Math.max(minTop, Math.min(top, Math.max(minTop, maxTop)));
   return { left, top };
+}
+
+/** 锚定字段右侧「+」：优先右对齐到触发按钮，再限制在白色 modal 内 */
+function clampAttachmentPanelPosition(trigger: DOMRect, boundary?: DOMRect | null) {
+  const preferred = clampCardModalPanelPosition(
+    trigger,
+    ATTACHMENT_PANEL_WIDTH,
+    ATTACHMENT_PANEL_HEIGHT,
+    boundary,
+    true,
+  );
+  // 若右侧对齐后离 + 过远（被 clamp 推走），改贴齐 + 左侧仍保持在边界内
+  const rightAlignedLeft = trigger.right - ATTACHMENT_PANEL_WIDTH;
+  if (boundary && Math.abs(preferred.left - rightAlignedLeft) > 24) {
+    const leftAligned = clampCardModalPanelPosition(
+      trigger,
+      ATTACHMENT_PANEL_WIDTH,
+      ATTACHMENT_PANEL_HEIGHT,
+      boundary,
+      false,
+    );
+    return leftAligned;
+  }
+  return preferred;
+}
+
+function clampDatePanelPosition(trigger: DOMRect, boundary?: DOMRect | null) {
+  return clampCardModalPanelPosition(
+    trigger,
+    DATE_PANEL_WIDTH,
+    DATE_PANEL_HEIGHT,
+    boundary,
+    false,
+  );
 }
 
 function formatCardDateDisplay(value: CellValue): string {
@@ -385,7 +429,12 @@ function AttachmentUploadPopover({
           ref={popoverRef}
           tabIndex={-1}
           className={`bitable-card-attachment-popover-panel bitable-card-attachment-popover-panel--portal${isDragging ? ' is-dragging' : ''}`}
-          style={{ left: panelPosition.left, top: panelPosition.top }}
+          data-e2e="bitable-card-attachment-panel"
+          style={{
+            left: panelPosition.left,
+            top: panelPosition.top,
+            zIndex: FLOATING_Z_INDEX.bitableMenu,
+          }}
           onMouseDown={event => event.stopPropagation()}
           onPaste={event => {
             const files = Array.from(event.clipboardData.files);
@@ -454,15 +503,19 @@ function DateFieldEditor({
   value,
   disabled,
   onChange,
+  modalBoundaryRef,
 }: {
   field: BaseField;
   value: CellValue;
   disabled?: boolean;
   onChange: (value: CellValue) => void;
+  modalBoundaryRef?: RefObject<HTMLElement | null>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [panelPosition, setPanelPosition] = useState({ left: 0, top: 0 });
   const [reminderEnabled, setReminderEnabled] = useState(false);
   const displayValue = formatCardDateDisplay(value);
   const pickerValue = toNativeDateValue(value) || undefined;
@@ -476,31 +529,86 @@ function DateFieldEditor({
     [pickerValue, viewMonth.monthIndex, viewMonth.year],
   );
 
+  function closePanel() {
+    setOpen(false);
+  }
+
+  function openPanel(trigger: HTMLElement) {
+    if (disabled) return;
+    const boundary = modalBoundaryRef?.current?.getBoundingClientRect();
+    setPanelPosition(clampDatePanelPosition(trigger.getBoundingClientRect(), boundary));
+    setOpen(true);
+  }
+
   useEffect(() => {
     if (!open) return;
     const nextParts = parseDateParts(pickerValue || todayDateValue())!;
     setViewMonth({ year: nextParts.year, monthIndex: nextParts.monthIndex });
   }, [open, pickerValue]);
 
-  useCardModalOutsideDismiss(open, () => setOpen(false), rootRef, target => {
+  useEffect(() => {
+    if (!open) return undefined;
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger?.isConnected) {
+        closePanel();
+        return;
+      }
+      const boundary = modalBoundaryRef?.current?.getBoundingClientRect();
+      setPanelPosition(clampDatePanelPosition(trigger.getBoundingClientRect(), boundary));
+    };
+    updatePosition();
+    const raf = window.requestAnimationFrame(updatePosition);
+    const cleanupLayout = bindFloatingLayoutListeners(updatePosition, triggerRef.current);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      cleanupLayout();
+    };
+  }, [modalBoundaryRef, open]);
+
+  useCardModalOutsideDismiss(open, closePanel, rootRef, target => {
     return panelRef.current?.contains(target) ?? false;
   });
 
   return (
     <div ref={rootRef} className="bitable-card-field-value bitable-card-field-value--tdesign bitable-card-field-value--date">
-      <Popup
-        visible={open}
-        trigger="click"
-        placement="bottom-left"
-        showArrow={false}
-        destroyOnClose={false}
-        disabled={disabled}
-        overlayClassName="bitable-card-date-popup bitable-card-date-popup--portal"
-        overlayInnerStyle={{ padding: 0 }}
-        attach={CARD_MODAL_POPUP_PROPS.attach}
-        zIndex={CARD_MODAL_POPUP_PROPS.zIndex}
-        content={(
-          <div ref={panelRef} className="bitable-card-date-shell">
+      <div
+        ref={triggerRef}
+        className="bitable-card-date-input-wrap"
+        onMouseDown={event => event.stopPropagation()}
+        onClick={() => {
+          if (disabled) return;
+          if (open) {
+            closePanel();
+            return;
+          }
+          if (triggerRef.current) openPanel(triggerRef.current);
+        }}
+      >
+        <Input
+          className="bitable-card-tdesign-control"
+          borderless
+          readonly
+          value={displayValue}
+          disabled={disabled}
+          placeholder={fieldPlaceholder(field)}
+          suffixIcon={<CalendarIcon />}
+        />
+      </div>
+      {open && createPortal(
+        <div
+          ref={panelRef}
+          className="bitable-card-date-popup bitable-card-date-popup--portal"
+          data-e2e="bitable-card-date-panel"
+          style={{
+            position: 'fixed',
+            left: panelPosition.left,
+            top: panelPosition.top,
+            zIndex: FLOATING_Z_INDEX.bitableMenu,
+          }}
+          onMouseDown={event => event.stopPropagation()}
+        >
+          <div className="bitable-card-date-shell">
             <div className="bitable-card-date-calendar">
               <div className="bitable-card-date-calendar__header">
                 <button
@@ -546,7 +654,7 @@ function DateFieldEditor({
                     ].filter(Boolean).join(' ')}
                     onClick={() => {
                       onChange(day.dateValue);
-                      setOpen(false);
+                      closePanel();
                     }}
                   >
                     {day.day}
@@ -568,24 +676,9 @@ function DateFieldEditor({
               />
             </div>
           </div>
-        )}
-        onVisibleChange={visible => {
-          if (disabled) return;
-          setOpen(visible);
-        }}
-      >
-        <div className="bitable-card-date-input-wrap">
-          <Input
-            className="bitable-card-tdesign-control"
-            borderless
-            readonly
-            value={displayValue}
-            disabled={disabled}
-            placeholder={fieldPlaceholder(field)}
-            suffixIcon={<CalendarIcon />}
-          />
-        </div>
-      </Popup>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -605,9 +698,10 @@ function SelectFieldEditor({
   const [popupOpen, setPopupOpen] = useState(false);
   const choices = field.options?.choices ?? [];
   const isMultiple = field.type === 'multi_select';
+  // 统一按选项 id 读写；兼容旧数据里存的 name（findSelectChoice/normalize 已处理）。
   const current = isMultiple
-    ? (Array.isArray(value) ? value : valueText(value) ? [valueText(value)] : [])
-    : valueText(value);
+    ? normalizeMultiSelectIds(field, value)
+    : (findSelectChoice(field, valueText(value))?.id ?? valueText(value));
 
   useCardModalOutsideDismiss(popupOpen, () => setPopupOpen(false), rootRef, isSelectDropdownTarget);
 
@@ -619,7 +713,7 @@ function SelectFieldEditor({
         clearable
         disabled={disabled}
         multiple={isMultiple}
-        options={choices.map(choice => ({ label: choice.name, value: choice.name }))}
+        options={choices.map(choice => ({ label: choice.name, value: choice.id }))}
         placeholder={fieldPlaceholder(field)}
         popupProps={CARD_MODAL_POPUP_PROPS}
         popupVisible={popupOpen}
@@ -693,6 +787,7 @@ function CardFieldEditor({
         value={value}
         disabled={disabled}
         onChange={onChange}
+        modalBoundaryRef={modalBoundaryRef}
       />
     );
   }
@@ -999,12 +1094,15 @@ export function BitableRecordCardModal({
   onDelete,
   onAddField,
   onUploadAttachment,
+  onAddComment,
 }: BitableRecordCardModalProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<'detail' | 'history'>('detail');
+  const [tab, setTab] = useState<'detail' | 'history' | 'comment'>('detail');
   const [hiddenExpanded, setHiddenExpanded] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [commentDraft, setCommentDraft] = useState('');
+  const comments = record.comments ?? [];
 
   const hiddenFieldIds = useMemo(() => {
     const hidden = new Set(activeView.hiddenFieldIds || []);
@@ -1045,7 +1143,15 @@ export function BitableRecordCardModal({
     setTab('detail');
     setHiddenExpanded(false);
     setMoreOpen(false);
+    setCommentDraft('');
   }, [record.id]);
+
+  const submitComment = () => {
+    const content = commentDraft.trim();
+    if (!content || locked || !onAddComment) return;
+    onAddComment(record.id, content);
+    setCommentDraft('');
+  };
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -1176,7 +1282,19 @@ export function BitableRecordCardModal({
                   >
                     <span className="bitable-item-view-edit-tab-name">历史</span>
                   </button>
-                  <span className={`bitable-item-view-tabs__ink${tab === 'history' ? ' is-history' : ''}`} aria-hidden />
+                  <button
+                    type="button"
+                    role="tab"
+                    className={`bitable-item-view-tab${tab === 'comment' ? ' is-active' : ''}`}
+                    aria-selected={tab === 'comment'}
+                    onClick={() => setTab('comment')}
+                  >
+                    <span className="bitable-item-view-edit-tab-name">评论</span>
+                  </button>
+                  <span
+                    className={`bitable-item-view-tabs__ink${tab === 'history' ? ' is-history' : ''}${tab === 'comment' ? ' is-comment' : ''}`}
+                    aria-hidden
+                  />
                 </div>
               </div>
 
@@ -1240,13 +1358,64 @@ export function BitableRecordCardModal({
                     </div>
                   </div>
                 </div>
-              ) : (
+              ) : null}
+
+              {tab === 'history' ? (
                 <div className="bitable-card-detail bitable-card-detail--history">
                   <div className="J-card-edit-modal-body J-card-edit-modal-body--padding-standard">
                     <CardHistoryTable history={history} fields={table.fields} record={record} />
                   </div>
                 </div>
-              )}
+              ) : null}
+
+              {tab === 'comment' ? (
+                <div className="bitable-card-detail bitable-card-detail--comments">
+                  <div className="J-card-edit-modal-body J-card-edit-modal-body--padding-standard">
+                    <div className="bitable-card-comments" data-e2e="bitable-card-comments">
+                      <div className="bitable-card-comments__list">
+                        {comments.length ? (
+                          comments.map(comment => (
+                            <article key={comment.id} className="bitable-card-comments__item">
+                              <div className="bitable-card-comments__avatar" aria-hidden>
+                                {(comment.author || DEFAULT_RECORD_OPERATOR).slice(0, 1)}
+                              </div>
+                              <div className="bitable-card-comments__body">
+                                <div className="bitable-card-comments__meta">
+                                  <strong>{comment.author || DEFAULT_RECORD_OPERATOR}</strong>
+                                  <time>{formatHistoryTime(comment.createdAt)}</time>
+                                </div>
+                                <p>{comment.content}</p>
+                              </div>
+                            </article>
+                          ))
+                        ) : (
+                          <div className="bitable-card-comments__empty">暂无评论</div>
+                        )}
+                      </div>
+                      <div className="bitable-card-comments__composer">
+                        <Input
+                          className="bitable-card-comments__input"
+                          borderless
+                          value={commentDraft}
+                          disabled={locked || !onAddComment}
+                          placeholder="输入评论"
+                          onChange={value => setCommentDraft(String(value ?? ''))}
+                          onEnter={submitComment}
+                        />
+                        <Button
+                          type="button"
+                          size="small"
+                          theme="primary"
+                          disabled={locked || !onAddComment || !commentDraft.trim()}
+                          onClick={submitComment}
+                        >
+                          发送
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

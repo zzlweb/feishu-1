@@ -420,14 +420,14 @@ function FeishuTableOverlay({
   }, [activateTableChrome, editor, tableHost]);
 
   const openCellInsertMenu = useCallback(
-    (handle: TableCellHandleState, clientX: number, clientY: number) => {
+    (handle: TableCellHandleState, clientX: number, clientY: number, anchor?: HTMLElement | null) => {
       const tablePos = getTablePosFromHost(editor, tableHost);
       if (tablePos == null) return;
       const cellPos = resolveTableCellPos(editor, tablePos, handle.row, handle.col);
       if (cellPos == null) return;
       editor.chain().focus().setTextSelection(handle.cursorPos || cellPos + 1).run();
       window.dispatchEvent(new CustomEvent('feishu-open-table-cell-slash-menu', {
-        detail: { x: clientX + 8, y: clientY + 8 },
+        detail: { x: clientX + 8, y: clientY + 8, anchorEl: anchor ?? undefined },
       }));
     },
     [editor, tableHost],
@@ -1467,7 +1467,7 @@ function FeishuTableOverlay({
               const key = `${cellHandle.row}:${cellHandle.col}:insert`;
               if (cellHandleOpenKeyRef.current === key) return;
               cellHandleOpenKeyRef.current = key;
-              openCellInsertMenu(cellHandle, e.clientX, e.clientY);
+              openCellInsertMenu(cellHandle, e.clientX, e.clientY, e.currentTarget);
             }}
             onMouseLeave={e => {
               const next = e.relatedTarget;
@@ -1478,7 +1478,7 @@ function FeishuTableOverlay({
               e.preventDefault();
               e.stopPropagation();
               activateTableChrome();
-              openCellInsertMenu(cellHandle, e.clientX, e.clientY);
+              openCellInsertMenu(cellHandle, e.clientX, e.clientY, e.currentTarget);
             }}
           >
             <span className="feishu-table-chrome__cell-handle-plus-box">

@@ -4,6 +4,8 @@ export interface FieldTypeOptionDef {
   type: BaseFieldType;
   label: string;
   isNew?: boolean;
+  /** 本地尚未完整实现：创建后只能按文本读写，无原生编辑器/自动计算。 */
+  unsupported?: boolean;
 }
 
 export interface FieldTypeGroupDef {

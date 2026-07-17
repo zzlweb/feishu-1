@@ -61,6 +61,7 @@ export type ImportedBlock =
   | { type: 'bitable'; payload: ImportedBitableBlock }
   | { type: 'dashboard'; payload: ImportedDashboardBlock }
   | { type: 'embed'; title: string; url?: string; kind?: string; desc?: string }
+  | { type: 'formula'; formula: string }
   | { type: 'html'; html: string };
 
 export interface ImportedDocument {

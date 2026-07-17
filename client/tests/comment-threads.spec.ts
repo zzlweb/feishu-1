@@ -79,12 +79,16 @@ test('creates a text-range comment thread and links highlight with sidebar', asy
   await expect(page.locator('.comment-panel__reply-content')).toContainText('text range comment');
 
   await highlight.click();
-  await expect(page.locator('.comment-panel--active')).toBeVisible();
+  const activePanel = page.locator('.comment-panel--active');
+  await expect(activePanel).toBeVisible();
 
-  await panel.locator('.comment-panel__textarea-inner--idle').click();
-  await panel.locator('.comment-panel__textarea-editor').fill('quick reply');
-  await panel.locator('.comment-panel__textarea-editor').press('Enter');
-  await expect(page.locator('.comment-panel__reply-content').filter({ hasText: 'quick reply' })).toBeVisible();
+  // 用面板内「回复」按钮打开编辑器（避免点到其它线程的 idle 占位）
+  await activePanel.locator('.comment-panel__icon-btn[title="回复"]').click();
+  const replyEditor = activePanel.locator('.comment-panel__textarea-editor');
+  await expect(replyEditor).toBeVisible();
+  await replyEditor.fill('quick reply');
+  await replyEditor.press('Enter');
+  await expect(activePanel.locator('.comment-panel__reply-content').filter({ hasText: 'quick reply' })).toBeVisible();
 });
 
 test('deletes own comment and closes confirm dialog', async ({ page }) => {

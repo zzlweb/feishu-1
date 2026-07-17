@@ -25,22 +25,6 @@ function deleteSelectedBlocks(editor: Editor): boolean {
   return deleteBoxSelection(editor) || deleteSelectedControlBlock(editor);
 }
 
-function isTextEditingTarget(active: Element | null, editor: Editor): boolean {
-  if (!active) return false;
-  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement) {
-    return true;
-  }
-  if (!(active instanceof HTMLElement) || !active.isContentEditable) return false;
-  return active !== editor.view.dom && !active.classList.contains('ProseMirror');
-}
-
-function canHandleSelectAll(editor: Editor): boolean {
-  const active = document.activeElement;
-  if (!(active instanceof Element)) return true;
-  if (isTextEditingTarget(active, editor)) return false;
-  return active === document.body || active === editor.view.dom || editor.view.dom.contains(active);
-}
-
 /** 框选多块后 Enter / Delete / Backspace 批量删除 */
 export const FeishuBoxSelectionKeyboard = Extension.create({
   name: 'feishuBoxSelectionKeyboard',
@@ -63,7 +47,9 @@ export const FeishuBoxSelectionKeyboard = Extension.create({
         return true;
       },
       'Mod-a': ({ editor }) => {
-        if (!boxSelectionStore || !canHandleSelectAll(editor)) return false;
+        // 仅在已进入块框选模式时拦截为「全文档块全选」；
+        // 正文编辑态下交还 ProseMirror 默认文本全选，避免劫持首次 Ctrl+A。
+        if (!boxSelectionStore?.isActive()) return false;
         const units = collectSelectableUnits(editor);
         if (units.length === 0) return false;
         boxSelectionStore.selectUnits?.(units);

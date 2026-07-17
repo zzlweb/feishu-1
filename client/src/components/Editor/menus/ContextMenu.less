@@ -1,16 +1,18 @@
+@import '../../../styles/feishu-tokens.less';
+
 .context-menu-feishu.context-menu {
   position: fixed;
-  --border-color: #e8e9eb;
+  --border-color: @border-light;
   --border-light: #eef0f3;
-  --text-primary: #1f2329;
-  --text-secondary: #646a73;
-  --text-placeholder: #8f959e;
-  --bg-white: #ffffff;
-  --bg-hover: #f5f6f7;
-  --shadow-lg: 0 12px 32px rgba(31, 35, 41, 0.1), 0 2px 8px rgba(31, 35, 41, 0.06);
-  --radius-md: 8px;
-  --radius-sm: 4px;
-  --primary-color: #3370ff;
+  --text-primary: @text-primary;
+  --text-secondary: @text-secondary;
+  --text-placeholder: @text-placeholder;
+  --bg-white: @bg-white;
+  --bg-hover: @bg-hover;
+  --shadow-lg: @shadow-lg;
+  --radius-md: @radius-lg;
+  --radius-sm: @radius-sm;
+  --primary-color: @primary;
 
   background: var(--bg-white);
   border: 1px solid var(--border-color);

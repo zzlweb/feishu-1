@@ -199,6 +199,10 @@ export function renderImportedBlock(block: ImportedBlock): string {
     const desc = block.desc ? ` data-desc="${escapeAttr(block.desc)}"` : '';
     return `<div data-local-block="embed"${kind}${href}${desc} data-title="${escapeAttr(block.title)}">${escapeHtml(block.title)}</div>`;
   }
+  if (block.type === 'formula') {
+    const formula = block.formula || '';
+    return `<div data-local-block="formula" data-formula="${escapeAttr(formula)}" class="feishu-formula-block">${escapeHtml(formula)}</div>`;
+  }
   return block.html;
 }
 

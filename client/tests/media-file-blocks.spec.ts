@@ -33,7 +33,7 @@ async function openMediaDoc(page: import('@playwright/test').Page) {
 
 async function dropFiles(
   page: import('@playwright/test').Page,
-  files: Array<{ name: string; type: string; body: string }>,
+  files: Array<{ name: string; type: string; body: string; isBase64?: boolean }>,
 ) {
   const area = page.locator('.editor-content-area');
   const box = await area.boundingBox();
@@ -41,7 +41,10 @@ async function dropFiles(
   await area.evaluate((element, payload) => {
     const data = new DataTransfer();
     payload.files.forEach(file => {
-      data.items.add(new File([file.body], file.name, { type: file.type }));
+      const body = file.isBase64
+        ? Uint8Array.from(atob(file.body), character => character.charCodeAt(0))
+        : file.body;
+      data.items.add(new File([body], file.name, { type: file.type }));
     });
     const x = payload.x;
     const y = payload.y;
@@ -64,8 +67,9 @@ test('drops an image as a preview media block and updates it after upload', asyn
 
   const block = page.locator('[data-local-block="file"][data-upload-id]').first();
   await expect(block).toBeVisible();
-  await expect(block).toContainText('photo.png');
+  // 图片预览态文件名主要在 alt，不强制正文可见文本
   await expect(block.locator('.feishu-media-preview__image')).toBeVisible();
+  await expect(block.locator('.feishu-media-preview__image')).toHaveAttribute('alt', 'photo.png');
   await expect(block).toHaveAttribute('data-upload-status', 'success');
   await expect(block.locator('.feishu-media-preview__image')).toHaveAttribute('src', /\/static\/uploads\/photo\.png$/);
 });
@@ -97,7 +101,9 @@ test('drops video and normal files as independent attachment blocks', async ({ p
 
   const blocks = page.locator('[data-local-block="file"][data-upload-id]');
   await expect(blocks).toHaveCount(2);
-  await expect(blocks.nth(0)).toContainText('clip.mp4');
+  // 视频预览标题为「VID」+ 去扩展名文件名
+  await expect(blocks.nth(0).locator('.feishu-media-preview__video-file-icon')).toHaveText('VID');
+  await expect(blocks.nth(0)).toContainText('clip');
   await expect(blocks.nth(0).locator('video')).toBeVisible();
   await expect(blocks.nth(1)).toContainText('report.pdf');
   await expect(blocks.nth(1)).toHaveAttribute('data-upload-status', 'success');

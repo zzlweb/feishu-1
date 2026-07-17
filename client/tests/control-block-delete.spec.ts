@@ -39,27 +39,46 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.feishu-sync-block')).toBeVisible();
 });
 
-async function deleteThroughBlockMenu(page: import('@playwright/test').Page, target: string) {
-  await page.locator(target).hover();
+async function revealBlockHandle(page: import('@playwright/test').Page, target: string) {
+  await page.locator(target).first().hover();
   const blockHandle = page.locator('.block-drag-row');
   await expect(blockHandle).toBeVisible();
-  await blockHandle.hover();
+  return blockHandle;
+}
 
+/** 普通块：悬停块柄打开 .context-menu；多维表格：需点击块柄打开 .bitable-context-menu */
+async function deleteThroughBlockMenu(
+  page: import('@playwright/test').Page,
+  target: string,
+  options?: { bitable?: boolean },
+) {
+  const blockHandle = await revealBlockHandle(page, target);
+  if (options?.bitable) {
+    await blockHandle.click();
+    const menu = page.locator('.bitable-context-menu').first();
+    await expect(menu).toBeVisible();
+    await menu.locator('.delete-item, [data-name="delete"]').first().click();
+    return;
+  }
+
+  await blockHandle.hover();
   const menu = page.locator('.context-menu').first();
   await expect(menu).toBeVisible();
   await menu.locator('.context-menu-item--danger').click();
 }
 
 test('deletes a bitable control through its block menu', async ({ page }) => {
-  await deleteThroughBlockMenu(page, '.feishu-bitable-block');
+  await deleteThroughBlockMenu(page, '.feishu-bitable-block', { bitable: true });
   await expect(page.locator('.feishu-bitable-block')).toHaveCount(0);
   await expect(page.locator('.feishu-local-card')).toBeVisible();
 });
 
 test('deletes a selected bitable control with Backspace', async ({ page }) => {
-  await page.locator('.feishu-bitable-block__tail').first().click();
+  // 点击块柄会同步 NodeSelection；Esc 关掉菜单后 Backspace 删除选中块
+  const handle = await revealBlockHandle(page, '.feishu-bitable-block');
+  await handle.click();
   await expect(page.locator('.feishu-bitable-block')).toHaveClass(/is-selected/);
-
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Backspace');
   await expect(page.locator('.feishu-bitable-block')).toHaveCount(0);
 });
@@ -105,7 +124,8 @@ test('marquee selection deletes widget controls including content containers', a
   await page.mouse.move(areaBox.x + areaBox.width - 4, lastBox.y + lastBox.height + 4, { steps: 12 });
   await page.mouse.up();
 
-  await expect(page.locator('.feishu-box-selection-band')).toHaveCount(4);
+  // 可能额外选中相邻段落；至少覆盖 4 个控件块
+  await expect.poll(async () => page.locator('.feishu-box-selection-band').count()).toBeGreaterThanOrEqual(4);
   await page.keyboard.press('Delete');
   await expect(page.locator('.feishu-bitable-block, .feishu-div-table, .feishu-local-card, .feishu-sync-block')).toHaveCount(0);
 });

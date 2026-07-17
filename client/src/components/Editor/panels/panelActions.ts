@@ -16,7 +16,8 @@ export type BlockStyleKind =
   | 'taskList'
   | 'codeBlock'
   | 'blockquote'
-  | 'highlightBlock';
+  | 'highlightBlock'
+  | 'localSyncBlock';
 
 export function setHeadingLevel(editor: Editor, level: number) {
   if (level === 0) {
@@ -56,6 +57,9 @@ export function toggleBlockStyle(editor: Editor, type: BlockStyleKind) {
         .focus()
         .toggleWrap('highlightBlock', { bgColor: '#fff0d9', borderColor: '#ffb057' })
         .run();
+      return;
+    case 'localSyncBlock':
+      editor.chain().focus().toggleWrap('localSyncBlock').run();
       return;
   }
 }

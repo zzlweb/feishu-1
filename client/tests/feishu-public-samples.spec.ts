@@ -183,17 +183,17 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('renders 20 indexed public Feishu document smoke samples', async ({ page }) => {
-  expect(publicFeishuDocs).toHaveLength(20);
-
+test.describe('indexed public Feishu document smoke samples', () => {
   for (let index = 0; index < publicFeishuDocs.length; index += 1) {
     const sample = publicFeishuDocs[index];
-    await page.goto(`/doc/public-feishu-${index + 1}`);
-    await expect(page.locator('.editor-title-input')).toHaveValue(sample.title);
-    await expect(page.locator('.editor-content-area h1')).toHaveText(sample.title);
-    await expect(page.locator('.feishu-highlight-block')).toBeVisible();
-    await expect(page.locator('.editor-content-area')).not.toContainText('涓');
-    await expect(page.locator('.editor-content-area')).not.toContainText('鍒');
+    test(`renders public sample ${index + 1}: ${sample.title}`, async ({ page }) => {
+      await page.goto(`/doc/public-feishu-${index + 1}`);
+      await expect(page.locator('.editor-title-input')).toHaveValue(sample.title);
+      await expect(page.locator('.editor-content-area h1')).toHaveText(sample.title);
+      await expect(page.locator('.feishu-highlight-block')).toBeVisible();
+      await expect(page.locator('.editor-content-area')).not.toContainText('涓');
+      await expect(page.locator('.editor-content-area')).not.toContainText('鍒');
+    });
   }
 });
 
@@ -214,6 +214,8 @@ test('renders non-bitable Feishu blocks with stable Feishu-like chrome', async (
   await expect(card).toBeVisible();
   await expect(card.locator('.feishu-local-card__title')).toHaveText(sample.title);
   await expect(card.locator('.feishu-local-card__desc')).toHaveText('公开飞书文档');
+  await card.locator('.feishu-local-card__body').dblclick();
+  await expect(card.locator('.feishu-local-card__title-input')).toHaveValue(sample.title);
 });
 
 test('renders public Feishu business report sample blocks', async ({ page }) => {

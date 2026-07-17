@@ -7,6 +7,7 @@ export interface FloatingPanelPosition {
 
 export type FloatingPanelPlacement = 'bottom-start' | 'top-start' | 'right-start' | 'left-start';
 
+/** 与 styles/global.css `--z-*` / feishu-tokens.less `@z-*` 保持一致 */
 export const FLOATING_Z_INDEX = {
   stickyHeader: 100,
   docFloating: 1000,

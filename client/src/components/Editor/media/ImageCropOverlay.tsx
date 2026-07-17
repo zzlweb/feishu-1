@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { getRenderedImageBounds, type CropRect, type RenderedImageBounds } from './imageBlockUtils';
+import { confirmActiveImageCropSession } from './imageCropSession';
 import './ImageCropOverlay.less';
 
 interface ImageCropOverlayProps {
@@ -194,6 +195,11 @@ export default function ImageCropOverlay({
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onDoubleClick={event => {
+          event.preventDefault();
+          event.stopPropagation();
+          void confirmActiveImageCropSession();
+        }}
       >
         <div
           className="feishu-image-crop-layer__move"

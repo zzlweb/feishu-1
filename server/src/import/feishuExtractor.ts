@@ -416,6 +416,7 @@ function importedBlockText(block: ImportedBlock): string {
   }
   if (block.type === 'highlight') return block.content.map(importedBlockText).filter(Boolean).join('\n');
   if (block.type === 'embed') return [block.title, block.desc, block.url].filter(Boolean).join(' ');
+  if (block.type === 'formula') return block.formula;
   if (block.type === 'image') return block.alt || block.src;
   return '';
 }
@@ -706,11 +707,10 @@ async function convertFeishuBlock(
   }
 
   if (block.equation?.content || block.equation?.elements) {
+    const formula = (block.equation.content || inlineText(textElementsToInlines(block.equation.elements))).trim();
     return {
-      type: 'embed',
-      kind: 'formula',
-      title: '公式',
-      desc: block.equation.content || inlineText(textElementsToInlines(block.equation.elements)),
+      type: 'formula',
+      formula: formula || ' ',
     };
   }
 
@@ -1344,6 +1344,7 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
     if (documentToken === BUSINESS_REPORT_TOKEN) {
       return buildFallbackBusinessReportPayload(sourceUrl, `飞书 API 导入失败：${message}`);
     }
-    return null;
+    // 有凭证但 API 失败时抛出，供上层回退 HTML 并保留失败原因（勿静默 return null）
+    throw error instanceof Error ? error : new Error(message);
   }
 }

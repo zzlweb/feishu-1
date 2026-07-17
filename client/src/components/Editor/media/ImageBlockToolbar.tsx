@@ -9,7 +9,9 @@ interface ImageBlockToolbarProps {
   onAlignChange: (align: 'left' | 'center' | 'right') => void;
   onCaptionClick?: () => void;
   onCropClick?: () => void;
+  onResetClick?: () => void;
   isCropping?: boolean;
+  hasCrop?: boolean;
   documentId?: string;
   blockId?: string;
   onEnsureBlockId?: (blockId: string) => void;
@@ -50,8 +52,18 @@ function MenuItem({
     <div
       className={`panel-menu-item${active ? ' menu-item-actived' : ''}${name === 'comment' ? ' comment-item' : ''}`}
       data-name={name}
+      role="button"
+      tabIndex={0}
+      title={name}
+      aria-label={name}
       onMouseDown={event => event.preventDefault()}
       onClick={onClick}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      }}
     >
       <div className="menu-item-content">
         <div className="menu-icon">
@@ -83,6 +95,7 @@ const COMMENT_PATHS = [
   'M7 11a1 1 0 0 1 1-1h8a1 1 0 1 1 0 2H8a1 1 0 0 1-1-1Z',
   'M2 5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v11.5a2 2 0 0 1-2 2h-3.812a.5.5 0 0 0-.33.124l-2.541 2.224a2 2 0 0 1-2.634 0l-2.542-2.224a.5.5 0 0 0-.329-.124H4a2 2 0 0 1-2-2V5Zm2 0v11.5h3.812a2.5 2.5 0 0 1 1.646.619L12 19.343l2.542-2.224a2.5 2.5 0 0 1 1.646-.619H20V5H4Z',
 ];
+const RESET_PATH = 'M12 3a9 9 0 1 1-8.49 6H1.2a1 1 0 0 1-.7-1.71l3-3a1 1 0 0 1 1.41 0l3 3A1 1 0 0 1 7.2 9H5.57A7 7 0 1 0 12 5a1 1 0 1 1 0-2Z';
 
 export default function ImageBlockToolbar({
   editor,
@@ -90,7 +103,9 @@ export default function ImageBlockToolbar({
   onAlignChange,
   onCaptionClick,
   onCropClick,
+  onResetClick,
   isCropping = false,
+  hasCrop = false,
   documentId,
   blockId,
   onEnsureBlockId,
@@ -136,6 +151,14 @@ export default function ImageBlockToolbar({
         active={isCropping}
         onClick={() => onCropClick?.()}
       />
+      {hasCrop && (
+        <MenuItem
+          name="resetImage"
+          dataIcon="ResetOutlined"
+          paths={[RESET_PATH]}
+          onClick={() => onResetClick?.()}
+        />
+      )}
       <MenuDivider />
       <MenuItem
         name="caption"

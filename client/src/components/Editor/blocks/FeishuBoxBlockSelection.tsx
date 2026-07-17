@@ -143,10 +143,13 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, editorCo
     setSelectionBands(layoutSelectionBands(units, areaRect));
   }, [editorAreaRef]);
 
-  const selectUnits = useCallback((units: SelectableUnit[]) => {
+  const selectUnits = useCallback((units: SelectableUnit[], options?: { preserveAnchor?: boolean }) => {
     const normalized = normalizeSelectedUnits(units);
     selectedRef.current = normalized;
-    if (normalized.length > 0) shiftAnchorIdRef.current = normalized[0].id;
+    // Shift 扩选保留原锚点；只有首次框选/点击才把锚点设为范围最小端。
+    if (!options?.preserveAnchor && normalized.length > 0) {
+      shiftAnchorIdRef.current = normalized[0].id;
+    }
     setSelectedUnits(normalized);
     syncSelectionBands(normalized);
   }, [syncSelectionBands]);
@@ -382,7 +385,7 @@ export default function BoxBlockSelectionLayer({ editor, editorAreaRef, editorCo
           e.preventDefault();
           const [from, to] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
           const rangeUnits = allUnits.slice(from, to + 1);
-          selectUnits(rangeUnits);
+          selectUnits(rangeUnits, { preserveAnchor: true });
           applyBoxSelectionToEditor(editor, rangeUnits);
           return;
         }

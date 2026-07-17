@@ -1,10 +1,21 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent, type MutableRefObject, type Ref } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+  type MutableRefObject,
+  type Ref,
+  type RefObject,
+} from 'react';
 import { createPortal } from 'react-dom';
 import * as React from 'react';
 import { SelGlyphChevronDown } from '../../../icons/selectionToolbarGlyphs';
 import { FieldLockGlyph, fieldTypeGlyph } from '../fields/bitableFieldTypeIcons';
 import { getAttachments, getMultiSelectChoices, valueText, findSelectChoice, formatCardDateValue, normalizeColorValue, textColorForBackground, type AttachmentValue, type BaseField, type BaseRecord, type CellValue } from '../model/bitableModel';
-import { bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
+import { FLOATING_Z_INDEX, bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
 import { BITABLE_TD_PORTAL_SELECTOR } from './bitableTdesign';
 
 export { FieldLockGlyph, fieldTypeGlyph };
@@ -196,6 +207,15 @@ export function FileBadge({ attachment }: { attachment: AttachmentValue }) {
   );
 }
 
+/** 将 Bitable 左缘与标题区对齐：补偿 editor-container 左侧 padding */
+export function syncBitableDocAlign(block: HTMLElement) {
+  const editorContainer = block.closest<HTMLElement>('.editor-container');
+  const paddingLeft = editorContainer
+    ? Number.parseFloat(getComputedStyle(editorContainer).paddingLeft) || 0
+    : 0;
+  block.style.setProperty('--bitable-doc-align-shift', `${paddingLeft}px`);
+}
+
 const PRIMARY_FIELD_LOCK_TIP = '索引列：用来标识每条记录。不能被删除、移动或隐藏';
 
 export type BitableTooltipPlacement = 'top' | 'bottom';
@@ -374,10 +394,87 @@ export function attachmentCellLabel(record: BaseRecord, fieldId: string) {
 }
 
 export const BITABLE_PANEL_PORTAL_SELECTOR =
-  `.bitable-field-condition-picker__menu--portal, .bitable-group-field-picker__menu--portal, .base-filter-select__menu--portal, .base-field-edit-popover-portal, .base-b-field-type-picker-portal, .base-b-select-color-panel, .base-b-select-default-panel, .base-view-contextmenu--portal, ${BITABLE_TD_PORTAL_SELECTOR}`;
+  `.base-toolbar-panel--portal, .bitable-group-panel--portal, .bitable-sort-panel--portal, .bitable-toolbar__group-menu--portal, .bitable-field-condition-picker__menu--portal, .bitable-group-field-picker__menu--portal, .base-filter-select__menu--portal, .base-field-edit-popover-portal, .base-b-field-type-picker-portal, .base-b-select-color-panel, .base-b-select-default-panel, .base-view-contextmenu--portal, .base-grid-field-menu--portal, .base-grid-cell-menu--portal, ${BITABLE_TD_PORTAL_SELECTOR}`;
 
 export function isBitablePanelPortalTarget(node: EventTarget | null): boolean {
   return node instanceof Element && Boolean(node.closest(BITABLE_PANEL_PORTAL_SELECTOR));
+}
+
+/** 工具栏筛选/分组/排序等宽面板：相对锚点水平居中，视口内 clamp */
+export function computeBitableToolbarPortalPosition(
+  anchor: DOMRect,
+  panelWidth: number,
+  panelHeight: number,
+  pad = 8,
+  gap = 6,
+) {
+  let left = anchor.left + anchor.width / 2 - panelWidth / 2;
+  let top = anchor.bottom + gap;
+  if (top + panelHeight > window.innerHeight - pad && anchor.top - gap - panelHeight >= pad) {
+    top = anchor.top - gap - panelHeight;
+  }
+  left = Math.max(pad, Math.min(left, window.innerWidth - panelWidth - pad));
+  top = Math.max(pad, Math.min(top, window.innerHeight - Math.min(panelHeight, window.innerHeight - pad * 2) - pad));
+  return { left, top };
+}
+
+export function useBitableToolbarPortalStyle(
+  open: boolean,
+  anchorRef: RefObject<HTMLElement | null> | undefined,
+  panelRef: RefObject<HTMLElement | null>,
+  fallbackWidth: number,
+  fallbackHeight = 320,
+): CSSProperties | undefined {
+  const [pos, setPos] = useState({ left: 0, top: 0, visible: false });
+
+  useLayoutEffect(() => {
+    if (!open || !anchorRef) {
+      setPos(prev => (prev.visible ? { left: 0, top: 0, visible: false } : prev));
+      return undefined;
+    }
+
+    const sync = () => {
+      const anchor = anchorRef.current;
+      if (!anchor?.isConnected) return;
+      const panel = panelRef.current;
+      const width = panel?.offsetWidth || fallbackWidth;
+      const height = panel?.offsetHeight || fallbackHeight;
+      const next = computeBitableToolbarPortalPosition(anchor.getBoundingClientRect(), width, height);
+      setPos(prev => (
+        prev.left === next.left && prev.top === next.top && prev.visible
+          ? prev
+          : { left: next.left, top: next.top, visible: true }
+      ));
+    };
+
+    // 首帧先按 fallback 尺寸定位并立刻可见，避免 visibility:hidden 卡住。
+    sync();
+    const raf = window.requestAnimationFrame(() => {
+      sync();
+      if (panelRef.current && typeof ResizeObserver !== 'undefined') {
+        resizeObserver?.observe(panelRef.current);
+      }
+    });
+    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null;
+    if (panelRef.current) resizeObserver?.observe(panelRef.current);
+    const cleanupLayout = bindFloatingLayoutListeners(sync, anchorRef.current);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      resizeObserver?.disconnect();
+      cleanupLayout();
+    };
+  }, [open, anchorRef, panelRef, fallbackWidth, fallbackHeight]);
+
+  if (!open || !anchorRef) return undefined;
+  return {
+    position: 'fixed',
+    left: pos.left,
+    top: pos.top,
+    zIndex: FLOATING_Z_INDEX.bitablePanel,
+    // 即使首帧尚未测到尺寸，也展示；定位会在 layout/raf 中校正。
+    visibility: pos.visible || open ? 'visible' : 'hidden',
+    maxHeight: 'min(80vh, calc(100vh - 16px))',
+  };
 }
 
 export function resolveBitableBleedRightEdge(block: HTMLElement, edgeMargin: number): number {
@@ -394,6 +491,19 @@ export function resolveBitableBleedRightEdge(block: HTMLElement, edgeMargin: num
   return window.innerWidth - commentRail - edgeMargin;
 }
 
+const BITABLE_TOOLBAR_HOVER_KEEP_ALIVE =
+  '.base-viewbar__tool-anchor, .bitable-float-toolbar-btn-wrapper, .base-viewbar__tool, .bitable-float-toolbar-btn, .base-toolbar-panel, .bitable-group-panel, .bitable-sort-panel, .bitable-toolbar__group-menu';
+
+function isBitableToolbarHoverKeepAlive(target: EventTarget | null): boolean {
+  if (isBitablePanelPortalTarget(target)) return true;
+  return target instanceof Element && Boolean(target.closest(BITABLE_TOOLBAR_HOVER_KEEP_ALIVE));
+}
+
+/**
+ * 工具栏筛选/分组/排序等面板的悬停保活。
+ * 打开面板时 React 重渲染会触发「假 mouseleave」（relatedTarget 常为 null），
+ * 若直接 onClose 会表现为「点了没反应」。关闭前用 elementFromPoint 复核指针位置。
+ */
 export function useBitablePanelHoverHandlers(onClose: () => void, enabled = true) {
   const timerRef = useRef<number>();
 
@@ -408,14 +518,28 @@ export function useBitablePanelHoverHandlers(onClose: () => void, enabled = true
     }
   }, []);
 
+  useEffect(() => {
+    if (!enabled) cancelClose();
+  }, [cancelClose, enabled]);
+
   const scheduleClose = useCallback((event?: MouseEvent<HTMLElement>) => {
     if (!enabled) return;
     cancelClose();
+    const clientX = event?.clientX;
+    const clientY = event?.clientY;
     timerRef.current = window.setTimeout(() => {
       const related = event?.relatedTarget ?? null;
-      if (isBitablePanelPortalTarget(related)) return;
+      if (isBitableToolbarHoverKeepAlive(related)) return;
+      // 重渲染假 leave：relatedTarget 为空时，按指针下元素判断是否仍在按钮/面板上。
+      if (typeof clientX === 'number' && typeof clientY === 'number') {
+        const under = document.elementFromPoint(clientX, clientY);
+        if (isBitableToolbarHoverKeepAlive(under)) return;
+      } else if (related == null) {
+        // 无坐标的假 leave（如节点卸载）一律忽略，交给外点关闭。
+        return;
+      }
       onClose();
-    }, 120);
+    }, 160);
   }, [cancelClose, enabled, onClose]);
 
   return {

@@ -173,10 +173,8 @@ function getBlockOccupiedRects(child: HTMLElement): DOMRect[] {
 
   if (child.matches('p, h1, h2, h3, h4, h5, h6, blockquote, pre, li')) {
     const text = child.textContent?.replace(/\u200b/g, '').trim() ?? '';
-    if (!text) {
-      const rect = child.getBoundingClientRect();
-      return [new DOMRect(rect.left, rect.top, rect.width, Math.max(4, Math.min(rect.height, 28)))];
-    }
+    // 空块不占「内容区」：允许从文末空段落等位置发起反向框选
+    if (!text) return [];
   }
 
   return [child.getBoundingClientRect()];

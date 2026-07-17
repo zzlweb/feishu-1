@@ -141,6 +141,8 @@ test('importFeishuPublicUrl falls back to public html when Open API fails', asyn
     assert.equal(imported.title, sample.title);
     assert.equal(imported.importQuality, 'fallback');
     assert.doesNotMatch(imported.content, /飞书 API 导入失败|invalid param/);
+    assert.match(imported.warnings.join('\n'), /Open API 导入失败|已回退公开页面 HTML/);
+    assert.match(imported.warnings.join('\n'), /无法完整识别飞书结构/);
     assert.match(imported.content, /data-type="highlight-block"/);
   } finally {
     if (previousAppId === undefined) delete process.env.FEISHU_APP_ID;
@@ -1089,6 +1091,7 @@ test('importFeishuPublicHtml converts public samples into local renderable block
         assert.match(imported.content, /feishu-doc-nav__link/);
       }
       assert.ok(imported.warnings.length > 0);
+      assert.match(imported.warnings.join('\n'), /无法完整识别飞书结构/);
       if (sample.expectedCapabilities.includes('columns')) {
         assert.match(imported.content, /data-local-block="columns"/);
       }

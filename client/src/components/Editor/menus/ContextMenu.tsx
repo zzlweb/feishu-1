@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { createPortal } from 'react-dom';
 import type { ComponentType } from 'react';
 import type { Editor } from '@tiptap/react';
 import { DOMSerializer } from '@tiptap/pm/model';
@@ -61,7 +60,12 @@ import {
   applyEditorIndentIncrease,
   getEditorIndentUiState,
 } from '../blocks/blockIndent';
-import { isPointerWithinFloatingShell, bindFloatingLayoutListeners, useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../shared/floatingPanel';
+import { isPointerWithinFloatingShell, bindFloatingLayoutListeners } from '../shared/floatingPanel';
+import {
+  CONTEXT_MENU_SHELL_SELECTORS,
+  FloatingMenuPortal,
+  useFloatingMenuShell,
+} from '../shared/FloatingMenuShell';
 import { setHeadingLevel, setTextAlignment, toggleBlockStyle } from '../panels/panelActions';
 import './ContextMenu.less';
 import './SlashMenu.less';
@@ -144,7 +148,7 @@ function getCurrentTextAlign(editor: Editor): string {
   return (p || h || 'left') as string;
 }
 
-function getCurrentBlockRange(editor: Editor) {
+export function getCurrentBlockRange(editor: Editor) {
   const { selection } = editor.state;
   if (!selection.empty) return { from: selection.from, to: selection.to };
   const { $from } = selection;
@@ -157,7 +161,7 @@ function getCurrentBlockRange(editor: Editor) {
   return { from: selection.from, to: selection.to };
 }
 
-function serializeRangeToHtml(editor: Editor, from: number, to: number) {
+export function serializeRangeToHtml(editor: Editor, from: number, to: number) {
   const slice = editor.state.doc.slice(from, to);
   const serializer = DOMSerializer.fromSchema(editor.state.schema);
   const fragment = serializer.serializeFragment(slice.content);
@@ -202,7 +206,6 @@ export default function ContextMenu({
   const addBelowTriggerRef = useRef<HTMLDivElement>(null);
   const addBelowFlyoutRef = useRef<HTMLDivElement>(null);
   const colorFlyoutRef = useRef<HTMLDivElement>(null);
-  const { finalPos, posVisible } = useAnchoredContextMenuPosition(anchorRef, menuRef, { x, y });
   const [gridTooltip, setGridTooltip] = useState<{ item: GridRowDef; rect: DOMRect } | null>(null);
   const [activeFlyout, setActiveFlyout] = useState<{
     kind: 'align' | 'color' | 'below';
@@ -211,35 +214,32 @@ export default function ContextMenu({
   const [flyoutPanelHeight, setFlyoutPanelHeight] = useState<number | null>(null);
   const gridTooltipTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
-  useEffect(() => {
-    const isWithinContextMenuShell = (target: Node) => {
-      if (menuRef.current?.contains(target)) return true;
-      if (colorFlyoutRef.current?.contains(target)) return true;
-      if (addBelowFlyoutRef.current?.contains(target)) return true;
-      if (target instanceof Element && target.closest('.context-submenu-flyout, .context-add-below-flyout')) {
-        return true;
-      }
-      return false;
-    };
+  const dismissByHover = () => {
+    setActiveFlyout(null);
+    (onHoverDismiss ?? onClose)();
+  };
 
-    const handleClick = (e: MouseEvent) => {
-      if (e.button !== 0) return;
-      const t = e.target as Node;
-      if (isWithinContextMenuShell(t)) return;
-      if (anchorRef?.current?.contains(t)) return;
-      onClose();
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('mousedown', handleClick);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('keydown', handleEscape);
-      clearTimeout(gridTooltipTimerRef.current);
-    };
-  }, [onClose]);
+  const {
+    finalPos,
+    posVisible,
+    keepHoverAlive,
+    scheduleClose,
+    containsTarget,
+  } = useFloatingMenuShell({
+    fallback: { x, y },
+    panelRef: menuRef,
+    anchorRef,
+    onClose,
+    onHoverDismiss: dismissByHover,
+    onMouseEnterCancel,
+    hoverRefs: [alignTriggerRef, colorTriggerRef, colorFlyoutRef, addBelowTriggerRef, addBelowFlyoutRef],
+    hoverSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+    insideSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+  });
+
+  useEffect(() => () => {
+    clearTimeout(gridTooltipTimerRef.current);
+  }, []);
 
   const alignSelectionToBlockAnchor = () =>
     syncEditorSelectionToAnchoredBlock(editor, blockAnchorRef?.current ?? null);
@@ -259,34 +259,8 @@ export default function ContextMenu({
     setGridTooltip(null);
   };
 
-  const dismissByHover = () => {
-    (onHoverDismiss ?? onClose)();
-  };
-
-  const hoverGroup = useHoverFloatingGroup({
-    refs: [menuRef, alignTriggerRef, colorTriggerRef, colorFlyoutRef, addBelowTriggerRef, addBelowFlyoutRef, anchorRef],
-    selectors: [
-      '.context-menu',
-      '.context-submenu-flyout',
-      '.context-add-below-flyout',
-      '.slash-table-grid-flyout',
-      '.slash-columns-count-flyout',
-    ],
-    closeDelay: 160,
-    onClose: () => {
-      setActiveFlyout(null);
-      dismissByHover();
-    },
-  });
-
   const pointerStillInShell = (next: EventTarget | null): boolean =>
-    hoverGroup.containsTarget(next) || isPointerWithinFloatingShell(next, [menuRef, anchorRef], [
-      '.context-menu',
-      '.context-submenu-flyout',
-      '.context-add-below-flyout',
-      '.slash-table-grid-flyout',
-      '.slash-columns-count-flyout',
-    ]);
+    containsTarget(next) || isPointerWithinFloatingShell(next, [menuRef, anchorRef], [...CONTEXT_MENU_SHELL_SELECTORS]);
 
   const isFlyoutAnchorTarget = (target: EventTarget | null): boolean => {
     if (!(target instanceof Element)) return false;
@@ -299,7 +273,7 @@ export default function ContextMenu({
 
   const handleShellMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    hoverGroup.scheduleClose(e.relatedTarget);
+    scheduleClose(e.relatedTarget);
   };
 
   const resolveFlyoutTriggerEl = (kind: 'align' | 'color' | 'below') =>
@@ -374,12 +348,7 @@ export default function ContextMenu({
       }
       return;
     }
-    hoverGroup.scheduleClose(e.relatedTarget);
-  };
-
-  const keepHoverAlive = () => {
-    hoverGroup.cancelClose();
-    onMouseEnterCancel?.();
+    scheduleClose(e.relatedTarget);
   };
 
   const handlePlainMenuZoneEnter = () => {
@@ -854,39 +823,40 @@ export default function ContextMenu({
       </div>
   );
 
-  return createPortal(
-    <Fragment>
-      {menuPanel}
+  return (
+    <FloatingMenuPortal>
+      <Fragment>
+        {menuPanel}
 
-      {activeFlyout?.kind === 'align' && flyoutPosition && alignFlyoutPanel}
-      {activeFlyout?.kind === 'color' && flyoutPosition && colorFlyoutPanel}
-      {activeFlyout?.kind === 'below' && flyoutPosition && renderAddBelowFlyoutPanel()}
+        {activeFlyout?.kind === 'align' && flyoutPosition && alignFlyoutPanel}
+        {activeFlyout?.kind === 'color' && flyoutPosition && colorFlyoutPanel}
+        {activeFlyout?.kind === 'below' && flyoutPosition && renderAddBelowFlyoutPanel()}
 
-      {gridTooltip && hasGridTooltip(gridTooltip.item) && (
-        <div
-          className="context-grid-tooltip"
-          style={{
-            position: 'fixed',
-            top: gridTooltip.rect.top - 8,
-            left: gridTooltip.rect.left + gridTooltip.rect.width / 2,
-            transform: 'translate(-50%, -100%)',
-            zIndex: 10070,
-          }}
-        >
-          <div className="context-grid-tooltip__line1">
-            {gridTooltip.item.label}
-            {gridTooltip.item.tooltip!.shortcut && (
-              <span className="context-grid-tooltip__shortcut"> ({gridTooltip.item.tooltip!.shortcut})</span>
+        {gridTooltip && hasGridTooltip(gridTooltip.item) && (
+          <div
+            className="context-grid-tooltip"
+            style={{
+              position: 'fixed',
+              top: gridTooltip.rect.top - 8,
+              left: gridTooltip.rect.left + gridTooltip.rect.width / 2,
+              transform: 'translate(-50%, -100%)',
+              zIndex: 10070,
+            }}
+          >
+            <div className="context-grid-tooltip__line1">
+              {gridTooltip.item.label}
+              {gridTooltip.item.tooltip!.shortcut && (
+                <span className="context-grid-tooltip__shortcut"> ({gridTooltip.item.tooltip!.shortcut})</span>
+              )}
+            </div>
+            {gridTooltip.item.tooltip!.markdown && (
+              <div className="context-grid-tooltip__line2">
+                Markdown: {gridTooltip.item.tooltip!.markdown}
+              </div>
             )}
           </div>
-          {gridTooltip.item.tooltip!.markdown && (
-            <div className="context-grid-tooltip__line2">
-              Markdown: {gridTooltip.item.tooltip!.markdown}
-            </div>
-          )}
-        </div>
-      )}
-    </Fragment>,
-    document.body,
+        )}
+      </Fragment>
+    </FloatingMenuPortal>
   );
 }

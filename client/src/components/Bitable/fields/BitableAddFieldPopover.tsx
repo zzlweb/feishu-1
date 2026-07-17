@@ -51,12 +51,16 @@ function normalizeChoices(choices: SelectChoice[]) {
     .filter(choice => choice.name);
 }
 
-function parseSelectDefaultValue(type: BaseFieldType, value?: CellValue): string | string[] {
+function parseSelectDefaultValue(type: BaseFieldType, value: CellValue | undefined, choices: SelectChoice[]): string | string[] {
+  const byId = new Map(choices.map(choice => [choice.id, choice.name]));
   if (type === 'multi_select') {
-    if (Array.isArray(value) && typeof value[0] !== 'object') return value as string[];
+    if (Array.isArray(value) && value.length && typeof value[0] !== 'object') {
+      // 兼容旧数据：id → name 供 picker 显示。
+      return (value as string[]).map(item => byId.get(item) ?? String(item));
+    }
     return [];
   }
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') return byId.get(value) ?? value;
   return '';
 }
 
@@ -102,7 +106,7 @@ function FieldForm({
   const [fieldType, setFieldType] = useState<BaseFieldType>(initialType);
   const [defaultValue, setDefaultValue] = useState(initialDefaultValue == null ? '' : String(initialDefaultValue));
   const [choices, setChoices] = useState<SelectChoice[]>(() => [...initialChoices]);
-  const [selectDefault, setSelectDefault] = useState<string | string[]>(() => parseSelectDefaultValue(initialType, initialDefaultValue));
+  const [selectDefault, setSelectDefault] = useState<string | string[]>(() => parseSelectDefaultValue(initialType, initialDefaultValue, initialChoices));
   const [showTypePicker, setShowTypePicker] = useState(false);
 
   useEffect(() => {
@@ -154,10 +158,14 @@ function FieldForm({
     if (isSelectFieldType(fieldType)) {
       const validChoices = normalizeChoices(choices);
       payload.options = { choices: validChoices };
+      // 默认值统一存 option id（picker 内部用 name 展示，提交时转回 id）。
       if (fieldType === 'single_select' && typeof selectDefault === 'string' && selectDefault) {
-        payload.defaultValue = selectDefault;
+        const choice = validChoices.find(item => item.name === selectDefault);
+        payload.defaultValue = choice?.id || '';
       } else if (fieldType === 'multi_select' && Array.isArray(selectDefault) && selectDefault.length) {
-        payload.defaultValue = selectDefault;
+        payload.defaultValue = selectDefault
+          .map(name => validChoices.find(item => item.name === name)?.id)
+          .filter((id): id is string => Boolean(id));
       }
     } else if (supportsTextDefault(fieldType) && defaultValue.trim()) {
       payload.defaultValue = fieldType === 'number' ? Number(defaultValue) || 0 : defaultValue.trim();

@@ -9,6 +9,37 @@ export interface FeishuApiClient {
   getTenantAccessToken(): Promise<string>;
 }
 
+export type FeishuApiErrorCode =
+  | 'FEISHU_AUTH_FAILED'
+  | 'FEISHU_API_ERROR'
+  | 'FEISHU_TIMEOUT'
+  | 'FEISHU_CONFIG_MISSING';
+
+export class FeishuApiError extends Error {
+  readonly code: FeishuApiErrorCode;
+  readonly httpStatus?: number;
+  readonly apiCode?: number;
+
+  constructor(
+    code: FeishuApiErrorCode,
+    message: string,
+    options?: { httpStatus?: number; apiCode?: number; cause?: unknown },
+  ) {
+    super(message);
+    this.name = 'FeishuApiError';
+    this.code = code;
+    this.httpStatus = options?.httpStatus;
+    this.apiCode = options?.apiCode;
+    if (options?.cause !== undefined) {
+      (this as Error & { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+export function isFeishuApiError(error: unknown): error is FeishuApiError {
+  return error instanceof FeishuApiError;
+}
+
 interface FeishuApiEnvelope<T> {
   code?: number;
   msg?: string;
@@ -102,6 +133,11 @@ async function fetchWithTimeout(url: string, init?: RequestInit) {
       ...init,
       signal: controller.signal,
     });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new FeishuApiError('FEISHU_TIMEOUT', '飞书 Open API 请求超时，请检查网络或稍后重试', { cause: error });
+    }
+    throw error;
   } finally {
     clearTimeout(timeoutId);
   }
@@ -127,9 +163,22 @@ export function createFeishuApiClient(config: FeishuApiConfig): FeishuApiClient 
         app_secret: config.appSecret,
       }),
     });
-    const body = await response.json() as TenantAccessTokenResponse;
+    let body: TenantAccessTokenResponse;
+    try {
+      body = await response.json() as TenantAccessTokenResponse;
+    } catch (error) {
+      throw new FeishuApiError(
+        'FEISHU_AUTH_FAILED',
+        `获取飞书 tenant_access_token 失败：响应无法解析 (${response.status})`,
+        { httpStatus: response.status, cause: error },
+      );
+    }
     if (!response.ok || !isSuccessCode(body.code) || !body.tenant_access_token) {
-      throw new Error(body.msg || `获取飞书 tenant_access_token 失败 (${response.status})`);
+      throw new FeishuApiError(
+        'FEISHU_AUTH_FAILED',
+        body.msg || `获取飞书 tenant_access_token 失败 (${response.status})。请检查 FEISHU_APP_ID / FEISHU_APP_SECRET。`,
+        { httpStatus: response.status, apiCode: body.code },
+      );
     }
     tenantToken = body.tenant_access_token;
     return tenantToken;
@@ -146,9 +195,22 @@ export function createFeishuApiClient(config: FeishuApiConfig): FeishuApiClient 
         ...(init?.headers || {}),
       },
     });
-    const body = await response.json() as FeishuApiEnvelope<T>;
+    let body: FeishuApiEnvelope<T>;
+    try {
+      body = await response.json() as FeishuApiEnvelope<T>;
+    } catch (error) {
+      throw new FeishuApiError(
+        'FEISHU_API_ERROR',
+        `飞书 API 响应无法解析 (${response.status})：${path}`,
+        { httpStatus: response.status, cause: error },
+      );
+    }
     if (!response.ok || !isSuccessCode(body.code)) {
-      throw new Error(body.msg || `飞书 API 请求失败 (${response.status})`);
+      throw new FeishuApiError(
+        'FEISHU_API_ERROR',
+        body.msg || `飞书 API 请求失败 (${response.status})：${path}`,
+        { httpStatus: response.status, apiCode: body.code },
+      );
     }
     return (body.data || {}) as T;
   }

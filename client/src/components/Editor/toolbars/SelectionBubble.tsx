@@ -57,6 +57,7 @@ import { openCommentSidebarForEditorSelection } from '../blocks/commentBlockAnch
 import { resolveTableHostFromEditor } from '../tables/tableDom';
 import { getActiveTableSelectionContext } from '../tables/tableInsert';
 import { getActiveTableFlags } from '../tables/tableMenu';
+import { FLOATING_Z_INDEX } from '../shared/floatingPanel';
 import {
   insertTableColumn,
   insertTableRow,
@@ -172,6 +173,7 @@ function shouldShowBubble({
   }
   if (document.querySelector('.context-menu')) return false;
   if (document.querySelector('.slash-menu')) return false;
+  if (document.querySelector('.docx-menu-wrapper')) return false;
   if (editor.isActive('codeBlock')) return false;
   if (isImageBlockActive(editor)) return false;
   // 多维表格（含其设置/详情面板）不展示正文格式气泡工具栏
@@ -486,7 +488,7 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
       tippyOptions={{
         placement: tableBubbleAnchor.placement,
         duration: [120, 80],
-        zIndex: 260,
+        zIndex: FLOATING_Z_INDEX.docFloating,
         offset: tableBubbleAnchor.offset,
         moveTransition: 'transform 0.15s ease-out',
         maxWidth: 'none',
@@ -787,10 +789,11 @@ export default function SelectionBubble({ editor, documentId }: SelectionBubbleP
                 />
                 <StyleMenuRow
                   icon={<SlashGlyphSyncMuted size={STYLE_ICON} fill={TINT_SYNC} />}
-                  active={false}
+                  active={editor.isActive('localSyncBlock')}
                   label="同步块"
                   trailing={null}
                   onClick={() => {
+                    toggleBlockStyle(editor, 'localSyncBlock');
                     closeHeadingStylePanel();
                   }}
                 />

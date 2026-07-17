@@ -3,12 +3,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const samplePng = path.resolve(__dirname, '../../server/public/uploads/d77deaa3-b0b7-4752-b381-3e490bb191ed.png');
+const samplePng = path.resolve(__dirname, './fixtures/sample-crop.png');
 
 const cropDocument = {
   id: 'image-crop-e2e',
   title: 'Image Crop E2E',
-  content: `<p>before</p><img class="feishu-image" src="/static/uploads/d77deaa3-b0b7-4752-b381-3e490bb191ed.png" data-align="center"><p>after</p>`,
+  content: `<p>before</p><img class="feishu-image" src="/static/uploads/sample-crop.png" data-align="center"><p>after</p>`,
   author: 'E2E',
   created_at: '2026-05-24T00:00:00.000Z',
   updated_at: '2026-05-24T00:00:00.000Z',
@@ -63,8 +63,10 @@ test('crops image when clicking document blank area', async ({ page }) => {
   await expect(page.locator('.editor-content-area')).toBeVisible();
   await expect(page.locator('.feishu-image')).toBeVisible();
 
-  const image = page.locator('.feishu-image-block-wrap .feishu-image, .feishu-image').first();
+  const imageWrap = page.locator('.feishu-image-block-wrap').first();
+  const image = imageWrap.locator('.feishu-image, img.feishu-image').first();
   await image.click();
+  await imageWrap.hover();
 
   const cropBtn = page.locator('.docx-menu-container .panel-menu-item[data-name="Crop"]');
   await expect(cropBtn).toBeVisible();
@@ -90,7 +92,9 @@ test('crops image when clicking document blank area', async ({ page }) => {
 
 test('shades the right side when resizing from the right crop handle', async ({ page }) => {
   await page.goto('/doc/image-crop-e2e');
-  await page.locator('.feishu-image').first().click();
+  const imageWrap = page.locator('.feishu-image-block-wrap').first();
+  await imageWrap.locator('.feishu-image, img.feishu-image').first().click();
+  await imageWrap.hover();
   await page.locator('.docx-menu-container .panel-menu-item[data-name="Crop"]').click();
 
   const layer = page.locator('.feishu-image-crop-layer');

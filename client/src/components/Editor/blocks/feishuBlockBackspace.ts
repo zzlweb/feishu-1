@@ -123,7 +123,10 @@ function handleFeishuBackspace(editor: Editor): boolean {
 
   if (parentType === 'paragraph') {
     if (isFirstBlockInParent(editor)) {
-      return deleteCurrentEmptyParagraphBlock(editor) || true;
+      // 文档仅一段 / 嵌套首段时删除会失败：交还 PM 默认 Backspace（no-op 或 joinBackward），
+      // 不要用 `|| true` 吞掉事件，否则首段空段落退格完全无效。
+      if (deleteCurrentEmptyParagraphBlock(editor)) return true;
+      return false;
     }
     return editor.chain().focus().joinBackward().run();
   }

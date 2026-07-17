@@ -1,20 +1,7 @@
-@primary: #3370ff;
-@primary-hover: #2860e1;
-@text-primary: #1f2329;
-@text-secondary: #646a73;
-@text-placeholder: #bbbfc4;
-@bg-white: #ffffff;
-@bg-hover: #f5f6f7;
-@border-light: #e8e9eb;
-@border-color: #dee0e3;
-@shadow-md: 0 8px 24px rgba(31, 35, 41, 0.1), 0 2px 6px rgba(31, 35, 41, 0.06);
-@radius-sm: 4px;
-@radius-md: 8px;
-@font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
-  "Microsoft YaHei", sans-serif;
+@import '../../styles/feishu-tokens.less';
 
-/** 版心宽度：视口变窄时不缩小该宽度，超出部分由外层横向裁切，正文不因容器变窄而重排换�?*/
-@editor-page-width: 860px;
+@text-placeholder: @text-placeholder-light;
+@radius-md: @radius-lg;
 @editor-page-padding-left: 48px;
 @editor-page-padding-right: 56px;
 /** 目录轨与正文之间的固定间距（轨宽由 Layout 中 .doc-page-catalogue-rail 占位） */
@@ -97,7 +84,7 @@
       position: relative;
       padding-top: 34px;
 
-      // Hover meta bar �?absolutely positioned in the top padding, no layout push
+      // Keep the hover metadata bar in the title padding without shifting layout.
       .page-block-header-top {
         position: absolute;
         top: 6px;
@@ -1202,10 +1189,10 @@
         }
 
         hr {
-          display: none; // 安全备用：NodeView 已全量接管渲�?
+          display: none; // Fallback: the NodeView owns divider rendering.
         }
 
-        // 飞书风格分割�?
+        // Feishu-style divider.
         .feishu-divider {
           display: flex;
           align-items: center;
@@ -1692,9 +1679,9 @@
           max-width: 100%;
           margin: 8px 0;
 
+          // 飞书：图片工具条仅 hover / 操作中（focus-within）显示，选中不常驻
           &:hover .docx-menu-container,
-          &:focus-within .docx-menu-container,
-          &.is-selected .docx-menu-container {
+          &:focus-within .docx-menu-container {
             opacity: 1;
             pointer-events: auto;
             transform: translate(-50%, 0);
@@ -1758,6 +1745,57 @@
 
           .feishu-image {
             margin: 0;
+          }
+
+          &[style*='width'] .feishu-image {
+            width: 100%;
+            height: auto;
+          }
+        }
+
+        .feishu-image-resize-handle {
+          position: absolute;
+          z-index: 11;
+          width: 20px;
+          height: 20px;
+          padding: 0;
+          border: 0;
+          border-radius: 50%;
+          background: transparent;
+          touch-action: none;
+
+          &::after {
+            position: absolute;
+            inset: 5px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            background: @primary;
+            box-shadow: 0 1px 3px rgba(31, 35, 41, 0.28);
+            content: '';
+          }
+
+          &--nw {
+            top: -10px;
+            left: -10px;
+            cursor: nwse-resize;
+          }
+
+          &--ne {
+            top: -10px;
+            right: -10px;
+            cursor: nesw-resize;
+          }
+
+          &--sw {
+            bottom: -10px;
+            left: -10px;
+            cursor: nesw-resize;
+          }
+
+          &--se {
+            right: -10px;
+            bottom: -10px;
+            cursor: nwse-resize;
           }
         }
 
@@ -1865,6 +1903,11 @@
             object-fit: contain;
           }
 
+          &[style*='width'] &__image {
+            width: 100%;
+            height: auto;
+          }
+
           &__video,
           &__audio,
           &__pdf {
@@ -1917,7 +1960,11 @@
           color: #646a73;
           background: transparent;
           font-size: 13px;
+          line-height: 20px;
           text-align: center;
+          resize: none;
+          overflow: hidden;
+          font-family: inherit;
 
           &::placeholder {
             color: #a6abb2;
@@ -2008,9 +2055,9 @@
           position: relative;
         }
 
+        // 与图片一致：预览态工具条不因选中常驻
         .feishu-file-block:hover .docx-menu-container,
-        .feishu-file-block:focus-within .docx-menu-container,
-        .feishu-file-block.is-selected .docx-menu-container {
+        .feishu-file-block:focus-within .docx-menu-container {
           opacity: 1;
           pointer-events: auto;
           transform: translate(-50%, 0);
@@ -2331,7 +2378,7 @@
           overflow-x: auto;
           overflow-y: hidden;
           -webkit-overflow-scrolling: touch;
-          /* Ĭ�����ع�����������ʱ��ɫ */
+          /* Keep the default rail color until the row is selected. */
           scrollbar-width: thin;
           scrollbar-color: #bfc4cc transparent;
 
@@ -2350,7 +2397,7 @@
           }
         }
 
-        /* 左右渐隐：独立层叠在 scroll 之上，避�?overflow 裁剪 */
+        /* Place edge fades above the scroll surface so overflow does not clip them. */
         .feishu-table-edge-fades {
           position: absolute;
           top:  @feishu-table-chrome-gutter;
@@ -2509,7 +2556,7 @@
           overflow: visible;
         }
 
-        /* 无内�?scroll 的旧 DOM（兼容） */
+        /* Compatibility for legacy DOM without an inner scroll container. */
         .tableWrapper:not(:has(.feishu-table-scroll)),
         .feishu-table-host:not(:has(.feishu-table-scroll)) {
           overflow-x: auto;
@@ -2540,7 +2587,7 @@
           }
         }
 
-        // 飞书风格表格：细灰边框、首行浅灰表�?
+        // Feishu-style table with thin borders and a subtle header row.
         table.feishu-table,
         .tableWrapper table.feishu-table,
         .feishu-table-host table.feishu-table {
@@ -2596,7 +2643,7 @@
             }
           }
 
-          /* 仅开启「标题行/列」时（th）：浅灰�?+ 正文加粗 */
+          /* Header cells use a subtle background and stronger text. */
           th,
           .feishu-table__header-cell {
             font-weight: 600 !important;

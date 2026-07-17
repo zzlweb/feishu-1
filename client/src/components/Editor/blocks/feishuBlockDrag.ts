@@ -24,6 +24,9 @@ const DRAGGABLE_BLOCK_TYPES = new Set([
   'localEmbedBlock',
 ]);
 
+/** 块拖放落点：上下重排 */
+export type BlockDragPlacement = 'before' | 'after';
+
 interface BlockPos {
   pos: number;
   node: ProseMirrorNode;
@@ -43,17 +46,28 @@ function readDirectNode(editor: Editor, pos: number): BlockPos | null {
   };
 }
 
+const CONTAINER_ROOT_SELECTOR =
+  '.feishu-table-host, .tableWrapper, .feishu-file-block, .feishu-image-block-wrap, '
+  + '.feishu-bitable-block, .feishu-div-table, .feishu-sync-block, .feishu-button-block, '
+  + '.feishu-formula-editor, .feishu-local-card, .feishu-columns-block';
+
+/**
+ * 仅当 blockEl 自身是容器/原子块根时才声明 preferredType。
+ * 用 closest 会让分栏列内、表格单元格内的段落被解析为整容器，
+ * 导致拖拽误移整个分栏/表格（飞书期望列内/格内块可独立排序）。
+ */
 function resolvePreferredNodeType(blockEl: HTMLElement): string | null {
-  if (blockEl.closest('.feishu-table-host, .tableWrapper')) return 'table';
-  if (blockEl.closest('.feishu-file-block')) return 'localFileBlock';
-  if (blockEl.closest('.feishu-image-block-wrap')) return 'image';
-  if (blockEl.closest('.feishu-bitable-block')) return 'localBitableBlock';
-  if (blockEl.closest('.feishu-div-table')) return 'localDivTableBlock';
-  if (blockEl.closest('.feishu-sync-block')) return 'localSyncBlock';
-  if (blockEl.closest('.feishu-button-block')) return 'localButtonBlock';
-  if (blockEl.closest('.feishu-formula-editor')) return 'localFormulaBlock';
-  if (blockEl.closest('.feishu-local-card')) return 'localEmbedBlock';
-  if (blockEl.closest('.feishu-columns-block')) return 'localColumnsBlock';
+  if (!blockEl.matches(CONTAINER_ROOT_SELECTOR)) return null;
+  if (blockEl.matches('.feishu-table-host, .tableWrapper')) return 'table';
+  if (blockEl.matches('.feishu-file-block')) return 'localFileBlock';
+  if (blockEl.matches('.feishu-image-block-wrap')) return 'image';
+  if (blockEl.matches('.feishu-bitable-block')) return 'localBitableBlock';
+  if (blockEl.matches('.feishu-div-table')) return 'localDivTableBlock';
+  if (blockEl.matches('.feishu-sync-block')) return 'localSyncBlock';
+  if (blockEl.matches('.feishu-button-block')) return 'localButtonBlock';
+  if (blockEl.matches('.feishu-formula-editor')) return 'localFormulaBlock';
+  if (blockEl.matches('.feishu-local-card')) return 'localEmbedBlock';
+  if (blockEl.matches('.feishu-columns-block')) return 'localColumnsBlock';
   return null;
 }
 
@@ -189,7 +203,7 @@ export function moveDraggableBlock(
   editor: Editor,
   sourceEl: HTMLElement | null,
   targetEl: HTMLElement | null,
-  placement: 'before' | 'after',
+  placement: BlockDragPlacement,
 ): boolean {
   const source = resolveDraggableBlockPos(editor, sourceEl);
   const target = resolveDraggableBlockPos(editor, targetEl);

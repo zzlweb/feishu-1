@@ -1,24 +1,10 @@
-@primary: #3370ff;
-@primary-hover: #2860e1;
-@text-primary: #1f2329;
-@text-secondary: #646a73;
-@text-placeholder: #bbbfc4;
-@bg-white: #ffffff;
-@bg-hover: #f5f6f7;
-@bg-active: #e8e9eb;
-@border-light: #e8e9eb;
-@border-color: #dee0e3;
-@header-bar-bg: #f5f6f7;
-@shadow-md: 0 8px 24px rgba(31, 35, 41, 0.1), 0 2px 6px rgba(31, 35, 41, 0.06);
-@shadow-lg: 0 12px 32px rgba(31, 35, 41, 0.1), 0 2px 8px rgba(31, 35, 41, 0.06);
-@radius-sm: 4px;
-@radius-md: 8px;
-/** 与 Editor.less 版心一致（正文列宽）；顶图横贯工作区时不再受此宽度约束 */
-@editor-page-width: 860px;
+@import '../../styles/feishu-tokens.less';
+
+@header-bar-bg: @bg-hover;
 /** 左侧目录轨宽（固定占位，展开/收起目录不改变正文列位置） */
 @catalogue-rail-width: 232px;
-@font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
-  "Microsoft YaHei", sans-serif;
+/** Layout 内中圆角沿用 8px（与历史视觉一致） */
+@radius-md: @radius-lg;
 
 // ========================
 // Document Page
@@ -598,6 +584,11 @@
     .editor-container {
       /* 目录轨占据了正文左侧空间，这里按整个页面中心线校正文档版心。 */
       margin-left: max(calc((100% - @editor-page-width - @catalogue-rail-width) / 2), 24px);
+    }
+
+    /* 无目录（纯段落/空文档）时不占 232px 轨，正文按页面中心居中。 */
+    &.doc-page-main--no-catalogue .editor-container {
+      margin-left: max(calc((100% - @editor-page-width) / 2), 24px);
     }
   }
 

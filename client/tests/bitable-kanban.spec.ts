@@ -56,6 +56,7 @@ const kanbanModel = {
       config: {
         titleFieldId: 'title',
         visibleFieldIds: ['note'],
+        groupByFieldId: 'status',
         coverFit: 'cover',
         cardSize: 'medium',
         cardAspectRatio: '4:3',
@@ -67,6 +68,20 @@ const kanbanModel = {
       },
       filters: [],
       sorts: [],
+    },
+  ],
+};
+
+const kanbanNoTopAddModel = {
+  ...kanbanModel,
+  id: 'tbl_kanban_no_top_add',
+  views: [
+    {
+      ...kanbanModel.views[0],
+      config: {
+        ...kanbanModel.views[0].config,
+        showNewRecordButton: false,
+      },
     },
   ],
 };
@@ -121,6 +136,63 @@ test('opens record modal from kanban card context menu', async ({ page }) => {
   await openKanban(page);
 
   await page.locator('.base-kanban__card').nth(1).click({ button: 'right' });
-  await page.locator('.base-kanban__card-menu').getByRole('button', { name: '查看详情' }).click();
+  const cardMenu = page.locator('.base-kanban__card-menu--portal');
+  await expect(cardMenu).toBeVisible();
+  expect(await cardMenu.evaluate(el => el.parentElement?.tagName)).toBe('BODY');
+  await cardMenu.getByRole('button', { name: '查看详情' }).click();
   await expect(page.locator('.bitable-record-card-mask')).toBeVisible();
+});
+
+test('column menu portals to body and is not clipped by column', async ({ page }) => {
+  await openKanban(page);
+
+  await page.locator('.base-kanban__column').first().getByRole('button', { name: /更多操作/ }).click();
+  const columnMenu = page.locator('.base-kanban__column-menu--portal');
+  await expect(columnMenu).toBeVisible();
+  expect(await columnMenu.evaluate(el => el.parentElement?.tagName)).toBe('BODY');
+  const box = await columnMenu.boundingBox();
+  expect(box).toBeTruthy();
+  expect(box!.width).toBeGreaterThan(80);
+  expect(box!.height).toBeGreaterThan(40);
+  await expect(columnMenu.getByRole('button', { name: '新建记录' })).toBeVisible();
+});
+
+test('column cards scroll container is the card list not the header', async ({ page }) => {
+  await openKanban(page);
+
+  const cards = page.locator('.base-kanban__column').first().locator('.base-kanban__column-cards');
+  const header = page.locator('.base-kanban__column').first().locator('.base-kanban__column-header');
+  await expect(cards).toBeVisible();
+  await expect(header).toBeVisible();
+
+  const cardsOverflowY = await cards.evaluate(el => getComputedStyle(el).overflowY);
+  expect(['auto', 'scroll', 'overlay']).toContain(cardsOverflowY);
+  const headerOverflowY = await header.evaluate(el => getComputedStyle(el).overflowY);
+  expect(headerOverflowY === 'visible' || headerOverflowY === 'auto').toBeTruthy();
+});
+
+test('keeps column add entry when new-record button is enabled', async ({ page }) => {
+  await openKanban(page);
+  await expect(page.locator('.base-kanban__column-add').first()).toBeVisible();
+  await expect(page.locator('.base-kanban__column-add').first()).toContainText('新建任务');
+});
+
+test('column menu still offers add when showNewRecordButton is false', async ({ page }) => {
+  const document = {
+    ...kanbanDocument,
+    content: `<div data-local-block="bitable" data-model='${JSON.stringify(kanbanNoTopAddModel)}'></div>`,
+  };
+  await page.unroute('**/api/documents/bitable-kanban-e2e');
+  await page.route('**/api/documents/bitable-kanban-e2e', route =>
+    route.fulfill({ json: { code: 0, data: document } }),
+  );
+  await page.goto('/doc/bitable-kanban-e2e');
+  await expect(page.locator('.base-kanban__card')).toHaveCount(3);
+  await expect(page.locator('.base-kanban__column-add')).toHaveCount(0);
+
+  await page.locator('.base-kanban__column').first().getByRole('button', { name: /更多操作/ }).click();
+  const columnMenu = page.locator('.base-kanban__column-menu--portal');
+  await expect(columnMenu.getByRole('button', { name: '新建记录' })).toBeVisible();
+  await columnMenu.getByRole('button', { name: '新建记录' }).click();
+  await expect(page.locator('.base-kanban__card')).toHaveCount(4);
 });

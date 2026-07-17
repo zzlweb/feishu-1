@@ -8,7 +8,7 @@ import {
 import { createPortal } from 'react-dom';
 import {
   FLOATING_Z_INDEX,
-  bindFloatingLayer,
+  bindFloatingLayoutListeners,
   useAnchoredContextMenuPosition,
   useHoverFloatingGroup,
   type FloatingPanelPosition,
@@ -21,6 +21,9 @@ export const CONTEXT_MENU_SHELL_SELECTORS = [
   '.context-add-below-flyout',
   '.slash-table-grid-flyout',
   '.slash-columns-count-flyout',
+  '.docx-menu-wrapper',
+  '.bitable-context-menu',
+  '.feishu-table-chrome',
   '[data-floating-panel="true"]',
 ] as const;
 
@@ -68,7 +71,7 @@ export interface UseFloatingMenuShellOptions {
 
 /**
  * 块/媒体/表格/多维表配置菜单共用的壳：锚定定位、body portal 样式、悬停关闭、Esc/外点关闭。
- * 子菜单 flyout 仍由各菜单自行渲染，但布局同步应走 bindFloatingLayer({ mode: 'reposition' })。
+ * 子菜单 flyout 仍由各菜单自行渲染，但布局同步应走 bindFloatingLayoutListeners。
  */
 export function useFloatingMenuShell({
   fallback,
@@ -154,9 +157,5 @@ export function bindMenuFlyoutReposition(
   sync: () => void,
   anchor?: HTMLElement | null,
 ) {
-  return bindFloatingLayer({
-    mode: 'reposition',
-    anchor,
-    onReposition: sync,
-  });
+  return bindFloatingLayoutListeners(sync, anchor);
 }

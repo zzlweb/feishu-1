@@ -14,13 +14,11 @@
 - 目录与评论：左侧目录、当前章节高亮、块级评论、评论侧栏、评论定位和解决状态。
 - 导入能力：支持飞书公开链接导入、飞书导出 HTML / Markdown / TXT / ZIP 文件导入，并对部分公开样例做本地结构化还原。
 
-## 还原目标文档
+## 产品交付计划
 
-本项目的核心目标是：在本地项目中显示飞书文档，并尽量还原飞书的文档内容、UI、布局和交互效果。后续 UI、导入和 Bitable 相关开发优先参考：
+本项目的目标是交付可靠的单租户飞书文档复刻应用，而不只是展示一组相似组件。后续开发、修复和验收都以 [docs/PRODUCT_DELIVERY_PLAN.md](docs/PRODUCT_DELIVERY_PLAN.md) 为唯一入口。
 
-- `docs/feishu-rendering-spec.md`：飞书文档显示与 UI 还原规范。
-- `docs/feishu-import-strategy.md`：飞书公开链接、Open API、导出文件的导入策略。
-- `docs/feishu-parity-roadmap.md`：按阶段修复导入、普通文档显示、浮层系统和 Bitable 的路线图。
+计划以当前前后端代码审计为依据，覆盖数据/安全/保存、普通文档编辑、表格、多维表格 Grid 与画册、导入、视觉、可访问性、性能和发布门禁。开始任何新任务前先读取该计划中对应阶段的任务卡与验收条件。
 
 ## 技术栈
 
@@ -67,7 +65,9 @@ FEISHU_APP_SECRET=
 # PORT=3000
 ```
 
-没有飞书凭证时，基础文档编辑、上传、模板、本地导入仍可使用；需要调用飞书开放平台 API 的导入能力会受限。
+没有飞书凭证时，基础文档编辑、上传、模板、本地导入仍可使用；公开链接导入会走 HTML fallback。
+
+配置有效凭证后，`POST /api/documents/import-url` 优先使用 Open API 结构化映射；导入质量和资源管线的后续实施要求见 `docs/PRODUCT_DELIVERY_PLAN.md` 第 7 阶段。token 获取失败时警告中带 `FEISHU_AUTH_FAILED` 等错误码，并回退公开页。**勿将 `.env` 真值提交到仓库。**
 
 ### 3. 启动开发服务
 
@@ -143,7 +143,10 @@ npm run free-port  # 释放 3000 端口
 │   ├── data/db.json                 # 默认本地数据文件
 │   └── package.json
 └── docs/
-    └── public-feishu-docs.json      # 公开飞书样例清单
+    ├── PRODUCT_DELIVERY_PLAN.md             # 产品级复刻的唯一实施与验收计划
+    ├── public-feishu-docs.json               # 公开飞书样例清单
+    ├── public-feishu-import-audit.json       # 导入审计数据
+    └── public-feishu-render-audit.json       # 页面审计数据
 ```
 
 ## 主要模块说明
@@ -256,7 +259,7 @@ Playwright 默认访问 `http://127.0.0.1:5174`，可用 `PLAYWRIGHT_BASE_URL` �
 
 ## 开发注意事项
 
-- 任何 UI 还原或导入修复都应先对照 `docs/feishu-rendering-spec.md` 和 `docs/feishu-import-strategy.md`，避免只针对单张截图做临时 CSS。
+- 任务执行以 `docs/feishu-implementation-checklist.md` 为准；UI / 导入细节对照 `docs/feishu-rendering-spec.md` 和 `docs/feishu-import-strategy.md`，避免只针对单张截图做临时 CSS。
 - 修改 TipTap / ProseMirror 相关逻辑时，优先复用现有扩展和工具函数，不要直接在 `view.update` 中随意改正文 DOM。
 - 新增浮层时注意 React、Tippy、Portal 与 ProseMirror DOM 的边界，避免把会 portal 的节点放在容易被条件渲染重排的容器内。
 - 块操作应优先基于稳定 `blockId` 或可靠的 DOM → ProseMirror 节点解析，不要把文档位置 `pos` 当持久 ID。

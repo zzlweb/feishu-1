@@ -1,5 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import type { Editor } from '@tiptap/react';
 import { DOMSerializer } from '@tiptap/pm/model';
 import { MessagePlugin } from 'tdesign-react';
@@ -7,12 +6,19 @@ import {
   FormatVerticalAlignLeftIcon,
   FormatVerticalAlignCenterIcon,
   FormatVerticalAlignRightIcon,
+  IndentRightIcon,
+  IndentLeftIcon,
 } from 'tdesign-icons-react';
 import { wrapIcon } from '../../../icons/wrap';
 import { IconChevronMenuEnd } from '../../../icons/feishuDoc';
 import { syncEditorSelectionToAnchoredBlock } from '../blocks/blockAnchorSelection';
 import { copyCurrentBlockLink } from '../blocks/blockLink';
 import { makeFeishuBlockId } from '../blocks/feishuBlockId';
+import {
+  applyEditorIndentIncrease,
+  applyEditorIndentDecrease,
+  getEditorIndentUiState,
+} from '../blocks/blockIndent';
 import {
   ADD_BELOW_FLYOUT_MAX_HEIGHT,
   clampFlyoutHeight,
@@ -22,7 +28,12 @@ import { getInsertBelowPosition, insertButtonBlockAt, insertSlashItemAt } from '
 import { insertFeishuColumnsAt } from '../blocks/columnsInsert';
 import { insertFeishuTableAt } from '../tables/tableInsert';
 import AddBelowSlashSections from '../menus/AddBelowSlashSections';
-import { isPointerWithinFloatingShell, bindFloatingLayoutListeners, useAnchoredContextMenuPosition, useHoverFloatingGroup } from '../shared/floatingPanel';
+import { isPointerWithinFloatingShell, bindFloatingLayoutListeners } from '../shared/floatingPanel';
+import {
+  CONTEXT_MENU_SHELL_SELECTORS,
+  FloatingMenuPortal,
+  useFloatingMenuShell,
+} from '../shared/FloatingMenuShell';
 import {
   dispatchImageBlockAction,
   getImageAlignFromEditor,
@@ -35,6 +46,8 @@ import '../menus/ContextMenu.less';
 const AlignTextLeft = wrapIcon(FormatVerticalAlignLeftIcon);
 const AlignTextCenter = wrapIcon(FormatVerticalAlignCenterIcon);
 const AlignTextRight = wrapIcon(FormatVerticalAlignRightIcon);
+const IndentRight = wrapIcon(IndentRightIcon);
+const IndentLeft = wrapIcon(IndentLeftIcon);
 
 interface ImageContextMenuProps {
   editor: Editor;
@@ -189,6 +202,9 @@ const ADD_BELOW = [
   'M2 4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm2 0v16h16V4H4Z',
 ];
 const CROP_PATH = 'M6.667 2.533A.533.533 0 0 0 6.133 2H5.2a.533.533 0 0 0-.533.533v2.8h-2.8a.533.533 0 0 0-.534.534V6.8c0 .295.24.533.534.533h2.8V17.6c0 .59.477 1.067 1.067 1.067h11.601v2.8c0 .294.239.533.533.533h.934a.533.533 0 0 0 .533-.533v-2.8h2.799a.533.533 0 0 0 .533-.534V17.2a.533.533 0 0 0-.534-.533h-2.798v-8.8c0-.014 0-.028-.002-.04V6.4c0-.59-.477-1.067-1.066-1.067h-11.6v-2.8Zm10.666 14.134H6.668V7.333h10.667v9.334Z';
+const IMAGE_PREVIEW = 'M12 3C6.5 3 2.1 7.1 1 12c1.1 4.9 5.5 9 11 9s9.9-4.1 11-9c-1.1-4.9-5.5-9-11-9Zm0 16c-4.2 0-7.6-2.9-8.7-7C4.4 7.9 7.8 5 12 5s7.6 2.9 8.7 7c-1.1 4.1-4.5 7-8.7 7Zm0-11a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z';
+const IMAGE_RESET = 'M12 3a9 9 0 1 1-8.49 6H1.2a1 1 0 0 1-.7-1.71l3-3a1 1 0 0 1 1.41 0l3 3A1 1 0 0 1 7.2 9H5.57A7 7 0 1 0 12 5a1 1 0 1 1 0-2Z';
+const IMAGE_DOWNLOAD = 'M11 3a1 1 0 1 1 2 0v9.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42l2.3 2.3V3Zm-7 14a1 1 0 0 1 1 1v1h14v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Z';
 
 export default function ImageContextMenu({
   editor,
@@ -205,75 +221,40 @@ export default function ImageContextMenu({
   const imageEditTriggerRef = useRef<HTMLDivElement>(null);
   const addBelowTriggerRef = useRef<HTMLDivElement>(null);
   const addBelowFlyoutRef = useRef<HTMLDivElement>(null);
-  const { finalPos, posVisible } = useAnchoredContextMenuPosition(anchorRef, menuRef, { x, y });
   const [activeFlyout, setActiveFlyout] = useState<{ kind: 'align' | 'below' | 'imageEdit'; rect: DOMRect } | null>(null);
 
-  useEffect(() => {
-    const isWithinShell = (target: Node) => {
-      if (menuRef.current?.contains(target)) return true;
-      if (addBelowFlyoutRef.current?.contains(target)) return true;
-      if (target instanceof Element && target.closest('.context-submenu-flyout, .context-add-below-flyout, .docx-menu-wrapper')) {
-        return true;
-      }
-      return false;
-    };
+  const dismissByHover = () => {
+    setActiveFlyout(null);
+    (onHoverDismiss ?? onClose)();
+  };
 
-    const handleClick = (e: MouseEvent) => {
-      if (e.button !== 0) return;
-      const t = e.target as Node;
-      if (isWithinShell(t)) return;
-      if (anchorRef?.current?.contains(t)) return;
-      onClose();
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('mousedown', handleClick);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [anchorRef, onClose]);
+  const {
+    finalPos,
+    posVisible,
+    keepHoverAlive,
+    scheduleClose,
+    containsTarget,
+  } = useFloatingMenuShell({
+    fallback: { x, y },
+    panelRef: menuRef,
+    anchorRef,
+    onClose,
+    onHoverDismiss: dismissByHover,
+    onMouseEnterCancel,
+    hoverRefs: [alignTriggerRef, imageEditTriggerRef, addBelowTriggerRef, addBelowFlyoutRef],
+    hoverSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+    insideSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+  });
 
   const alignSelectionToBlockAnchor = () =>
     syncEditorSelectionToAnchoredBlock(editor, blockAnchorRef?.current ?? null);
 
-  const dismissByHover = () => {
-    (onHoverDismiss ?? onClose)();
-  };
-
-  const hoverGroup = useHoverFloatingGroup({
-    refs: [menuRef, alignTriggerRef, imageEditTriggerRef, addBelowTriggerRef, addBelowFlyoutRef, anchorRef],
-    selectors: [
-      '.docx-menu-wrapper',
-      '.context-submenu-flyout',
-      '.context-add-below-flyout',
-      '.slash-table-grid-flyout',
-      '.slash-columns-count-flyout',
-    ],
-    closeDelay: 160,
-    onClose: () => {
-      setActiveFlyout(null);
-      dismissByHover();
-    },
-  });
-
   const pointerStillInShell = (next: EventTarget | null): boolean =>
-    hoverGroup.containsTarget(next) || isPointerWithinFloatingShell(next, [menuRef, anchorRef], [
-      '.docx-menu-wrapper',
-      '.context-submenu-flyout',
-      '.context-add-below-flyout',
-    ]);
+    containsTarget(next) || isPointerWithinFloatingShell(next, [menuRef, anchorRef], [...CONTEXT_MENU_SHELL_SELECTORS]);
 
   const handleShellMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    hoverGroup.scheduleClose(e.relatedTarget);
-  };
-
-  const keepHoverAlive = () => {
-    hoverGroup.cancelClose();
-    onMouseEnterCancel?.();
+    scheduleClose(e.relatedTarget);
   };
 
   const openFlyout = (kind: 'align' | 'below' | 'imageEdit', triggerEl: HTMLElement) => {
@@ -316,7 +297,7 @@ export default function ImageContextMenu({
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
     if (pointerStillInShell(e.relatedTarget)) return;
-    hoverGroup.scheduleClose(e.relatedTarget);
+    scheduleClose(e.relatedTarget);
   };
 
   const handleSyncBlock = () => {
@@ -420,6 +401,12 @@ export default function ImageContextMenu({
     onClose();
   };
 
+  const handleImageAction = (action: 'preview' | 'reset' | 'download' | 'focusCaption') => {
+    alignSelectionToBlockAnchor();
+    dispatchImageBlockAction(action);
+    onClose();
+  };
+
   const setAlign = (align: ImageAlign) => {
     alignSelectionToBlockAnchor();
     setImageAlignOnEditor(editor, align);
@@ -427,6 +414,7 @@ export default function ImageContextMenu({
   };
 
   const currentAlign = getImageAlignFromEditor(editor);
+  const indentState = getEditorIndentUiState(editor);
   const submenuIconStroke = { strokeWidth: 2.75 };
 
   const flyoutPosition = activeFlyout && posVisible
@@ -435,7 +423,7 @@ export default function ImageContextMenu({
       panelWidth: activeFlyout.kind === 'below' ? 252 : 200,
       panelHeight: activeFlyout.kind === 'below'
         ? clampFlyoutHeight(addBelowFlyoutRef.current?.scrollHeight ?? ADD_BELOW_FLYOUT_MAX_HEIGHT)
-        : activeFlyout.kind === 'imageEdit' ? 48 : 132,
+        : activeFlyout.kind === 'imageEdit' ? 192 : 132,
       gap: 0,
       pad: 8,
     })
@@ -453,11 +441,29 @@ export default function ImageContextMenu({
       onMouseLeave={handleFlyoutMouseLeave}
       onMouseDown={e => e.preventDefault()}
     >
+      <button type="button" className="context-align-row" onClick={() => handleImageAction('preview')}>
+        <span className="context-menu-icon">
+          <MenuIcon dataIcon="PreviewOutlined" paths={[IMAGE_PREVIEW]} />
+        </span>
+        <span className="context-align-label">放大查看</span>
+      </button>
       <button type="button" className="context-align-row" onClick={handleCrop}>
         <span className="context-menu-icon">
           <MenuIcon dataIcon="CropOutlined" paths={[CROP_PATH]} />
         </span>
         <span className="context-align-label">裁剪</span>
+      </button>
+      <button type="button" className="context-align-row" onClick={() => handleImageAction('reset')}>
+        <span className="context-menu-icon">
+          <MenuIcon dataIcon="ResetOutlined" paths={[IMAGE_RESET]} />
+        </span>
+        <span className="context-align-label">重置图片</span>
+      </button>
+      <button type="button" className="context-align-row" onClick={() => handleImageAction('download')}>
+        <span className="context-menu-icon">
+          <MenuIcon dataIcon="DownloadOutlined" paths={[IMAGE_DOWNLOAD]} />
+        </span>
+        <span className="context-align-label">下载图片</span>
       </button>
     </div>
   );
@@ -487,6 +493,37 @@ export default function ImageContextMenu({
           </button>
         );
       })}
+      <div className="context-menu-divider context-menu-divider--thin" aria-hidden />
+      <button
+        type="button"
+        className="context-align-row"
+        disabled={indentState.canDecrease === false}
+        onClick={() => {
+          alignSelectionToBlockAnchor();
+          applyEditorIndentDecrease(editor);
+          onClose();
+        }}
+      >
+        <span className="context-menu-icon">
+          <IndentLeft {...submenuIconStroke} size={16} fill={ICON_MUTED} />
+        </span>
+        <span className="context-align-label">减少缩进</span>
+      </button>
+      <button
+        type="button"
+        className="context-align-row"
+        disabled={indentState.canIncrease === false}
+        onClick={() => {
+          alignSelectionToBlockAnchor();
+          applyEditorIndentIncrease(editor);
+          onClose();
+        }}
+      >
+        <span className="context-menu-icon">
+          <IndentRight {...submenuIconStroke} size={16} fill={ICON_MUTED} />
+        </span>
+        <span className="context-align-label">增加缩进</span>
+      </button>
     </div>
   );
 
@@ -662,13 +699,14 @@ export default function ImageContextMenu({
     </div>
   );
 
-  return createPortal(
-    <Fragment>
-      {menuPanel}
-      {activeFlyout?.kind === 'imageEdit' && flyoutPosition && imageEditFlyoutPanel}
-      {activeFlyout?.kind === 'align' && flyoutPosition && alignFlyoutPanel}
-      {activeFlyout?.kind === 'below' && flyoutPosition && addBelowFlyoutPanel}
-    </Fragment>,
-    document.body,
+  return (
+    <FloatingMenuPortal>
+      <Fragment>
+        {menuPanel}
+        {activeFlyout?.kind === 'imageEdit' && flyoutPosition && imageEditFlyoutPanel}
+        {activeFlyout?.kind === 'align' && flyoutPosition && alignFlyoutPanel}
+        {activeFlyout?.kind === 'below' && flyoutPosition && addBelowFlyoutPanel}
+      </Fragment>
+    </FloatingMenuPortal>
   );
 }

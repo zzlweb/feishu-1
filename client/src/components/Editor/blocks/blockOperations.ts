@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/react';
 import { Fragment, type Node as ProseNode } from '@tiptap/pm/model';
 import { DOMSerializer } from '@tiptap/pm/model';
-import { NodeSelection, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, TextSelection, type Transaction } from '@tiptap/pm/state';
 
 export const OPERABLE_BLOCK_TYPES = new Set([
   'paragraph',
@@ -39,19 +39,45 @@ interface InsertRange {
 
 const LIST_BLOCK_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
 
-function resolveStandaloneBlockInsertPos(editor: Editor, pos: number): number {
-  const doc = editor.state.doc;
-  const clamped = Math.max(0, Math.min(pos, doc.content.size));
-  const $pos = doc.resolve(clamped);
-
+function findListDepth($pos: { depth: number; node: (depth: number) => ProseNode; after: (depth: number) => number }): number {
   let listDepth = -1;
   for (let depth = $pos.depth; depth > 0; depth -= 1) {
     if (LIST_BLOCK_TYPES.has($pos.node(depth).type.name)) {
       listDepth = depth;
     }
   }
+  return listDepth;
+}
 
-  return listDepth > 0 ? $pos.after(listDepth) : clamped;
+function isVisuallyEmptyTextblock(node: ProseNode): boolean {
+  return node.isTextblock && node.textContent.trim().length === 0;
+}
+
+function placeCaretAfterHorizontalRule(tr: Transaction, hrPos: number) {
+  const hrNode = tr.doc.nodeAt(hrPos);
+  if (!hrNode || hrNode.type.name !== 'horizontalRule') {
+    return tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(hrPos + 1, tr.doc.content.size)), 1));
+  }
+
+  const afterPos = hrPos + hrNode.nodeSize;
+  const $after = tr.doc.resolve(Math.min(afterPos, tr.doc.content.size));
+  const nodeAfter = $after.nodeAfter;
+
+  if (nodeAfter?.isTextblock) {
+    return tr.setSelection(TextSelection.create(tr.doc, afterPos + 1));
+  }
+
+  if (nodeAfter?.isBlock && NodeSelection.isSelectable(nodeAfter)) {
+    return tr.setSelection(NodeSelection.create(tr.doc, afterPos));
+  }
+
+  const paragraph = tr.doc.type.schema.nodes.paragraph?.createAndFill();
+  if (paragraph && $after.parent.canReplaceWith($after.index(), $after.index(), paragraph.type)) {
+    tr = tr.insert(afterPos, paragraph);
+    return tr.setSelection(TextSelection.create(tr.doc, afterPos + 1));
+  }
+
+  return tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(afterPos, tr.doc.content.size)), 1));
 }
 
 export function insertStandaloneHorizontalRule(
@@ -59,18 +85,80 @@ export function insertStandaloneHorizontalRule(
   options?: { pos?: number; deleteRange?: InsertRange },
 ): boolean {
   const { state, view } = editor;
-  const pos = options?.pos ?? state.selection.from;
-  const insertPos = resolveStandaloneBlockInsertPos(editor, pos);
   const horizontalRule = state.schema.nodes.horizontalRule?.create();
   if (!horizontalRule) return false;
 
-  let tr = state.tr;
-  if (options?.deleteRange && options.deleteRange.from < options.deleteRange.to) {
-    tr = tr.delete(options.deleteRange.from, options.deleteRange.to);
+  const anchorPos = options?.pos ?? state.selection.from;
+  const deleteRange = options?.deleteRange;
+
+  // + 菜单空段落：deleteRange 已覆盖整块，直接替换，避免留下空行
+  if (deleteRange && deleteRange.from < deleteRange.to) {
+    const covered = state.doc.nodeAt(deleteRange.from);
+    if (covered?.isBlock && deleteRange.from + covered.nodeSize === deleteRange.to) {
+      let tr = state.tr.replaceWith(deleteRange.from, deleteRange.to, horizontalRule);
+      tr = placeCaretAfterHorizontalRule(tr, deleteRange.from);
+      view.dispatch(tr.scrollIntoView());
+      view.focus();
+      return true;
+    }
   }
 
-  const mappedInsertPos = tr.mapping.map(insertPos, -1);
-  tr = tr.insert(mappedInsertPos, horizontalRule);
+  let tr = state.tr;
+  if (deleteRange && deleteRange.from < deleteRange.to) {
+    tr = tr.delete(deleteRange.from, deleteRange.to);
+  }
+
+  const mappedAnchor = tr.mapping.map(anchorPos, -1);
+  const safePos = Math.max(0, Math.min(mappedAnchor, tr.doc.content.size));
+  const $pos = tr.doc.resolve(safePos);
+  const listDepth = findListDepth($pos);
+
+  // 列表内：提到列表外，避免 HR 嵌在 listItem 里
+  if (listDepth > 0) {
+    const insertPos = $pos.after(listDepth);
+    tr = tr.insert(insertPos, horizontalRule);
+    tr = placeCaretAfterHorizontalRule(tr, insertPos);
+    view.dispatch(tr.scrollIntoView());
+    view.focus();
+    return true;
+  }
+
+  // 空段落 / slash 删完后的空文本块：替换当前块，而不是插到下一行
+  for (let depth = $pos.depth; depth > 0; depth -= 1) {
+    const node = $pos.node(depth);
+    if (!node.isTextblock) continue;
+    if (!isVisuallyEmptyTextblock(node)) break;
+    const from = $pos.before(depth);
+    const to = $pos.after(depth);
+    tr = tr.replaceWith(from, to, horizontalRule);
+    tr = placeCaretAfterHorizontalRule(tr, from);
+    view.dispatch(tr.scrollIntoView());
+    view.focus();
+    return true;
+  }
+
+  // 插入点落在块间隙且前一块为空段落：替换前一块（兼容 + 菜单未带上整块 range 的情况）
+  const nodeBefore = $pos.nodeBefore;
+  if (nodeBefore && isVisuallyEmptyTextblock(nodeBefore)) {
+    const from = safePos - nodeBefore.nodeSize;
+    tr = tr.replaceWith(from, safePos, horizontalRule);
+    tr = placeCaretAfterHorizontalRule(tr, from);
+    view.dispatch(tr.scrollIntoView());
+    view.focus();
+    return true;
+  }
+
+  // 非空块：行首插在块前（对齐 TipTap 官方），否则插在块后
+  let insertPos = safePos;
+  for (let depth = $pos.depth; depth > 0; depth -= 1) {
+    const node = $pos.node(depth);
+    if (!node.isTextblock) continue;
+    insertPos = $pos.parentOffset === 0 ? $pos.before(depth) : $pos.after(depth);
+    break;
+  }
+
+  tr = tr.insert(insertPos, horizontalRule);
+  tr = placeCaretAfterHorizontalRule(tr, insertPos);
   view.dispatch(tr.scrollIntoView());
   view.focus();
   return true;
@@ -321,9 +409,18 @@ export function moveBlock(editor: Editor, source: EditorBlockRef, target: Editor
   return true;
 }
 
-export function moveBlockIntoColumns(editor: Editor, source: EditorBlockRef, target: EditorBlockRef): boolean {
+/** 将 source 拖到 target 左侧/右侧，合并为两栏分栏（飞书式并排）。 */
+export function moveBlockIntoColumns(
+  editor: Editor,
+  source: EditorBlockRef,
+  target: EditorBlockRef,
+  side: 'left' | 'right' = 'right',
+): boolean {
   if (source.from === target.from && source.to === target.to) return false;
   if (target.from >= source.from && target.to <= source.to) return false;
+  if (source.node.type.name === 'localColumnsBlock' || target.node.type.name === 'localColumnsBlock') {
+    return false;
+  }
 
   const columnsType = editor.schema.nodes.localColumnsBlock;
   const columnType = editor.schema.nodes.localColumnBlock;
@@ -331,11 +428,13 @@ export function moveBlockIntoColumns(editor: Editor, source: EditorBlockRef, tar
 
   const sourceContent = editor.state.doc.slice(source.from, source.to).content;
   const targetContent = editor.state.doc.slice(target.from, target.to).content;
+  const leftContent = side === 'left' ? sourceContent : targetContent;
+  const rightContent = side === 'left' ? targetContent : sourceContent;
   const columnsNode = columnsType.create(
     null,
     Fragment.fromArray([
-      columnType.create({ widthRatio: 1 }, targetContent),
-      columnType.create({ widthRatio: 1 }, sourceContent),
+      columnType.create({ widthRatio: 1 }, leftContent),
+      columnType.create({ widthRatio: 1 }, rightContent),
     ]),
   );
 
@@ -352,6 +451,16 @@ export function moveBlockIntoColumns(editor: Editor, source: EditorBlockRef, tar
   } else {
     tr = tr.delete(source.from, source.to);
     tr = tr.replaceWith(targetFrom, targetTo, columnsNode);
+  }
+
+  const insertPos = Math.min(targetFrom, targetTo);
+  try {
+    const inserted = tr.doc.nodeAt(insertPos);
+    if (inserted && NodeSelection.isSelectable(inserted)) {
+      tr = tr.setSelection(NodeSelection.create(tr.doc, insertPos));
+    }
+  } catch {
+    /* keep mapped selection */
   }
 
   tr = tr.scrollIntoView();

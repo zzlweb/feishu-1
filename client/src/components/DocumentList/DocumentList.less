@@ -1,19 +1,9 @@
-@primary: #3370ff;
-@primary-hover: #2860e1;
-@text-primary: #1f2329;
-@text-secondary: #646a73;
-@text-placeholder: #bbbfc4;
-@bg-body: #f5f6f7;
-@bg-white: #ffffff;
-@bg-hover: #f0f1f2;
-@border-color: #dee0e3;
-@border-light: #e8e9eb;
+@import '../../styles/feishu-tokens.less';
+
+@bg-body: @bg-hover;
+@text-placeholder: @text-placeholder-light;
+@radius-md: @radius-lg;
 @shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-@shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-@radius-sm: 4px;
-@radius-md: 8px;
-@font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
-  "Microsoft YaHei", sans-serif;
 
 .home-page {
   display: flex;
@@ -801,6 +791,14 @@
   color: @primary;
   font-size: 12px;
   font-weight: 500;
+}
+
+.feishu-import-result__fallback-hint {
+  margin: 8px 0 0;
+  color: #d46b08;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 .feishu-import-result__meta {

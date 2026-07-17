@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import { HTMLElement, parse } from 'node-html-parser';
 import { marked } from 'marked';
 import { decodeUploadedFilename } from './encoding';
+import { assertImportQualityContract } from './import/importQuality';
 import type { ImportMetadata } from './import/types';
 
 const uploadDir = path.resolve(__dirname, '..', 'public', 'uploads');
@@ -55,6 +56,15 @@ function buildPlainTextDocument(text: string) {
     .split(/\n{2,}/)
     .map(part => `<p>${part.split('\n').map(line => escapeHtml(line)).join('<br>') || '<br>'}</p>`)
     .join('');
+}
+
+function localFileImportMetadata(note: string): ImportMetadata {
+  return {
+    permission: 'unknown',
+    readonly: false,
+    comments: 'not_supported',
+    notes: [note],
+  };
 }
 
 function safeUploadedAssetName(originalName: string) {
@@ -210,12 +220,7 @@ async function importZip(buffer: Buffer, sourceName: string): Promise<ImportedDo
       ? [`已从 ZIP 中还原 ${assetMap.size} 个本地资源。`]
       : ['ZIP 中没有检测到可还原的本地资源。'],
     importQuality: 'partial',
-    importMetadata: {
-      permission: 'unknown',
-      readonly: false,
-      comments: 'not_supported',
-      notes: ['本地导出文件不包含飞书实时权限与评论线程，已作为可编辑副本导入。'],
-    },
+    importMetadata: localFileImportMetadata('本地导出文件不包含飞书实时权限与评论线程，已作为可编辑副本导入。'),
   };
 }
 
@@ -223,26 +228,21 @@ export async function importDocumentFile(file: Express.Multer.File): Promise<Imp
   const sourceName = decodeUploadedFilename(file.originalname || file.filename || '未命名文档');
   const ext = path.extname(sourceName).toLowerCase();
 
-  if (ext === '.zip') return importZip(file.buffer, sourceName);
+  if (ext === '.zip') return assertImportQualityContract(await importZip(file.buffer, sourceName));
 
   const text = file.buffer.toString('utf-8');
   if (HTML_EXTENSIONS.has(ext)) {
-    return {
+    return assertImportQualityContract({
       ...extractHtmlBody(text, sourceName),
       sourceName,
       assetCount: 0,
       warnings: ['已导入 HTML 正文；飞书私有块数据可能无法完整还原。'],
       importQuality: 'partial',
-      importMetadata: {
-        permission: 'unknown',
-        readonly: false,
-        comments: 'not_supported',
-        notes: ['HTML 文件导入不包含飞书实时权限与评论线程。'],
-      },
-    };
+      importMetadata: localFileImportMetadata('HTML 文件导入不包含飞书实时权限与评论线程。'),
+    });
   }
   if (MARKDOWN_EXTENSIONS.has(ext)) {
-    return {
+    return assertImportQualityContract({
       title: stripExtension(sourceName),
       content: await marked.parse(text),
       sourceName,
@@ -250,16 +250,11 @@ export async function importDocumentFile(file: Express.Multer.File): Promise<Imp
       warnings: ['Markdown 导入仅保留文本结构和基础格式，飞书块级 UI 会降级。'],
       importQuality: 'fallback',
       unsupportedBlocks: [{ type: 'feishu-blocks', reason: 'Markdown 文件不包含飞书结构化 block 数据。' }],
-      importMetadata: {
-        permission: 'unknown',
-        readonly: false,
-        comments: 'not_supported',
-        notes: ['Markdown 文件不包含飞书权限与评论线程。'],
-      },
-    };
+      importMetadata: localFileImportMetadata('Markdown 文件不包含飞书权限与评论线程。'),
+    });
   }
   if (TEXT_EXTENSIONS.has(ext)) {
-    return {
+    return assertImportQualityContract({
       title: stripExtension(sourceName),
       content: buildPlainTextDocument(text),
       sourceName,
@@ -267,13 +262,8 @@ export async function importDocumentFile(file: Express.Multer.File): Promise<Imp
       warnings: ['纯文本导入仅保留段落和换行，所有飞书块级样式都会降级。'],
       importQuality: 'fallback',
       unsupportedBlocks: [{ type: 'rich-formatting', reason: '纯文本文件不包含富文本或飞书块结构。' }],
-      importMetadata: {
-        permission: 'unknown',
-        readonly: false,
-        comments: 'not_supported',
-        notes: ['纯文本文件不包含飞书权限与评论线程。'],
-      },
-    };
+      importMetadata: localFileImportMetadata('纯文本文件不包含飞书权限与评论线程。'),
+    });
   }
 
   throw new Error('暂不支持该文件类型。请导入飞书导出的 HTML/Markdown/TXT 或包含这些文件的 ZIP');
