@@ -35,7 +35,7 @@
 | FG-014 | Slash | 选择图片/文件命令后取消原生文件选择器 | 命令范围延迟到用户实际选中文件后才删除，取消选择会保留原 Slash 文本 | [slashMenuConfig.ts](../../client/src/components/Editor/menus/slashMenuConfig.ts) | Client build 已覆盖，文件选择器 E2E 待补 | REF-SLASH-03 |
 | FG-015 | Slash 上传 | 选择图片并令 `/api/uploads` 失败 | 插入无重试能力的失败 embed；应保留媒体块并提供重试/移除 | [slashMenuConfig.ts](../../client/src/components/Editor/menus/slashMenuConfig.ts) | 缺失 | REF-UPLOAD-02 |
 | FG-016 | 块菜单 | 用键盘打开对齐、颜色或下方添加子菜单 | 触发器是 pointer hover 的非聚焦 `div`；应使用语义 menuitem 和完整键盘路径 | [ContextMenu.tsx](../../client/src/components/Editor/menus/ContextMenu.tsx) | 部分：[block-color.spec.ts](../../client/tests/block-color.spec.ts)、[block-hover-floating.spec.ts](../../client/tests/block-hover-floating.spec.ts) 仅鼠标 | REF-BLOCK-01 |
-| FG-017 | 块菜单 | 在剪贴板权限被拒绝或 `execCommand` 失败时剪切/复制 | 失败被忽略；应使用 Clipboard API/fallback 并展示可恢复错误 | [ContextMenu.tsx](../../client/src/components/Editor/menus/ContextMenu.tsx) | 缺失 | REF-BLOCK-02 |
+| FG-017 | 块菜单 | 在剪贴板权限被拒绝或 `execCommand` 失败时剪切/复制 | 已检查剪切/复制返回值并显示快捷键恢复提示；复制文档链接捕获权限异常并提示从地址栏复制 | [ContextMenu.tsx](../../client/src/components/Editor/menus/ContextMenu.tsx) | Client build 已覆盖，权限拒绝 E2E 待补 | REF-BLOCK-02 |
 | FG-018 | 标题折叠 | 折叠标题后替换/导入内容，使 heading ID 改变，再刷新 | 保存的 ID 不清理，状态孤立；应稳定身份或迁移/裁剪 | [DocumentPage.tsx](../../client/src/components/Layout/DocumentPage.tsx)、[headingCollapse.ts](../../client/src/components/Editor/blocks/headingCollapse.ts) | 部分：[heading-id-uniqueness.spec.ts](../../client/tests/heading-id-uniqueness.spec.ts) 只测重复 ID | REF-HEADING-01 |
 | FG-019 | 目录 | 长文档只滚动、不移动光标 | 当前项由焦点/选区驱动；应按视口提供 scrollspy 高亮 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[Sidebar.tsx](../../client/src/components/Layout/Sidebar.tsx) | 部分：[catalogue-sticky-layout.spec.ts](../../client/tests/catalogue-sticky-layout.spec.ts) 只测布局 | REF-HEADING-02 |
 | FG-020 | 标题折叠 | 拒绝 `collapsed_heading_ids` 保存 | 通用错误短暂消失，无定向重试或回滚；应保留失败状态与重试 | [DocumentPage.tsx](../../client/src/components/Layout/DocumentPage.tsx) | 缺失 | REF-HEADING-01 |
@@ -62,7 +62,7 @@
 
 ## P2 候选
 
-以下能力不应在界面中伪装成完整功能，应在对应阶段决定实现或移除：块菜单“翻译”、评论“翻译/举报”、评论本地点赞、打开筛选面板即持久化空规则、公共链接允许 HTTP、Record Modal 文本字段逐键提交且 Esc 不取消。
+以下能力不应在界面中伪装成完整功能，应在对应阶段决定实现或移除：评论“翻译/举报”、评论本地点赞、打开筛选面板即持久化空规则、Record Modal 文本字段逐键提交且 Esc 不取消。块菜单伪“翻译”和公共链接 HTTP 已移除。
 
 ## 数量与覆盖
 

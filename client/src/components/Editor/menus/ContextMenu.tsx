@@ -22,7 +22,6 @@ import {
   ContextGlyphShare,
   ContextGlyphStyleColor,
   ContextGlyphTemplate,
-  ContextGlyphTranslate,
   ContextGlyphTypography,
   ContextGlyphText,
   FEISHU_TOOLBOX,
@@ -411,27 +410,16 @@ export default function ContextMenu({
 
   const handleCut = () => {
     alignSelectionToBlockAnchor();
-    document.execCommand('cut');
+    const succeeded = document.execCommand('cut');
+    if (!succeeded) void MessagePlugin.error('剪切失败，请使用 Ctrl+X 重试');
     onClose();
   };
 
   const handleCopy = () => {
     alignSelectionToBlockAnchor();
-    document.execCommand('copy');
-    onClose();
-  };
-
-  const handleTranslate = async () => {
-    alignSelectionToBlockAnchor();
-    const { from, to } = getCurrentBlockRange(editor);
-    const text = editor.state.doc.textBetween(from, to, '\n').trim();
-    if (!text) {
-      void MessagePlugin.info('当前块没有可翻译的文本');
-      onClose();
-      return;
-    }
-    await navigator.clipboard.writeText(text);
-    void MessagePlugin.info('已复制当前块文本，可粘贴到翻译工具');
+    const succeeded = document.execCommand('copy');
+    if (succeeded) void MessagePlugin.success('已复制');
+    else void MessagePlugin.error('复制失败，请使用 Ctrl+C 重试');
     onClose();
   };
 
@@ -443,8 +431,12 @@ export default function ContextMenu({
   };
 
   const handleShare = async () => {
-    await navigator.clipboard.writeText(window.location.href);
-    void MessagePlugin.success('分享链接已复制');
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      void MessagePlugin.success('文档链接已复制');
+    } catch {
+      void MessagePlugin.error('无法访问剪贴板，请从地址栏复制链接');
+    }
     onClose();
   };
 
@@ -771,10 +763,6 @@ export default function ContextMenu({
             <span style={{ flex: 1 }}>复制</span>
             <span className="context-menu-shortcut">Ctrl+C</span>
           </button>
-          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleTranslate()}>
-            <span className="context-menu-icon"><ContextGlyphTranslate size={18} fill={ICON_MUTED} /></span>
-            <span style={{ flex: 1 }}>翻译</span>
-          </button>
           <button type="button" className="context-menu-item context-menu-item--danger" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleDelete}>
             <span className="context-menu-icon"><ContextGlyphDelete size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>删除</span>
@@ -785,7 +773,7 @@ export default function ContextMenu({
 
           <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleShare()}>
             <span className="context-menu-icon"><ContextGlyphShare size={18} fill={ICON_MUTED} /></span>
-            <span style={{ flex: 1 }}>分享</span>
+            <span style={{ flex: 1 }}>复制文档链接</span>
           </button>
           <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleConvertToChild()}>
             <span className="context-menu-icon context-menu-icon--subdoc"><SlashGlyphSubDoc size={18} fill={ICON_MUTED} /></span>
