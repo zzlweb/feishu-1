@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { updateDocument, type UpdateDocumentInput } from '../../../api/documents';
 import type { Document, DocumentSaveStatus } from '../../../types';
+import { clearDocumentDraft, readDocumentDraft, writeDocumentDraft } from './documentDraft';
 
 export type DocumentPatch = Pick<Partial<Document>,
   'title' | 'content' | 'icon' | 'cover_url' | 'collapsed_heading_ids'
@@ -57,10 +58,16 @@ export function useDocumentSaveQueue({
       if (response.code === 0 && response.data) {
         versionRef.current = response.data.version;
         await onSavedRef.current(patch, response.data);
+        if (pendingRef.current) {
+          writeDocumentDraft(window.localStorage, documentId, versionRef.current, pendingRef.current);
+        } else {
+          clearDocumentDraft(window.localStorage, documentId);
+        }
         continue;
       }
 
       pendingRef.current = { ...patch, ...(pendingRef.current || {}) };
+      writeDocumentDraft(window.localStorage, documentId, versionRef.current, pendingRef.current);
       blockedRef.current = true;
       if (response.code === 409 && response.data) {
         setStatus('conflict');
@@ -76,7 +83,9 @@ export function useDocumentSaveQueue({
 
   const enqueue = useCallback((patch: DocumentPatch) => {
     if (!documentId || Object.keys(patch).length === 0) return;
-    pendingRef.current = { ...(pendingRef.current || {}), ...patch };
+    const storedPatch = readDocumentDraft(window.localStorage, documentId)?.patch || {};
+    pendingRef.current = { ...storedPatch, ...(pendingRef.current || {}), ...patch };
+    writeDocumentDraft(window.localStorage, documentId, versionRef.current, pendingRef.current);
     if (!blockedRef.current) setStatus('dirty');
     void drain();
   }, [documentId, drain]);
@@ -90,4 +99,3 @@ export function useDocumentSaveQueue({
 
   return { status, enqueue, retry };
 }
-

@@ -25,6 +25,12 @@ import {
 } from '../Editor/blocks/commentDocumentSync';
 import { resolveBlockElement } from '../Editor/blocks/blockDom';
 import { useDocumentSaveQueue, type DocumentPatch } from '../../features/documents/session/useDocumentSaveQueue';
+import {
+  clearDocumentDraft,
+  isDocumentDraftNewer,
+  readDocumentDraft,
+  type StoredDocumentDraft,
+} from '../../features/documents/session/documentDraft';
 import './Layout.less';
 
 const EDITOR_PAGE_MIN_WIDTH = 860;
@@ -88,6 +94,8 @@ export default function DocumentPage() {
     quote: string;
     anchorJson: string;
   } | null>(null);
+  const [recoverableDraft, setRecoverableDraft] = useState<{ draft: StoredDocumentDraft; serverDocument: Document } | null>(null);
+  const [editorRevision, setEditorRevision] = useState(0);
   const outlineWasVisibleRef = useRef(false);
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const pageMainRef = useRef<HTMLElement>(null);
@@ -168,7 +176,15 @@ export default function DocumentPage() {
       const res = await getDocument(id);
       if (requestId !== loadRequestSequenceRef.current) return;
       if (res.code === 0 && res.data) {
-        setDoc(res.data);
+        const draft = readDocumentDraft(window.localStorage, id);
+        if (draft && isDocumentDraftNewer(draft, res.data) && !res.data.read_only) {
+          setRecoverableDraft({ draft, serverDocument: res.data });
+          setDoc({ ...res.data, ...draft.patch });
+        } else {
+          if (draft) clearDocumentDraft(window.localStorage, id);
+          setRecoverableDraft(null);
+          setDoc(res.data);
+        }
         setReadOnly(Boolean(res.data.read_only));
       } else {
         navigate('/');
@@ -394,13 +410,32 @@ export default function DocumentPage() {
 
   const {
     status: saveStatus,
-    enqueue: handleSave,
+    enqueue: enqueueSave,
     retry: retrySave,
   } = useDocumentSaveQueue({
     documentId: id,
     version: doc?.version,
     onSaved: handleSavedPatch,
   });
+
+  const handleSave = useCallback((patch: DocumentPatch) => {
+    if (recoverableDraft) setRecoverableDraft(null);
+    enqueueSave(patch);
+  }, [enqueueSave, recoverableDraft]);
+
+  const retryRecoveredDraft = useCallback(() => {
+    if (!recoverableDraft) return;
+    enqueueSave(recoverableDraft.draft.patch);
+    setRecoverableDraft(null);
+  }, [enqueueSave, recoverableDraft]);
+
+  const discardRecoveredDraft = useCallback(() => {
+    if (!recoverableDraft || !id) return;
+    clearDocumentDraft(window.localStorage, id);
+    setDoc(recoverableDraft.serverDocument);
+    setRecoverableDraft(null);
+    setEditorRevision(value => value + 1);
+  }, [id, recoverableDraft]);
 
   useEffect(() => {
     if (!id || !doc?.id) return;
@@ -550,6 +585,15 @@ export default function DocumentPage() {
           )}
           <CommentSidebarTrackContext.Provider value={commentTrackHost}>
           <div className="doc-page-workspace-inner">
+            {recoverableDraft && (
+              <div className="doc-draft-recovery-banner" role="status">
+                <span>已恢复一份尚未上传的本地草稿</span>
+                <div>
+                  <button type="button" onClick={discardRecoveredDraft}>放弃草稿</button>
+                  <button type="button" className="is-primary" onClick={retryRecoveredDraft}>立即保存</button>
+                </div>
+              </div>
+            )}
             <main
               className={`doc-page-main${showOutlineSidebar ? '' : ' doc-page-main--no-catalogue'}`}
               ref={pageMainRef}
@@ -573,6 +617,7 @@ export default function DocumentPage() {
               )}
 
               <Editor
+                key={`${doc.id}:${editorRevision}`}
                 documentId={doc.id}
                 content={doc.content}
                 title={doc.title}

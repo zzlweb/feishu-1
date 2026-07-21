@@ -27,8 +27,8 @@
 
 | ID | 用户流 | 差距与复现 | 当前行为 / 期望 | 代码归属 | 自动化 | 参照 |
 | --- | --- | --- | --- | --- | --- | --- |
-| FG-009 | 文档保存 | 输入后立即刷新或关闭标签页 | `pagehide` 使用普通异步 PUT，可能被终止；应有可靠提交或草稿恢复 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[documents.ts](../../client/src/api/documents.ts) | 缺失：中断恢复 | REF-DOC-02 |
-| FG-010 | 文档保存 | 拒绝一次内容 PUT | 错误约四秒后消失且无重试；应保留失败 payload、状态和重试入口 | [DocumentPage.tsx](../../client/src/components/Layout/DocumentPage.tsx) | 部分：现有评论测试只覆盖成功保存 | REF-DOC-02 |
+| FG-009 | 文档保存 | 输入后立即刷新或关闭标签页 | `pagehide` 请求仍可能被终止，但待保存 patch 已同步写入按文档隔离的本地草稿，重新打开可恢复或放弃 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[documentDraft.ts](../../client/src/features/documents/session/documentDraft.ts) | 草稿单测与恢复/放弃 E2E 契约 | REF-DOC-02 |
+| FG-010 | 文档保存 | 拒绝一次内容 PUT | 保存队列保留失败 payload，顶部状态可重试，本地草稿继续合并后续输入且成功后才清理 | [DocumentPage.tsx](../../client/src/components/Layout/DocumentPage.tsx)、[useDocumentSaveQueue.ts](../../client/src/features/documents/session/useDocumentSaveQueue.ts) | 草稿单测与恢复 E2E 契约 | REF-DOC-02 |
 | FG-011 | 文档保存 | 编辑普通文本，等待保存，再从真实服务刷新 | 浏览器测试普遍 mock API，未证明落盘；应覆盖编辑→PUT→DB→GET→刷新 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[database.ts](../../server/src/database.ts) | 缺失：真实服务 fixture | REF-DOC-02 |
 | FG-012 | Slash | 在 URL 路径或普通文本中输入 `/query` | 已仅允许块首或空白后的 `/` 触发，URL、路径、单词内部和含空白查询不触发 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[slashTrigger.ts](../../client/src/components/Editor/menus/slashTrigger.ts) | 已覆盖：边界纯函数单测 | REF-SLASH-01 |
 | FG-013 | Slash | 打开表格、分栏、模板或按钮子菜单后用方向键与 Enter | 主菜单可用 Enter/右键打开子菜单；四类子菜单支持方向键、Enter 选择及 Esc/左键返回 | [SlashMenu.tsx](../../client/src/components/Editor/menus/SlashMenu.tsx) | Client build 已覆盖，浏览器焦点 E2E 待补 | REF-SLASH-02 |
