@@ -713,6 +713,30 @@
     transition: transform 0.15s ease;
   }
 
+  .comment-panel-wrapper--anchor-lost {
+    .comment-panel {
+      border-color: #f5c27a;
+    }
+
+    .comment-panel::before {
+      background: #f59e0b;
+    }
+
+    .comment-panel__quote-text {
+      color: #8f5b16;
+      cursor: default;
+    }
+  }
+
+  .comment-panel__anchor-lost {
+    padding: 7px 10px;
+    border-bottom: 1px solid #f7dfb8;
+    color: #8f5b16;
+    background: #fff7e8;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
   .comment-panel {
     position: relative;
     border: 1px solid #e5e7eb;

@@ -21,6 +21,7 @@ import {
   findOrphanedComments,
   getCommentThreadKey,
   hasOpenCommentSidebarContent,
+  isCommentAnchorPresentInHtml,
 } from '../Editor/blocks/commentDocumentSync';
 import { resolveBlockElement } from '../Editor/blocks/blockDom';
 import { useDocumentSaveQueue, type DocumentPatch } from '../../features/documents/session/useDocumentSaveQueue';
@@ -370,17 +371,23 @@ export default function DocumentPage() {
       updated_at: savedDocument.updated_at,
     } : null));
 
-    // 正文持久化成功后才能删除已失去锚点的评论，避免正文保存失败但评论已永久删除。
+    // 仅在正文持久化成功后更新锚点状态；评论内容绝不能随正文删除而静默丢失。
     if (id && data.content !== undefined) {
-      const orphaned = findOrphanedComments(data.content, comments);
-      if (orphaned.length > 0) {
-        const results = await Promise.all(orphaned.map(comment => deleteComment(id, comment.id)));
-        const deletedIds = new Set(
-          orphaned.filter((_, index) => results[index]?.code === 0).map(comment => comment.id),
+      const orphaned = findOrphanedComments(data.content, comments)
+        .filter(comment => comment.status !== 'anchor_lost' && comment.status !== 'deleted');
+      const recovered = comments.filter(comment => (
+        comment.status === 'anchor_lost' && isCommentAnchorPresentInHtml(data.content!, comment)
+      ));
+      const changes = [
+        ...orphaned.map(comment => ({ comment, status: 'anchor_lost' as const })),
+        ...recovered.map(comment => ({ comment, status: (comment.resolved ? 'resolved' : 'open') as 'resolved' | 'open' })),
+      ];
+      if (changes.length > 0) {
+        const results = await Promise.all(changes.map(({ comment, status }) => updateComment(id, comment.id, { status })));
+        const updated = new Map(
+          results.flatMap(result => result.code === 0 && result.data ? [[result.data.id, result.data] as const] : []),
         );
-        if (deletedIds.size > 0) {
-          setComments(current => current.filter(comment => !deletedIds.has(comment.id)));
-        }
+        if (updated.size > 0) setComments(current => current.map(comment => updated.get(comment.id) || comment));
       }
     }
   }, [comments, id]);

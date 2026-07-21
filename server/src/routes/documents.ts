@@ -44,6 +44,7 @@ const commentAnchorTypes = new Set<NonNullable<CommentRecord['anchor_type']>>([
   'text-range', 'block', 'image', 'video', 'file', 'table-cell', 'table-range', 'document',
 ]);
 const commentVisibilities = new Set<NonNullable<CommentRecord['visibility']>>(['public', 'private']);
+const commentStatuses = new Set<NonNullable<CommentRecord['status']>>(['open', 'resolved', 'deleted', 'anchor_lost']);
 
 function isRequestBody(value: unknown): value is RequestBody {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -414,6 +415,12 @@ router.patch('/:id/comments/:commentId', (req: Request, res: Response) => {
       updates.content = t;
     }
     if (req.body.resolved !== undefined) updates.resolved = req.body.resolved ? 1 : 0;
+    if (req.body.status !== undefined) {
+      if (typeof req.body.status !== 'string' || !commentStatuses.has(req.body.status as NonNullable<CommentRecord['status']>)) {
+        return res.status(400).json({ code: -1, message: '评论字段 status 无效' });
+      }
+      updates.status = req.body.status;
+    }
     const comment = updateCommentRecord(req.params.commentId, updates);
     if (!comment || comment.document_id !== req.params.id) {
       return res.status(404).json({ code: -1, message: '评论不存在' });

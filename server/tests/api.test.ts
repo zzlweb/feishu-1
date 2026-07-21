@@ -300,6 +300,19 @@ test('comment creation validates its target and persists client comment fields',
     assert.equal(created.body.data.document_id, documentId);
     assert.equal(created.body.data.status, 'open');
 
+    const anchorLost = await api<any>(`/api/documents/${documentId}/comments/${payload.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'anchor_lost' }),
+    });
+    assert.equal(anchorLost.status, 200);
+    assert.equal(anchorLost.body.data.status, 'anchor_lost');
+
+    const invalidStatus = await api<any>(`/api/documents/${documentId}/comments/${payload.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'missing' }),
+    });
+    assert.equal(invalidStatus.status, 400);
+
     const persisted = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
     const savedComment = persisted.comments.find((item: any) => item.id === payload.id);
     assert.ok(savedComment);

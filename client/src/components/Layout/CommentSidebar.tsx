@@ -101,9 +101,7 @@ function getBlockTop(blockId: string, searchRoot: HTMLElement, referenceEl: HTML
 function buildCommentMoreOptions(isOwn: boolean): DropdownOption[] {
   const items: DropdownOption[] = [];
   if (isOwn) items.push({ content: '编辑', value: 'edit' });
-  items.push({ content: '翻译为简体中文 ›', value: 'translate' });
   if (isOwn) items.push({ content: '删除', value: 'delete', theme: 'error' });
-  items.push({ content: '举报', value: 'report' });
   return items;
 }
 
@@ -334,13 +332,14 @@ export default function CommentSidebar({
             <input ref={attachInputRef} type="file" multiple accept="image/gif,image/jpg,image/jpeg,image/bmp,image/png" className="comment-panel__file-input" tabIndex={-1} aria-hidden />
             {showDocumentTrack && resolvedPanels.map(({ blockId, anchorBlockId, comments: blockComments, top }, panelIdx) => {
               const isActive = blockId === activeBlockId;
+              const anchorLost = blockComments.some(comment => comment.status === 'anchor_lost');
               const firstUnresolved = blockComments.find(c => !Number(c.resolved));
               const prevPanelBlockId = panelIdx > 0 ? resolvedPanels[panelIdx - 1]!.blockId : null;
               const nextPanelBlockId = panelIdx >= 0 && panelIdx < resolvedPanels.length - 1 ? resolvedPanels[panelIdx + 1]!.blockId : null;
 
               const openComposer = () => {
                 // 草稿按 thread key 隔离；正文定位仍由 onJumpToBlock 内部解析真实锚点。
-                onJumpToBlock(blockId);
+                if (!anchorLost) onJumpToBlock(blockId);
                 setReplyingBlockId(blockId);
                 onInputChange('');
               };
@@ -349,12 +348,13 @@ export default function CommentSidebar({
               const quoteLabel = quotePreview || '高亮块';
 
               return (
-                <div key={blockId} className={`comment-panel-wrapper${isActive ? ' comment-panel-wrapper--active' : ''}`} style={{ transform: `translate3d(0px, ${top}px, 0px)` }}>
+                <div key={blockId} className={`comment-panel-wrapper${isActive ? ' comment-panel-wrapper--active' : ''}${anchorLost ? ' comment-panel-wrapper--anchor-lost' : ''}`} style={{ transform: `translate3d(0px, ${top}px, 0px)` }}>
                   <CommentPanelShell id={blockId} active={isActive}>
+                    {anchorLost && <div className="comment-panel__anchor-lost" role="status">原评论位置已被删除，评论内容已保留</div>}
                     <CommentPanelHeader
                       quoteLabel={quoteLabel}
                       title={quoteLabel}
-                      onQuoteClick={() => onJumpToBlock(anchorBlockId || blockId)}
+                      onQuoteClick={() => anchorLost ? MessagePlugin.warning('原评论位置已被删除') : onJumpToBlock(anchorBlockId || blockId)}
                       controls={(
                         <div className="comment-panel-controls">
                         <div className="comment-panel-controls__pill">
@@ -374,7 +374,7 @@ export default function CommentSidebar({
                           </button>
                         </div>
                         <div className="comment-panel-controls__split comment-panel-controls__split-v2" aria-hidden />
-                        <button type="button" className="comment-panel-controls__btn comment-panel-controls__copy-anchor-btn" title="复制链接" aria-label="复制链接" onClick={() => copyCommentAnchor(blockId)}>
+                        <button type="button" disabled={anchorLost} className="comment-panel-controls__btn comment-panel-controls__copy-anchor-btn" title={anchorLost ? '原评论位置已删除' : '复制链接'} aria-label={anchorLost ? '原评论位置已删除' : '复制链接'} onClick={() => copyCommentAnchor(blockId)}>
                           <span className="universe-icon" style={{ fontSize: 14 }}>
                             <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                               <path d="M18.849 2.699a5.037 5.037 0 0 0-7.1.97L8.97 7.372a4.784 4.784 0 0 0 .957 6.699l.972.729a1 1 0 0 0 1.2-1.6l-.972-.73a2.784 2.784 0 0 1-.557-3.898l2.777-3.703a3.037 3.037 0 1 1 4.8 3.72l-1.429 1.786a1 1 0 1 0 1.562 1.25l1.43-1.788a5.037 5.037 0 0 0-.862-7.138Z" fill="currentColor" />
@@ -412,12 +412,6 @@ export default function CommentSidebar({
                             window.setTimeout(() => {
                               openDeleteCommentDialog(comment, onDeleteComment);
                             }, 0);
-                          }
-                          if (key === 'translate') {
-                            MessagePlugin.info('翻译功能敬请期待');
-                          }
-                          if (key === 'report') {
-                            MessagePlugin.info('感谢您的反馈，我们将尽快核实');
                           }
                         };
 

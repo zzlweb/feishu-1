@@ -186,7 +186,7 @@ test('deletes own comment and closes confirm dialog', async ({ page }) => {
   await expect(page.locator('.comment-sidebar-positioned')).toBeHidden();
 });
 
-test('removes orphaned comments when commented document text is deleted', async ({ page }) => {
+test('preserves orphaned comments with an anchor-lost state', async ({ page }) => {
   const threadId = 'comment-thread-remove-text';
   const comments: any[] = [
     {
@@ -212,14 +212,15 @@ test('removes orphaned comments when commented document text is deleted', async 
     content: '<p>before comment anchor</p><p><span data-comment-thread-id="comment-thread-remove-text" data-block-id="comment-thread-remove-text" data-comment-status="open" class="feishu-comment-highlight">www.baidu.com</span></p><p>after</p>',
   };
 
-  let deletedComment = false;
+  let anchorLost = false;
   let savedDocument = false;
 
   await page.route('**/api/documents/comment-threads-e2e/comments/comment-on-text', route => {
-    if (route.request().method() === 'DELETE') {
-      deletedComment = true;
-      comments.splice(0, comments.length);
-      return route.fulfill({ json: { code: 0, message: '删除成功' } });
+    if (route.request().method() === 'PATCH') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      anchorLost = body.status === 'anchor_lost';
+      comments[0].status = body.status;
+      return route.fulfill({ json: { code: 0, data: comments[0] } });
     }
     return route.continue();
   });
@@ -263,7 +264,8 @@ test('removes orphaned comments when commented document text is deleted', async 
 
   await expect(page.locator('.feishu-comment-highlight')).toHaveCount(0, { timeout: 3000 });
   await expect.poll(() => savedDocument, { timeout: 5000 }).toBe(true);
-  await expect.poll(() => deletedComment, { timeout: 5000 }).toBe(true);
-  await expect(page.locator('.comment-panel__reply-content')).toHaveCount(0);
-  await expect(page.locator('.comment-sidebar-positioned')).toBeHidden();
+  await expect.poll(() => anchorLost, { timeout: 5000 }).toBe(true);
+  await expect(page.locator('.comment-panel__reply-content')).toContainText('将被同步删除');
+  await expect(page.getByText('原评论位置已被删除，评论内容已保留')).toBeVisible();
+  await expect(page.locator('.comment-sidebar-positioned')).toBeVisible();
 });
