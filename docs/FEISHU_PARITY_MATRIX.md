@@ -15,7 +15,7 @@
 | Bitable | Gallery | REF-GALLERY-01/02 | 鼠标主路径可用，键盘和失败恢复不足 | 65% | 75% | 50% | P1 | 局部 |
 | Bitable | Kanban | REF-KANBAN-01..03 | 拖放可用，无键盘替代和删除迁移 | 60% | 70% | 45% | P1 | 局部 |
 | Bitable | Record Modal | REF-MODAL-01..03 | 详情可用，焦点和附件生命周期不足 | 60% | 75% | 45% | P1 | 局部 |
-| 导入 | 文件与公开链接 | REF-IMPORT-01..04 | Markdown/HTML/TXT/CSV/ZIP 主路径、安全限制、进度与取消可用；公开链接 SSRF 和浏览器 E2E 待补 | 78% | 75% | 70% | P0 | 服务端 3 条导入集成测试，E2E 待补 |
-| 上传 | 资产生命周期 | REF-UPLOAD-01..03 | 上传可用，类型隔离、归属和恢复不足 | 55% | 70% | 35% | P0 | 局部 |
+| 导入 | 文件与公开链接 | REF-IMPORT-01..04 | 文件导入、进度取消、逐跳域名/DNS/重定向限制可用；浏览器 E2E 待补 | 82% | 75% | 78% | P0 | 服务端导入与 URL 安全测试，E2E 待补 |
+| 上传 | 资产生命周期 | REF-UPLOAD-01..03 | 类型白名单、内容签名和静态隔离可用；资产归属、删除和恢复不足 | 68% | 70% | 55% | P0 | 上传安全集成测试 |
 
 详细问题、复现步骤与代码归属见 [quality/feature-gap-register.md](quality/feature-gap-register.md)。参照采集规范见 [quality/reference-capture/README.md](quality/reference-capture/README.md)。

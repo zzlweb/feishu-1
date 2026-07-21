@@ -18,7 +18,7 @@ interface ApiTestContext {
 }
 
 async function withApi<T>(fn: (
-  api: <R>(url: string, init?: RequestInit) => Promise<{ status: number; body: R }>,
+  api: <R>(url: string, init?: RequestInit) => Promise<{ status: number; body: R; headers: Headers }>,
   context: ApiTestContext,
 ) => Promise<T>) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feishu-doc-api-'));
@@ -32,12 +32,15 @@ async function withApi<T>(fn: (
   const address = server.address() as AddressInfo;
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
-  async function api<R>(url: string, init?: RequestInit): Promise<{ status: number; body: R }> {
+  async function api<R>(url: string, init?: RequestInit): Promise<{ status: number; body: R; headers: Headers }> {
     const res = await fetch(`${baseUrl}${url}`, {
       headers: { 'Content-Type': 'application/json' },
       ...init,
     });
-    return { status: res.status, body: await res.json() as R };
+    const responseBody = res.headers.get('content-type')?.includes('application/json')
+      ? await res.json()
+      : await res.arrayBuffer();
+    return { status: res.status, body: responseBody as R, headers: res.headers };
   }
 
   try {
@@ -142,6 +145,41 @@ test('health API returns ok', async () => {
     const health = await api<any>('/api/health');
     assert.equal(health.status, 200);
     assert.equal(health.body.status, 'ok');
+  });
+});
+
+test('upload API accepts verified images and serves them with isolation headers', async () => {
+  await withApi(async (api) => {
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
+    const form = new FormData();
+    form.append('file', new Blob([png], { type: 'image/png' }), 'safe.png');
+    const uploaded = await api<any>('/api/uploads', { method: 'POST', headers: {}, body: form as any });
+
+    assert.equal(uploaded.status, 201);
+    assert.equal(uploaded.body.data.type, 'image/png');
+    assert.equal(uploaded.body.data.disposition, 'inline');
+    const served = await api<any>(uploaded.body.data.url);
+    assert.equal(served.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(served.headers.get('content-security-policy') || '', /sandbox/);
+
+    const fileName = String(uploaded.body.data.url).split('/').pop();
+    if (fileName) fs.rmSync(path.resolve(__dirname, '..', 'public', 'uploads', fileName), { force: true });
+  });
+});
+
+test('upload API rejects active content and extension spoofing without retaining files', async () => {
+  await withApi(async (api) => {
+    const svgForm = new FormData();
+    svgForm.append('file', new Blob(['<svg onload="alert(1)"></svg>'], { type: 'image/svg+xml' }), 'active.svg');
+    const svg = await api<any>('/api/uploads', { method: 'POST', headers: {}, body: svgForm as any });
+    assert.equal(svg.status, 400);
+    assert.match(svg.body.message, /不能上传/);
+
+    const spoofedForm = new FormData();
+    spoofedForm.append('file', new Blob(['<script>alert(1)</script>'], { type: 'image/png' }), 'spoofed.png');
+    const spoofed = await api<any>('/api/uploads', { method: 'POST', headers: {}, body: spoofedForm as any });
+    assert.equal(spoofed.status, 400);
+    assert.match(spoofed.body.message, /内容与扩展名不匹配/);
   });
 });
 

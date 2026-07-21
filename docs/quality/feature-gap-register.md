@@ -20,8 +20,8 @@
 | FG-004 | Bitable 持久化 | 编辑一个单元格并检查保存 HTML | 完整字段、记录、视图和历史写进 `data-model`；应只存 table ID，由服务端版本化 | [BitableBlockView.tsx](../../client/src/components/Bitable/BitableBlockView.tsx)、[Editor.tsx](../../client/src/components/Editor/Editor.tsx) | 部分：[bitable-model-regressions.spec.ts](../../client/tests/bitable-model-regressions.spec.ts) 仅测本地模型 | REF-GRID-02 |
 | FG-005 | HTML 导入 | 导入含 `javascript:` URL、危险 CSS、iframe/object 或 active SVG 的 HTML | 已过滤主动元素、危险 URL/CSS/属性，ZIP 内 SVG 不落盘；待补独立 SVG fixture 与更细 MIME 嗅探 | [documentImporter.ts](../../server/src/documentImporter.ts) | 已覆盖：Markdown/HTML 主动内容集成测试 | REF-IMPORT-01 |
 | FG-006 | ZIP 导入 | 上传高压缩比或超多 entry 的 ZIP | 已限制 entry 数、单项/总展开量和压缩比；待补处理总时限与 entry 数上限 fixture | [documentImporter.ts](../../server/src/documentImporter.ts)、[documents.ts](../../server/src/routes/documents.ts) | 已覆盖：普通 ZIP 与异常压缩比 | REF-IMPORT-02 |
-| FG-007 | 公共链接导入 | 允许域名返回重定向到内网或循环地址 | 每跳未重验域名/IP且无明确深度限制；应逐跳校验并拒绝私网 | [feishuPublicImporter.ts](../../server/src/feishuPublicImporter.ts) | 缺失：redirect/SSRF 测试 | REF-IMPORT-03 |
-| FG-008 | 上传安全 | 上传 HTML/SVG/脚本型文件并直接访问静态 URL | 无 MIME 白名单、嗅探和安全下载头；应隔离活动内容并按资产策略服务 | [uploads.ts](../../server/src/routes/uploads.ts)、[app.ts](../../server/src/app.ts) | 缺失：恶意上传测试 | REF-UPLOAD-01 |
+| FG-007 | 公共链接导入 | 允许域名返回重定向到内网或循环地址 | 已限制 HTTPS/443/无凭据 URL，每跳重验允许域名，DNS 结果拒绝私网并绑定已验证地址，最多 5 次重定向 | [feishuPublicImporter.ts](../../server/src/feishuPublicImporter.ts) | 已覆盖：URL、私网地址和跨域重定向 | REF-IMPORT-03 |
+| FG-008 | 上传安全 | 上传 HTML/SVG/脚本型文件并直接访问静态 URL | 已使用扩展名白名单和文件签名校验，拒绝主动内容/伪装文件，静态响应启用 nosniff、sandbox 和下载隔离 | [uploads.ts](../../server/src/routes/uploads.ts)、[app.ts](../../server/src/app.ts) | 已覆盖：合法 PNG、SVG、伪装 PNG、隔离响应头 | REF-UPLOAD-01 |
 
 ## P1
 

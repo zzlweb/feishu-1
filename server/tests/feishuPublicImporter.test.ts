@@ -4,7 +4,9 @@ import http from 'node:http';
 import {
   importFeishuPublicHtml,
   importFeishuPublicUrl,
+  isPrivateOrLocalAddress,
   isAllowedFeishuPublicUrl,
+  resolveAllowedRedirectUrl,
 } from '../src/feishuPublicImporter';
 import { BUSINESS_REPORT_FIXTURE_HTML } from '../src/fixtures/feishuBusinessReport';
 import { FEISHU_PUBLIC_SAMPLE_FIXTURES } from '../src/fixtures/feishuPublicSamples';
@@ -89,6 +91,30 @@ test('isAllowedFeishuPublicUrl accepts feishu wiki links and rejects others', ()
   );
   assert.equal(isAllowedFeishuPublicUrl('https://example.com/wiki/test'), false);
   assert.equal(isAllowedFeishuPublicUrl('ftp://qcntpn5n60jv.feishu.cn/wiki/test'), false);
+  assert.equal(isAllowedFeishuPublicUrl('http://qcntpn5n60jv.feishu.cn/wiki/test'), false);
+  assert.equal(isAllowedFeishuPublicUrl('https://user@qcntpn5n60jv.feishu.cn/wiki/test'), false);
+  assert.equal(isAllowedFeishuPublicUrl('https://qcntpn5n60jv.feishu.cn:8443/wiki/test'), false);
+});
+
+test('public Feishu fetch safety rejects private addresses and untrusted redirects', () => {
+  assert.equal(isPrivateOrLocalAddress('127.0.0.1'), true);
+  assert.equal(isPrivateOrLocalAddress('10.0.0.1'), true);
+  assert.equal(isPrivateOrLocalAddress('169.254.169.254'), true);
+  assert.equal(isPrivateOrLocalAddress('::1'), true);
+  assert.equal(isPrivateOrLocalAddress('fc00::1'), true);
+  assert.equal(isPrivateOrLocalAddress('8.8.8.8'), false);
+  assert.equal(
+    resolveAllowedRedirectUrl('/wiki/next', 'https://tenant.feishu.cn/wiki/start'),
+    'https://tenant.feishu.cn/wiki/next',
+  );
+  assert.throws(
+    () => resolveAllowedRedirectUrl('http://127.0.0.1/admin', 'https://tenant.feishu.cn/wiki/start'),
+    /不受信任/,
+  );
+  assert.throws(
+    () => resolveAllowedRedirectUrl('https://example.com/phish', 'https://tenant.feishu.cn/wiki/start'),
+    /不受信任/,
+  );
 });
 
 test('importFeishuPublicHtml converts business report into editable bitable blocks', () => {

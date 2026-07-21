@@ -1,5 +1,6 @@
-import http from 'http';
 import https from 'https';
+import dns from 'dns';
+import net from 'net';
 import { parse, HTMLElement } from 'node-html-parser';
 import { extractHtmlBody } from './documentImporter';
 import { BUSINESS_REPORT_FIXTURE_HTML } from './fixtures/feishuBusinessReport';
@@ -19,6 +20,7 @@ const ALLOWED_HOST_PATTERNS = [
 
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15000;
+const MAX_REDIRECTS = 5;
 
 export interface ImportedFeishuUrlPayload {
   title: string;
@@ -36,11 +38,53 @@ export interface ImportedFeishuUrlPayload {
 export function isAllowedFeishuPublicUrl(urlString: string): boolean {
   try {
     const url = new URL(urlString);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
-    return ALLOWED_HOST_PATTERNS.some(pattern => pattern.test(url.hostname));
+    if (url.protocol !== 'https:' || url.username || url.password) return false;
+    if (url.port && url.port !== '443') return false;
+    return ALLOWED_HOST_PATTERNS.some(pattern => pattern.test(url.hostname.toLowerCase()));
   } catch {
     return false;
   }
+}
+
+export function isPrivateOrLocalAddress(address: string): boolean {
+  const normalized = address.toLowerCase().split('%')[0];
+  if (normalized.startsWith('::ffff:')) return isPrivateOrLocalAddress(normalized.slice(7));
+  if (net.isIPv4(normalized)) {
+    const [a, b] = normalized.split('.').map(Number);
+    return a === 0
+      || a === 10
+      || a === 127
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && [0, 168].includes(b))
+      || (a === 198 && [18, 19, 51].includes(b))
+      || (a === 203 && b === 0)
+      || a >= 224;
+  }
+  if (net.isIPv6(normalized)) {
+    return normalized === '::'
+      || normalized === '::1'
+      || /^f[cd]/.test(normalized)
+      || /^fe[89ab]/.test(normalized)
+      || normalized.startsWith('ff')
+      || normalized.startsWith('2001:db8:');
+  }
+  return true;
+}
+
+export function resolveAllowedRedirectUrl(location: string, currentUrl: string) {
+  const nextUrl = new URL(location, currentUrl).toString();
+  if (!isAllowedFeishuPublicUrl(nextUrl)) throw new Error('飞书页面重定向到了不受信任的地址');
+  return nextUrl;
+}
+
+async function resolvePublicAddress(hostname: string) {
+  const addresses = await dns.promises.lookup(hostname, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some(entry => isPrivateOrLocalAddress(entry.address))) {
+    throw new Error('飞书页面域名解析到了不安全的网络地址');
+  }
+  return addresses[0];
 }
 
 function escapeHtml(value: string) {
@@ -198,7 +242,7 @@ export function importFeishuPublicHtml(rawHtml: string, sourceUrl: string): Impo
   return buildGenericDocument(sourceUrl, rawHtml);
 }
 
-async function fetchWithNode(urlString: string): Promise<string> {
+async function fetchWithNode(urlString: string, redirectCount = 0): Promise<string> {
   if (process.env.NODE_ENV === 'test') {
     const sample = findFeishuPublicSample(urlString);
     if (sample) return sample.rawHtml;
@@ -207,12 +251,16 @@ async function fetchWithNode(urlString: string): Promise<string> {
     return BUSINESS_REPORT_FIXTURE_HTML;
   }
 
+  if (!isAllowedFeishuPublicUrl(urlString)) throw new Error('仅支持安全的飞书或 Lark HTTPS 文档链接');
+  if (redirectCount > MAX_REDIRECTS) throw new Error('飞书页面重定向次数过多');
+  const url = new URL(urlString);
+  const resolved = await resolvePublicAddress(url.hostname);
+
   return new Promise((resolve, reject) => {
-    const url = new URL(urlString);
-    const client = url.protocol === 'https:' ? https : http;
-    const request = client.get(
+    const request = https.get(
       url,
       {
+        lookup: (_hostname, _options, callback) => callback(null, resolved.address, resolved.family),
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; FeishuDocImporter/1.0)',
           Accept: 'text/html,application/xhtml+xml',
@@ -224,14 +272,25 @@ async function fetchWithNode(urlString: string): Promise<string> {
 
         if ([301, 302, 303, 307, 308].includes(statusCode) && location) {
           response.resume();
-          const nextUrl = new URL(location, url).toString();
-          fetchWithNode(nextUrl).then(resolve).catch(reject);
+          try {
+            const nextUrl = resolveAllowedRedirectUrl(location, url.toString());
+            fetchWithNode(nextUrl, redirectCount + 1).then(resolve).catch(reject);
+          } catch (error) {
+            reject(error);
+          }
           return;
         }
 
         if (statusCode < 200 || statusCode >= 300) {
           response.resume();
           reject(new Error(`抓取飞书页面失败 (${statusCode})`));
+          return;
+        }
+
+        const contentType = String(response.headers['content-type'] || '').toLowerCase();
+        if (contentType && !contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
+          response.resume();
+          reject(new Error('飞书链接返回的不是 HTML 文档'));
           return;
         }
 
