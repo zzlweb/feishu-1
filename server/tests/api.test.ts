@@ -145,6 +145,38 @@ test('health API returns ok', async () => {
   });
 });
 
+test('document updates use version checks and reject stale writers', async () => {
+  await withApi(async (api) => {
+    const created = await api<any>('/api/documents', {
+      method: 'POST',
+      body: JSON.stringify({ title: '版本测试', content: '<p>v1</p>' }),
+    });
+    const document = created.body.data;
+    assert.equal(document.version, 1);
+    assert.equal(document.schema_version, 1);
+
+    const first = await api<any>(`/api/documents/${document.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title: '第一个写入者', base_version: 1 }),
+    });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.data.version, 2);
+
+    const stale = await api<any>(`/api/documents/${document.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title: '陈旧写入者', base_version: 1 }),
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.code, 409);
+    assert.equal(stale.body.data.version, 2);
+    assert.equal(stale.body.data.title, '第一个写入者');
+
+    const restored = await api<any>(`/api/documents/${document.id}`);
+    assert.equal(restored.body.data.title, '第一个写入者');
+    assert.equal(restored.body.data.version, 2);
+  });
+});
+
 test('legacy comments are normalized and restored from the database', async () => {
   await withApi(async (api, { dbPath }) => {
     const createdAt = '2026-01-02T03:04:05.000Z';

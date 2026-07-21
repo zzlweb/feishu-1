@@ -16,6 +16,8 @@ export interface DocumentRecord {
   collapsed_heading_ids: string[];
   read_only?: number;
   import_metadata?: string;
+  version: number;
+  schema_version: number;
 }
 
 export interface CommentRecord {
@@ -149,6 +151,8 @@ function normalizeDocument(value: unknown, index: number): DocumentRecord {
     collapsed_heading_ids: normalizeStringList(value.collapsed_heading_ids),
     read_only: numberValue(value.read_only) ? 1 : 0,
     import_metadata: stringValue(value.import_metadata),
+    version: Math.max(1, numberValue(value.version, 1)),
+    schema_version: Math.max(1, numberValue(value.schema_version, 1)),
   };
 }
 
@@ -364,6 +368,8 @@ export function createDocumentRecord(doc: Partial<DocumentRecord> & { id: string
     collapsed_heading_ids: normalizeStringList(doc.collapsed_heading_ids),
     read_only: doc.read_only ? 1 : 0,
     import_metadata: doc.import_metadata || '',
+    version: Math.max(1, doc.version || 1),
+    schema_version: Math.max(1, doc.schema_version || 1),
   };
   db.documents.push(newDoc);
   saveDb(db);
@@ -385,6 +391,7 @@ export function updateDocumentRecord(id: string, updates: Partial<DocumentRecord
   if (updates.collapsed_heading_ids !== undefined) {
     doc.collapsed_heading_ids = normalizeStringList(updates.collapsed_heading_ids);
   }
+  doc.version = Math.max(1, doc.version || 1) + 1;
   doc.updated_at = nowStr();
   db.documents[idx] = doc;
   saveDb(db);

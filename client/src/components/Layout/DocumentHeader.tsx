@@ -13,7 +13,7 @@ import {
 import { wrapIcon } from '../../icons/wrap';
 import { IconChatPinOutlined, IconHomeOutlined } from '../../icons/feishuDoc';
 import { createDocument, deleteDocument, duplicateDocument, saveAsTemplate } from '../../api/documents';
-import type { Document } from '../../types';
+import type { Document, DocumentSaveStatus } from '../../types';
 
 const Notes = wrapIcon(FileIcon);
 const Edit = wrapIcon(EditIcon);
@@ -25,9 +25,11 @@ const Protect = wrapIcon(SecuredIcon);
 
 export interface DocumentHeaderProps {
   doc: Document;
-  saveStatus: 'saved' | 'saving' | 'error' | 'idle';
+  saveStatus: DocumentSaveStatus;
   readOnly: boolean;
   onReadOnlyChange: (readOnly: boolean) => void;
+  onRetrySave?: () => void;
+  onReloadConflict?: () => void;
 }
 
 function displayTitle(doc: Document) {
@@ -75,6 +77,8 @@ export default function DocumentHeader({
   saveStatus,
   readOnly,
   onReadOnlyChange,
+  onRetrySave,
+  onReloadConflict,
 }: DocumentHeaderProps) {
   const navigate = useNavigate();
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -232,16 +236,22 @@ export default function DocumentHeader({
                 内部信息
               </span>
               <span className="header-meta-vsep" aria-hidden />
-              <span
-                className={`header-meta-item header-meta-cloud${saveStatus === 'error' ? ' is-error' : ''}`}
-                title={saveStatus === 'error' ? '保存失败，请检查网络后继续编辑以重试' : undefined}
+              <button
+                type="button"
+                className={`header-meta-item header-meta-cloud${saveStatus === 'error' || saveStatus === 'conflict' ? ' is-error' : ''}`}
+                title={saveStatus === 'error' ? '保存失败，点击重试' : saveStatus === 'conflict' ? '版本冲突，点击重新加载' : undefined}
+                onClick={saveStatus === 'error' ? onRetrySave : saveStatus === 'conflict' ? onReloadConflict : undefined}
               >
                 {saveStatus === 'saving'
                   ? '保存中...'
+                  : saveStatus === 'dirty'
+                    ? '等待保存...'
+                    : saveStatus === 'conflict'
+                      ? '版本冲突，点击刷新'
                   : saveStatus === 'error'
                     ? '保存失败'
                     : '已保存到云端'}
-              </span>
+              </button>
             </div>
           </div>
         </div>

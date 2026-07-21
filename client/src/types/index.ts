@@ -12,6 +12,8 @@ export interface Document {
   collapsed_heading_ids?: string[];
   read_only?: number;
   import_metadata?: string;
+  version: number;
+  schema_version: number;
 }
 
 export interface Comment {
@@ -54,6 +56,8 @@ export interface ApiResponse<T> {
   data?: T;
   message?: string;
 }
+
+export type DocumentSaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
 
 export interface ImportDocumentResult {
   document: Document;

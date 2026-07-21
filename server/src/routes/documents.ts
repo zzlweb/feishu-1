@@ -244,10 +244,24 @@ router.post('/', (req: Request, res: Response) => {
 // PUT /api/documents/:id - 更新文档
 router.put('/:id', (req: Request, res: Response) => {
   try {
-    const doc = updateDocumentRecord(req.params.id, req.body);
-    if (!doc) {
+    const current = getDocumentById(req.params.id);
+    if (!current) {
       return res.status(404).json({ code: -1, message: '文档不存在' });
     }
+    const body = isRequestBody(req.body) ? req.body : {};
+    const baseVersion = body.base_version;
+    if (baseVersion !== undefined && (!Number.isInteger(baseVersion) || Number(baseVersion) < 1)) {
+      return res.status(400).json({ code: -1, message: 'base_version 必须是正整数' });
+    }
+    if (typeof baseVersion === 'number' && baseVersion !== current.version) {
+      return res.status(409).json({
+        code: 409,
+        message: '文档已在其他窗口更新，请刷新后合并修改',
+        data: current,
+      });
+    }
+    const { base_version: _baseVersion, version: _version, schema_version: _schemaVersion, ...updates } = body;
+    const doc = updateDocumentRecord(req.params.id, updates);
     res.json({ code: 0, data: doc });
   } catch (err: any) {
     res.status(500).json({ code: -1, message: err.message });

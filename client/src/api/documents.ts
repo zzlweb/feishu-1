@@ -27,6 +27,7 @@ async function request<T>(url: string, options?: ApiRequestOptions): Promise<Api
       return {
         code: body.code ?? res.status,
         message: body.message || `请求失败 (${res.status})`,
+        data: body.data,
       };
     }
 
@@ -98,7 +99,9 @@ export async function importDocumentUrl(
   });
 }
 
-export const updateDocument = (id: string, data: Partial<Document>) =>
+export type UpdateDocumentInput = Partial<Document> & { base_version?: number };
+
+export const updateDocument = (id: string, data: UpdateDocumentInput) =>
   request<Document>(`/documents/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
