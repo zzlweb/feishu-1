@@ -75,6 +75,13 @@ test('drops an image as a preview media block and updates it after upload', asyn
 });
 
 test('drops video and normal files as independent attachment blocks', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Document.prototype, 'pictureInPictureEnabled', { configurable: true, get: () => true });
+    Object.defineProperty(HTMLVideoElement.prototype, 'requestPictureInPicture', {
+      configurable: true,
+      value: () => Promise.resolve(),
+    });
+  });
   let uploadIndex = 0;
   await page.route('**/api/uploads', route => {
     uploadIndex += 1;
@@ -105,8 +112,42 @@ test('drops video and normal files as independent attachment blocks', async ({ p
   await expect(blocks.nth(0).locator('.feishu-media-preview__video-file-icon')).toHaveText('VID');
   await expect(blocks.nth(0)).toContainText('clip');
   await expect(blocks.nth(0).locator('video')).toBeVisible();
+  await expect(blocks.nth(0).getByRole('button', { name: '画中画播放' })).toBeVisible();
+
+  const videoBlock = blocks.nth(0);
+  await videoBlock.click();
+  const preview = videoBlock.locator('.feishu-media-preview--video');
+  const resizeHandle = videoBlock.getByRole('button', { name: '拖动调整视频大小' });
+  const initialBox = await preview.boundingBox();
+  const handleBox = await resizeHandle.boundingBox();
+  expect(initialBox).not.toBeNull();
+  expect(handleBox).not.toBeNull();
+  if (initialBox && handleBox) {
+    await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handleBox.x - 100, handleBox.y + handleBox.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(async () => (await preview.boundingBox())?.width || 0).toBeLessThan(initialBox.width - 70);
+  }
   await expect(blocks.nth(1)).toContainText('report.pdf');
   await expect(blocks.nth(1)).toHaveAttribute('data-upload-status', 'success');
+});
+
+test('keeps a failed image surface recoverable', async ({ page }) => {
+  await page.route('**/api/uploads', route =>
+    route.fulfill({
+      status: 201,
+      json: { code: 0, data: { name: 'broken.png', size: 12, type: 'image/png', url: '/static/uploads/missing.png' } },
+    }),
+  );
+  await page.route('**/static/uploads/missing.png', route => route.fulfill({ status: 404, body: 'missing' }));
+  await openMediaDoc(page);
+
+  await dropFiles(page, [{ name: 'broken.png', type: 'image/png', body: 'fake-image' }]);
+
+  const block = page.locator('[data-local-block="file"][data-upload-id]').first();
+  await expect(block.getByText('图片加载失败')).toBeVisible();
+  await expect(block.getByRole('button', { name: '重新加载' })).toBeVisible();
 });
 
 test('keeps failed file blocks with a retry action', async ({ page }) => {

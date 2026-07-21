@@ -71,7 +71,7 @@ export default function ImageResizeHandles({
             key={position}
             type="button"
             className={`feishu-image-resize-handle feishu-image-resize-handle--${position}`}
-            aria-label={`调整图片大小 ${position}`}
+            aria-label={`拖动${position.endsWith('w') ? '左' : '右'}${position.startsWith('n') ? '上' : '下'}角调整图片大小`}
             onPointerDown={event => startResize(direction, event)}
             onPointerMove={resize}
             onPointerUp={finishResize}

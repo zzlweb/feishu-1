@@ -34,6 +34,7 @@ import ImageBlockToolbar from './media/ImageBlockToolbar';
 import ImageCropOverlay from './media/ImageCropOverlay';
 import ImageResizeHandles from './media/ImageResizeHandles';
 import ImageViewer from './media/ImageViewer';
+import VideoResizeHandle from './media/VideoResizeHandle';
 import { useImageBlockInteractions } from './media/useImageBlockInteractions';
 import { getActiveImageCropSession } from './media/imageCropSession';
 import { normalizeImageAlign, type ImageAlign } from './media/imageBlockUtils';
@@ -207,6 +208,16 @@ function MediaFileToolbar({
   onActivateBlock?: () => void;
   onFullscreen?: () => void;
 }) {
+  const menuLabels: Record<string, string> = {
+    fullscreen: '全屏预览',
+    download: '下载文件',
+    'inline view': '切换为文字视图',
+    'card view': '切换为卡片视图',
+    'preview view': '切换为预览视图',
+    copyAnchorLink: '复制块链接',
+    shareTextLink: '分享文件链接',
+    comment: '添加评论',
+  };
   const ensureLinkableBlock = () => {
     onActivateBlock?.();
     const resolved = blockId || makeFeishuBlockId('file');
@@ -279,6 +290,8 @@ function MediaFileToolbar({
       type="button"
       className={`panel-menu-item${active ? ' menu-item-actived' : ''}`}
       data-name={name}
+      aria-label={menuLabels[name] || name}
+      title={menuLabels[name] || name}
       disabled={disabled}
       onMouseDown={event => event.preventDefault()}
       onClick={() => {
@@ -717,6 +730,19 @@ function FeishuDividerView({ node, selected, getPos, editor }: NodeViewProps) {
   );
 }
 
+function ImageLoadFeedback({ state, onRetry }: { state: 'loading' | 'loaded' | 'error'; onRetry: () => void }) {
+  if (state === 'loaded') return null;
+  return (
+    <div className={`feishu-image-load-state feishu-image-load-state--${state}`} role={state === 'error' ? 'alert' : 'status'}>
+      {state === 'loading' ? (
+        <><span className="feishu-image-load-state__spinner" aria-hidden /><span>图片加载中</span></>
+      ) : (
+        <><span>图片加载失败</span><button type="button" onMouseDown={event => event.preventDefault()} onClick={event => { event.stopPropagation(); onRetry(); }}>重新加载</button></>
+      )}
+    </div>
+  );
+}
+
 /** 使用官方 HorizontalRule（含 Markdown `---`/输入规则、`canInsertNode` 与安全插入光标逻辑），编辑器内用 NodeView 飞书样式替换 `<hr>` 展示 */
 const FeishuHorizontalRule = HorizontalRule.extend({
   addNodeView() {
@@ -736,6 +762,9 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
   const align = normalizeImageAlign(node.attrs.align);
   const blockId = String(node.attrs.blockId || '');
   const src = String(node.attrs.src || '');
+  const [imageLoadState, setImageLoadState] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [imageReloadNonce, setImageReloadNonce] = useState(0);
+  useEffect(() => setImageLoadState('loading'), [src]);
   const {
     captionRef,
     imageRef,
@@ -754,6 +783,7 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
     setNodeSelection,
     openViewer,
     closeViewer,
+    download,
     resetImage,
   } = useImageBlockInteractions({
     editor,
@@ -781,6 +811,8 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
         onCaptionClick={focusCaption}
         onCropClick={toggleCrop}
         onResetClick={resetImage}
+        onPreviewClick={openViewer}
+        onDownloadClick={download}
         isCropping={isCropping}
         hasCrop={hasCrop}
         documentId={(editor as any).__documentId}
@@ -788,7 +820,7 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
         onEnsureBlockId={ensureBlockId}
       />
       <div
-        className={`feishu-image-block${selected ? ' is-selected' : ''}`}
+        className={`feishu-image-block${selected ? ' is-selected' : ''} is-${imageLoadState}`}
         style={displayWidth ? { width: displayWidth } : undefined}
         onDoubleClick={event => {
           event.stopPropagation();
@@ -796,6 +828,7 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
         }}
       >
         <img
+          key={`${src}:${imageReloadNonce}`}
           ref={imageRef}
           className="feishu-image"
           src={src}
@@ -803,6 +836,7 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
           title={node.attrs.title || undefined}
           draggable={false}
           onLoad={event => {
+            setImageLoadState('loaded');
             const { naturalWidth, naturalHeight } = event.currentTarget;
             if (
               naturalWidth > 0
@@ -812,7 +846,9 @@ function FeishuImageView({ node, updateAttributes, editor, getPos, selected }: N
               updateAttributes({ naturalWidth, naturalHeight });
             }
           }}
+          onError={() => setImageLoadState('error')}
         />
+        <ImageLoadFeedback state={imageLoadState} onRetry={() => { setImageLoadState('loading'); setImageReloadNonce(value => value + 1); }} />
         {selected && !isCropping && (
           <ImageResizeHandles imageRef={imageRef} onResizeEnd={setDisplayWidth} />
         )}
@@ -928,7 +964,24 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
   const isFilePreview = kind !== 'image' && viewMode === 'preview' && canPreview;
   const isVideoPreview = kind === 'video' && viewMode === 'preview' && canPreview;
   const [videoActivated, setVideoActivated] = useState(false);
+  const [isPictureInPicture, setIsPictureInPicture] = useState(false);
+  const [imageLoadState, setImageLoadState] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [imageReloadNonce, setImageReloadNonce] = useState(0);
   const mediaPreviewRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => setImageLoadState('loading'), [src]);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return undefined;
+    const handleEnter = () => setIsPictureInPicture(true);
+    const handleLeave = () => setIsPictureInPicture(false);
+    video.addEventListener('enterpictureinpicture', handleEnter);
+    video.addEventListener('leavepictureinpicture', handleLeave);
+    return () => {
+      video.removeEventListener('enterpictureinpicture', handleEnter);
+      video.removeEventListener('leavepictureinpicture', handleLeave);
+    };
+  }, [isVideoPreview, src]);
   const align = normalizeImageAlign(attrs.align);
   const blockId = String(attrs.blockId || attrs.id || '');
   const {
@@ -949,6 +1002,7 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
     setNodeSelection,
     openViewer,
     closeViewer,
+    download,
     resetImage,
   } = useImageBlockInteractions({
     editor,
@@ -971,6 +1025,29 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
     if (attrs.url) void navigator.clipboard?.writeText(String(attrs.url));
   };
   const setViewMode = (mode: FileViewMode) => updateAttributes({ viewMode: mode });
+  const mediaPreviewStyle = (() => {
+    const style: CSSProperties & Record<string, string | number | undefined> = {};
+    if ((kind === 'image' || kind === 'video') && displayWidth) style.width = displayWidth;
+    const naturalWidth = Number(attrs.naturalWidth || 0);
+    const naturalHeight = Number(attrs.naturalHeight || 0);
+    if (kind === 'video' && naturalWidth > 0 && naturalHeight > 0) {
+      style['--feishu-video-aspect-ratio'] = `${naturalWidth} / ${naturalHeight}`;
+    }
+    return Object.keys(style).length ? style : undefined;
+  })();
+  const togglePictureInPicture = async () => {
+    const video = videoRef.current;
+    if (!video || !document.pictureInPictureEnabled || !video.requestPictureInPicture) return;
+    try {
+      if (document.pictureInPictureElement === video) {
+        await document.exitPictureInPicture();
+      } else {
+        await video.requestPictureInPicture();
+      }
+    } catch (error) {
+      void MessagePlugin.error(error instanceof Error ? error.message : '无法开启画中画');
+    }
+  };
   const deleteNode = () => {
     const pos = typeof getPos === 'function' ? getPos() : null;
     if (typeof pos !== 'number') return;
@@ -1020,6 +1097,8 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
           onCaptionClick={focusCaption}
           onCropClick={toggleCrop}
           onResetClick={resetImage}
+          onPreviewClick={openViewer}
+          onDownloadClick={download}
           isCropping={isCropping}
           hasCrop={hasCrop}
           documentId={(editor as any).__documentId}
@@ -1030,9 +1109,9 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
       {viewMode === 'preview' && canPreview && (
         <div
           ref={mediaPreviewRef}
-          className={`feishu-media-preview feishu-media-preview--${kind}`}
+          className={`feishu-media-preview feishu-media-preview--${kind}${kind === 'image' ? ` is-${imageLoadState}` : ''}`}
           data-no-marquee-selection="true"
-          style={kind === 'image' && displayWidth ? { width: displayWidth } : undefined}
+          style={mediaPreviewStyle}
           onDoubleClick={kind === 'image' ? event => {
             event.stopPropagation();
             openViewer();
@@ -1041,12 +1120,14 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
           {kind === 'image' && (
             <>
               <img
+                key={`${src}:${imageReloadNonce}`}
                 ref={imageRef}
                 className="feishu-media-preview__image"
                 src={src}
                 alt={attrs.name || 'image'}
                 draggable={false}
                 onLoad={event => {
+                  setImageLoadState('loaded');
                   const { naturalWidth, naturalHeight } = event.currentTarget;
                   if (
                     naturalWidth > 0
@@ -1056,7 +1137,9 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
                     updateAttributes({ naturalWidth, naturalHeight });
                   }
                 }}
+                onError={() => setImageLoadState('error')}
               />
+              <ImageLoadFeedback state={imageLoadState} onRetry={() => { setImageLoadState('loading'); setImageReloadNonce(value => value + 1); }} />
               {selected && !isCropping && (
                 <ImageResizeHandles imageRef={imageRef} onResizeEnd={setDisplayWidth} />
               )}
@@ -1071,8 +1154,9 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
             </>
           )}
           {kind === 'video' && (
-            <div className="feishu-media-preview__video-shell">
+            <div className={`feishu-media-preview__video-shell${videoActivated ? ' is-playing' : ''}`}>
               <video
+                ref={videoRef}
                 className="feishu-media-preview__video"
                 src={src}
                 controls={videoActivated}
@@ -1080,6 +1164,13 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
                 data-no-marquee-selection="true"
                 onPlay={() => setVideoActivated(true)}
                 onPause={() => setVideoActivated(false)}
+                onLoadedMetadata={event => {
+                  const naturalWidth = event.currentTarget.videoWidth;
+                  const naturalHeight = event.currentTarget.videoHeight;
+                  if (naturalWidth > 0 && naturalHeight > 0 && (attrs.naturalWidth !== naturalWidth || attrs.naturalHeight !== naturalHeight)) {
+                    updateAttributes({ naturalWidth, naturalHeight });
+                  }
+                }}
               />
               <div className="feishu-media-preview__video-title">
                 <span className="feishu-media-preview__video-file-icon">VID</span>
@@ -1100,7 +1191,27 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
                   <span aria-hidden />
                 </button>
               )}
+              {typeof document !== 'undefined' && document.pictureInPictureEnabled && (
+                <button
+                  type="button"
+                  className={`feishu-media-preview__pip${isPictureInPicture ? ' is-active' : ''}`}
+                  aria-label={isPictureInPicture ? '退出画中画' : '画中画播放'}
+                  title={isPictureInPicture ? '退出画中画' : '画中画播放'}
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => void togglePictureInPicture()}
+                >
+                  <span aria-hidden />
+                </button>
+              )}
             </div>
+          )}
+          {kind === 'video' && (
+            <VideoResizeHandle
+              hostRef={mediaPreviewRef}
+              videoRef={videoRef}
+              onResizeStart={setNodeSelection}
+              onResizeEnd={({ width, height }) => updateAttributes({ displayWidth: width, displayHeight: height })}
+            />
           )}
           {kind === 'audio' && <audio className="feishu-media-preview__audio" src={src} controls preload="metadata" data-no-marquee-selection="true" />}
           {extension === 'pdf' && <iframe className="feishu-media-preview__pdf" src={src} title={attrs.name || 'PDF'} sandbox="allow-same-origin allow-scripts" />}

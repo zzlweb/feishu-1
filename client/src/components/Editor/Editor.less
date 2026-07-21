@@ -1751,6 +1751,53 @@
             width: 100%;
             height: auto;
           }
+
+          &.is-loading,
+          &.is-error {
+            width: min(100%, 520px);
+            min-height: 180px;
+            border-radius: 8px;
+            background: #f5f6f7;
+          }
+        }
+
+        .feishu-image-load-state {
+          position: absolute;
+          inset: 0;
+          z-index: 5;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          min-height: 120px;
+          border: 1px solid #dee0e3;
+          border-radius: inherit;
+          color: #646a73;
+          background: #f5f6f7;
+          font-size: 13px;
+          line-height: 20px;
+
+          button {
+            padding: 3px 8px;
+            border: 0;
+            border-radius: 4px;
+            color: @primary;
+            background: rgba(51, 112, 255, 0.1);
+            cursor: pointer;
+          }
+
+          &__spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #d0d3d6;
+            border-top-color: @primary;
+            border-radius: 50%;
+            animation: feishu-media-spin 0.8s linear infinite;
+          }
+        }
+
+        @keyframes feishu-media-spin {
+          to { transform: rotate(360deg); }
         }
 
         .feishu-image-resize-handle {
@@ -1942,6 +1989,8 @@
           }
 
           &--video {
+            width: min(100%, 520px);
+            overflow: visible;
             border: 0;
             border-radius: 6px;
             background: transparent;
@@ -2143,10 +2192,102 @@
           border-radius: 6px;
           background: #000;
           line-height: 0;
+          width: 100%;
 
           video {
             display: block;
           }
+        }
+
+        .feishu-media-preview--image.is-loading,
+        .feishu-media-preview--image.is-error {
+          width: min(100%, 520px);
+          min-height: 180px;
+        }
+
+        .feishu-media-preview__video {
+          width: 100%;
+          max-width: none;
+          aspect-ratio: var(--feishu-video-aspect-ratio, 16 / 9);
+        }
+
+        .feishu-video-resize-handle {
+          position: absolute;
+          right: -10px;
+          bottom: -10px;
+          z-index: 12;
+          width: 22px;
+          height: 22px;
+          padding: 0;
+          border: 0;
+          border-radius: 50%;
+          background: transparent;
+          cursor: nwse-resize;
+          opacity: 0;
+          touch-action: none;
+          transition: opacity 0.12s ease;
+
+          &::after {
+            position: absolute;
+            inset: 5px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            background: @primary;
+            box-shadow: 0 1px 4px rgba(31, 35, 41, 0.32);
+            content: '';
+          }
+
+          &:focus-visible {
+            opacity: 1;
+            outline: 2px solid fade(@primary, 35%);
+          }
+        }
+
+        .feishu-media-preview--video:hover .feishu-video-resize-handle,
+        .feishu-file-block--video-preview.is-selected .feishu-video-resize-handle,
+        .feishu-file-block--video-preview:focus-within .feishu-video-resize-handle {
+          opacity: 1;
+        }
+
+        .feishu-media-preview__pip {
+          position: absolute;
+          right: 10px;
+          bottom: 10px;
+          z-index: 4;
+          width: 32px;
+          height: 28px;
+          padding: 0;
+          border: 0;
+          border-radius: 5px;
+          color: #fff;
+          background: rgba(31, 35, 41, 0.68);
+          cursor: pointer;
+
+          span {
+            position: absolute;
+            inset: 7px 6px;
+            border: 1.5px solid currentColor;
+            border-radius: 2px;
+
+            &::after {
+              position: absolute;
+              right: 2px;
+              bottom: 2px;
+              width: 7px;
+              height: 5px;
+              background: currentColor;
+              content: '';
+            }
+          }
+
+          &:hover,
+          &.is-active {
+            background: rgba(51, 112, 255, 0.92);
+          }
+        }
+
+        .feishu-media-preview__video-shell.is-playing .feishu-media-preview__pip {
+          bottom: 44px;
         }
 
         .feishu-media-preview__video-title {

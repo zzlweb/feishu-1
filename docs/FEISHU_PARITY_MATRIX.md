@@ -17,5 +17,6 @@
 | Bitable | Record Modal | REF-MODAL-01..03 | 详情可用，焦点和附件生命周期不足 | 60% | 75% | 45% | P1 | 局部 |
 | 导入 | 文件与公开链接 | REF-IMPORT-01..04 | 文件导入、进度取消、逐跳域名/DNS/重定向限制可用；浏览器 E2E 待补 | 82% | 75% | 78% | P0 | 服务端导入与 URL 安全测试，E2E 待补 |
 | 上传 | 资产生命周期 | REF-UPLOAD-01..03 | 类型白名单、内容签名和静态隔离可用；资产归属、删除和恢复不足 | 68% | 70% | 55% | P0 | 上传安全集成测试 |
+| 媒体 | 图片与视频组件 | MEDIA-001 | 图片工具条、裁剪、说明、预览与失败恢复可用；视频支持等比缩放持久化和画中画，待真实浏览器视觉基线 | 86% | 80% | 82% | P1 | 11 个 Client 单测，媒体/裁剪 E2E 契约 |
 
 详细问题、复现步骤与代码归属见 [quality/feature-gap-register.md](quality/feature-gap-register.md)。参照采集规范见 [quality/reference-capture/README.md](quality/reference-capture/README.md)。

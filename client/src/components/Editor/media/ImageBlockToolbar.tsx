@@ -10,6 +10,8 @@ interface ImageBlockToolbarProps {
   onCaptionClick?: () => void;
   onCropClick?: () => void;
   onResetClick?: () => void;
+  onPreviewClick?: () => void;
+  onDownloadClick?: () => void;
   isCropping?: boolean;
   hasCrop?: boolean;
   documentId?: string;
@@ -35,6 +37,7 @@ function MenuIcon({ dataIcon, paths, iconClass = 'universe-icon' }: {
 
 function MenuItem({
   name,
+  label,
   dataIcon,
   paths,
   iconClass = 'universe-icon',
@@ -42,6 +45,7 @@ function MenuItem({
   onClick,
 }: {
   name: string;
+  label: string;
   dataIcon: string;
   paths: string[];
   iconClass?: string;
@@ -54,8 +58,8 @@ function MenuItem({
       data-name={name}
       role="button"
       tabIndex={0}
-      title={name}
-      aria-label={name}
+      title={label}
+      aria-label={label}
       onMouseDown={event => event.preventDefault()}
       onClick={onClick}
       onKeyDown={event => {
@@ -96,6 +100,8 @@ const COMMENT_PATHS = [
   'M2 5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v11.5a2 2 0 0 1-2 2h-3.812a.5.5 0 0 0-.33.124l-2.541 2.224a2 2 0 0 1-2.634 0l-2.542-2.224a.5.5 0 0 0-.329-.124H4a2 2 0 0 1-2-2V5Zm2 0v11.5h3.812a2.5 2.5 0 0 1 1.646.619L12 19.343l2.542-2.224a2.5 2.5 0 0 1 1.646-.619H20V5H4Z',
 ];
 const RESET_PATH = 'M12 3a9 9 0 1 1-8.49 6H1.2a1 1 0 0 1-.7-1.71l3-3a1 1 0 0 1 1.41 0l3 3A1 1 0 0 1 7.2 9H5.57A7 7 0 1 0 12 5a1 1 0 1 1 0-2Z';
+const PREVIEW_PATH = 'M12 4c5.5 0 9.4 4.45 10.7 6.23a3 3 0 0 1 0 3.54C21.4 15.55 17.5 20 12 20S2.6 15.55 1.3 13.77a3 3 0 0 1 0-3.54C2.6 8.45 6.5 4 12 4Zm0 2c-4.36 0-7.65 3.69-9.08 5.41a1 1 0 0 0 0 1.18C4.35 14.31 7.64 18 12 18s7.65-3.69 9.08-5.41a1 1 0 0 0 0-1.18C19.65 9.69 16.36 6 12 6Zm0 2.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Zm0 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z';
+const DOWNLOAD_PATH = 'M12 2a1 1 0 0 1 1 1v10.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V3a1 1 0 0 1 1-1ZM4 19a1 1 0 0 1 1 1h14a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1v-2Z';
 
 export default function ImageBlockToolbar({
   editor,
@@ -104,6 +110,8 @@ export default function ImageBlockToolbar({
   onCaptionClick,
   onCropClick,
   onResetClick,
+  onPreviewClick,
+  onDownloadClick,
   isCropping = false,
   hasCrop = false,
   documentId,
@@ -118,14 +126,19 @@ export default function ImageBlockToolbar({
   };
 
   const handleShareLink = async () => {
-    if (blockId && onEnsureBlockId) onEnsureBlockId(blockId);
-    const url = await copyCurrentBlockLink(editor);
-    if (!url) return;
-    if (navigator.share) {
-      await navigator.share({ title: document.title, url });
-      return;
+    try {
+      if (blockId && onEnsureBlockId) onEnsureBlockId(blockId);
+      const url = await copyCurrentBlockLink(editor);
+      if (!url) return;
+      if (navigator.share) {
+        await navigator.share({ title: document.title, url });
+        return;
+      }
+      MessagePlugin.success('已复制分享链接');
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      void MessagePlugin.error('分享失败，请稍后重试');
     }
-    MessagePlugin.success('已复制分享链接');
   };
 
   const openCommentSidebar = () => {
@@ -145,6 +158,7 @@ export default function ImageBlockToolbar({
     <div className="docx-menu-container overlay-container block-toolbar__overlay slide-top" contentEditable={false} data-no-marquee-selection="true">
       <MenuItem
         name="Crop"
+        label={isCropping ? '完成裁剪' : '裁剪图片'}
         dataIcon="CropOutlined"
         paths={[CROP_PATH]}
         iconClass="universe-icon menu_ud_icon"
@@ -154,6 +168,7 @@ export default function ImageBlockToolbar({
       {hasCrop && (
         <MenuItem
           name="resetImage"
+          label="还原原图"
           dataIcon="ResetOutlined"
           paths={[RESET_PATH]}
           onClick={() => onResetClick?.()}
@@ -162,6 +177,7 @@ export default function ImageBlockToolbar({
       <MenuDivider />
       <MenuItem
         name="caption"
+        label="添加图片说明"
         dataIcon="FeedbackOutlined"
         paths={CAPTION_PATHS}
         iconClass="universe-icon menu_ud_icon"
@@ -170,6 +186,7 @@ export default function ImageBlockToolbar({
       <MenuDivider />
       <MenuItem
         name="align left"
+        label="左对齐"
         dataIcon="LeftAlignmentOutlined"
         paths={[ALIGN_LEFT]}
         active={align === 'left'}
@@ -177,6 +194,7 @@ export default function ImageBlockToolbar({
       />
       <MenuItem
         name="align center"
+        label="居中对齐"
         dataIcon="CenterAlignmentOutlined"
         paths={[ALIGN_CENTER]}
         active={align === 'center'}
@@ -184,6 +202,7 @@ export default function ImageBlockToolbar({
       />
       <MenuItem
         name="align right"
+        label="右对齐"
         dataIcon="RightAlignmentOutlined"
         paths={[ALIGN_RIGHT]}
         active={align === 'right'}
@@ -191,7 +210,23 @@ export default function ImageBlockToolbar({
       />
       <MenuDivider fullHeight />
       <MenuItem
+        name="preview"
+        label="预览图片"
+        dataIcon="ViewOutlined"
+        paths={[PREVIEW_PATH]}
+        onClick={() => onPreviewClick?.()}
+      />
+      <MenuItem
+        name="download"
+        label="下载图片"
+        dataIcon="DownloadOutlined"
+        paths={[DOWNLOAD_PATH]}
+        onClick={() => onDownloadClick?.()}
+      />
+      <MenuDivider />
+      <MenuItem
         name="copyAnchorLink"
+        label="复制块链接"
         dataIcon="BlocklinkOutlined"
         paths={[BLOCK_LINK]}
         iconClass="universe-icon menu_ud_icon color-b-500"
@@ -199,6 +234,7 @@ export default function ImageBlockToolbar({
       />
       <MenuItem
         name="shareTextLink"
+        label="分享图片链接"
         dataIcon="SharewordsOutlined"
         paths={[SHARE_TEXT]}
         iconClass="universe-icon menu_ud_icon color-b-500"
@@ -207,6 +243,7 @@ export default function ImageBlockToolbar({
       <MenuDivider />
       <MenuItem
         name="comment"
+        label="添加评论"
         dataIcon="AddCommentOutlined"
         paths={COMMENT_PATHS}
         iconClass="universe-icon menu_ud_icon"

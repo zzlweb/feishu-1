@@ -59,6 +59,7 @@
 | FG-038 | 导入取消 | 开始大文件/URL 导入后关闭对话框或切换页面 | 文件上传显示进度且可取消，URL 导入和页面卸载会 abort；待补浏览器 E2E 和服务端中断后的临时资源清理 | [documents.ts](../../client/src/api/documents.ts)、[DocumentList.tsx](../../client/src/components/DocumentList/DocumentList.tsx) | Client build 已覆盖，E2E 待补 | REF-IMPORT-04 |
 | FG-039 | 上传生命周期 | 删除文档块/记录中的附件后检查服务端文件 | 文件留在全局 public 目录，无资产归属和 DELETE/清理 | [uploads.ts](../../server/src/routes/uploads.ts) | 缺失 | REF-UPLOAD-03 |
 | FG-040 | 媒体失败恢复 | 上传失败、刷新页面，再点重试 | 重试依赖内存中的原始 `File`，刷新后失效；应提示重选或支持可恢复上传 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[mediaUploadRegistry.ts](../../client/src/components/Editor/media/mediaUploadRegistry.ts) | 部分：[media-file-blocks.spec.ts](../../client/tests/media-file-blocks.spec.ts) 未刷新 | REF-UPLOAD-02 |
+| FG-041 | 图片/视频交互 | 图片加载失败，或缩放视频后保存刷新 | 图片现保留可重试失败面板；视频右下角等比缩放会持久化宽高，并在浏览器支持时提供画中画；待真实浏览器视觉基线和刷新 E2E | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[VideoResizeHandle.tsx](../../client/src/components/Editor/media/VideoResizeHandle.tsx) | 单元测试已覆盖尺寸算法，浏览器契约已补 | MEDIA-001 |
 
 ## P2 候选
 
@@ -66,6 +67,6 @@
 
 ## 数量与覆盖
 
-- 共 40 条：P0 8 条，P1 32 条。
+- 共 41 条：P0 8 条，P1 33 条。
 - 全部 13 类计划流均有代码归属和测试状态：文档输入、Slash、块菜单、标题折叠、目录、评论、普通表格、Grid、Gallery、Kanban、Record Modal、导入、上传。
 - 主要空白集中在真实持久化、权限、安全、键盘路径和失败恢复；现有强项是局部渲染、指针交互和 portal 几何。
