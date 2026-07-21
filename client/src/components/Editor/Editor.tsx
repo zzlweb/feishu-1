@@ -28,6 +28,7 @@ import { CONTEXT_MENU_SHELL_SELECTORS } from './shared/FloatingMenuShell';
 import { computeTableBlockMenuPosition } from './tables/tableMenu';
 import SlashMenu from './menus/SlashMenu';
 import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH, type ButtonActionType } from './menus/slashMenuConfig';
+import { resolveSlashTrigger } from './menus/slashTrigger';
 import SelectionBubble from './toolbars/SelectionBubble';
 import ImageBlockToolbar from './media/ImageBlockToolbar';
 import ImageCropOverlay from './media/ImageCropOverlay';
@@ -3319,11 +3320,9 @@ export default function Editor({
       // Slash menu detection
       const { from } = editor.state.selection;
       const textBefore = editor.state.doc.textBetween(Math.max(0, from - 30), from, '\n', '\0');
-      const slashIdx = textBefore.lastIndexOf('/');
-      if (slashIdx !== -1) {
-        const query = textBefore.slice(slashIdx + 1);
-        // Only show if no space in query
-        if (!query.includes(' ') && !query.includes('\n')) {
+      const slashTrigger = resolveSlashTrigger(textBefore);
+      if (slashTrigger) {
+        const { query } = slashTrigger;
           const coords = editor.view.coordsAtPos(from);
           setSlashMenuPos({ top: coords.bottom + 4, left: coords.left });
           setSlashQuery(query);
@@ -3331,9 +3330,6 @@ export default function Editor({
           setSlashMenuFromTableCellPlus(false);
           (editor as any).__plusInsertRange = null;
           setSlashMenuVisible(true);
-        } else {
-          closeSlashMenu();
-        }
       } else {
         closeSlashMenu();
       }

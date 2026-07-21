@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TABLE_GRID_MAX } from './tableInsert';
 import './TableGridPicker.less';
 
@@ -12,7 +12,7 @@ const GRID_CELLS = Array.from({ length: TABLE_GRID_MAX * TABLE_GRID_MAX }, (_, i
 }));
 
 export default function TableGridPicker({ onPick }: Props) {
-  const [hover, setHover] = useState({ rows: 0, cols: 0 });
+  const [hover, setHover] = useState({ rows: 1, cols: 1 });
   const pickingRef = useRef(false);
 
   const handlePick = (row: number, col: number) => {
@@ -27,6 +27,24 @@ export default function TableGridPicker({ onPick }: Props) {
     });
   };
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        handlePick(hover.rows, hover.cols);
+        return;
+      }
+      setHover(current => ({
+        rows: Math.max(1, Math.min(TABLE_GRID_MAX, current.rows + (event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0))),
+        cols: Math.max(1, Math.min(TABLE_GRID_MAX, current.cols + (event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0))),
+      }));
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [hover.cols, hover.rows]);
+
   return (
     <div className="table-grid-picker">
       <div className="table-grid-picker__head">
@@ -34,7 +52,8 @@ export default function TableGridPicker({ onPick }: Props) {
       </div>
       <div
         className="table-grid-picker__grid"
-        onMouseLeave={() => setHover({ rows: 0, cols: 0 })}
+        role="grid"
+        aria-label={`表格大小 ${hover.rows} 行 ${hover.cols} 列`}
       >
         {GRID_CELLS.map(({ row, col }) => {
           const isActive = hover.rows > 0 && hover.cols > 0 && row <= hover.rows && col <= hover.cols;
@@ -44,6 +63,7 @@ export default function TableGridPicker({ onPick }: Props) {
               type="button"
               className={`table-grid-picker__cell${isActive ? ' is-active' : ''}`}
               aria-label={`${col} 列 ${row} 行`}
+              tabIndex={-1}
               onMouseEnter={() => setHover({ rows: row, cols: col })}
               onMouseDown={e => {
                 e.preventDefault();

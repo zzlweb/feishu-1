@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { Editor } from '@tiptap/react';
 import { insertButtonBlockFromSlash, type ButtonActionType } from '../menus/slashMenuConfig';
 
@@ -34,11 +35,24 @@ const BUTTON_TYPES: Array<{
 ];
 
 export default function ButtonTypePicker({ editor, onPick, onPickType }: ButtonTypePickerProps) {
+  const [activeIndex, setActiveIndex] = useState(0);
   const handlePick = (type: ButtonActionType) => {
     if (onPickType) onPickType(type);
     else if (editor) insertButtonBlockFromSlash(editor, type);
     onPick();
   };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!['ArrowUp', 'ArrowDown', 'Enter'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Enter') handlePick(BUTTON_TYPES[activeIndex].type);
+      else setActiveIndex(index => Math.max(0, Math.min(BUTTON_TYPES.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1))));
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [activeIndex]);
 
   return (
     <div className="docx-menu-container slash-button-type-picker">
@@ -46,10 +60,12 @@ export default function ButtonTypePicker({ editor, onPick, onPickType }: ButtonT
       {BUTTON_TYPES.map(item => (
         <div
           key={item.type}
-          className="panel-menu-item"
+          className={`panel-menu-item${activeIndex === BUTTON_TYPES.indexOf(item) ? ' active' : ''}`}
           data-name={item.name}
           role="button"
           tabIndex={0}
+          aria-selected={activeIndex === BUTTON_TYPES.indexOf(item)}
+          onMouseEnter={() => setActiveIndex(BUTTON_TYPES.indexOf(item))}
           onMouseDown={event => event.preventDefault()}
           onClick={() => handlePick(item.type)}
         >

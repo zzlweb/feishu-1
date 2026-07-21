@@ -52,6 +52,25 @@ export default function TemplatePicker({ onPick }: Props) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!templates?.length) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!['ArrowUp', 'ArrowDown', 'Enter'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const activeIndex = Math.max(0, templates.findIndex(template => template.id === hovered?.id));
+      if (event.key === 'Enter') {
+        onPick(templates[activeIndex]);
+        return;
+      }
+      const nextIndex = Math.max(0, Math.min(templates.length - 1, activeIndex + (event.key === 'ArrowDown' ? 1 : -1)));
+      setHovered(templates[nextIndex]);
+      itemRefs.current.get(templates[nextIndex].id)?.scrollIntoView({ block: 'nearest' });
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [hovered?.id, onPick, templates]);
+
   if (templates == null) {
     return (
       <div className="slash-template-flyout-inner">
@@ -89,6 +108,8 @@ export default function TemplatePicker({ onPick }: Props) {
               }}
               type="button"
               className={`slash-template-picker__item${hovered?.id === template.id ? ' is-active' : ''}`}
+              aria-selected={hovered?.id === template.id}
+              tabIndex={-1}
               onMouseEnter={() => setHovered(template)}
               onMouseDown={event => {
                 event.preventDefault();

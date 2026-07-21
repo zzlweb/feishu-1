@@ -138,6 +138,18 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
           return;
         }
       }
+      const activeItem = allItems[activeIdx];
+      if ((e.key === 'Enter' || e.key === 'ArrowRight') && activeItem?.submenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        const activeElement = menuRef.current?.querySelector('.slash-item.active, .slash-basic-cell.active') as HTMLElement | null;
+        if (activeElement) {
+          if (activeItem.submenu === 'templateList') templateInsertRangeRef.current = resolveSlashInsertRange(editor);
+          setActiveSubmenu({ kind: activeItem.submenu, rect: activeElement.getBoundingClientRect() });
+          setTooltipItem(null);
+        }
+        return;
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setActiveIdx(i => Math.min(i + 1, Math.max(0, allItems.length - 1)));
@@ -415,6 +427,8 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                     role="button"
                     tabIndex={0}
                     aria-label={item.label}
+                    aria-haspopup={hasSubmenu ? 'menu' : undefined}
+                    aria-expanded={hasSubmenu ? activeSubmenu?.kind === item.submenu : undefined}
                     onMouseEnter={e => {
                       setActiveIdx(idx);
                       if (!hasSubmenu && hasTooltipContent(item)) {

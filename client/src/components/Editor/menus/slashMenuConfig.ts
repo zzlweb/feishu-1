@@ -68,7 +68,8 @@ export function getSlashRange(editor: Editor) {
   const { from } = editor.state.selection;
   const text = editor.state.doc.textBetween(Math.max(0, from - 20), from, '\n', '\0');
   const slashIdx = text.lastIndexOf('/');
-  if (slashIdx === -1) return { from, to: from };
+  const beforeSlash = text[slashIdx - 1] || '';
+  if (slashIdx === -1 || (slashIdx > 0 && !/[\s\u00a0]/.test(beforeSlash))) return { from, to: from };
   const start = from - (text.length - slashIdx);
   return { from: start, to: from };
 }
@@ -172,11 +173,12 @@ async function uploadFile(file: File) {
 }
 
 function insertImageFromPicker(editor: Editor) {
-  const plusRange = consumePlusInsertRange(editor);
-  if (plusRange) editor.chain().focus().deleteRange(plusRange).run();
-  else editor.chain().focus().deleteRange(getSlashRange(editor)).run();
+  const plusRange = (editor as any).__plusInsertRange as { from: number; to: number } | null | undefined;
+  const slashRange = getSlashRange(editor);
 
   pickFile('image/*', file => {
+    if (plusRange) editor.chain().focus().deleteRange(plusRange).run();
+    else editor.chain().focus().deleteRange(slashRange).run();
     void uploadFile(file).then(uploaded => {
       const imageNode = { type: 'image', attrs: { src: uploaded.url, alt: uploaded.name } };
       if (plusRange) editor.chain().focus().insertContentAt(plusRange.from, imageNode).run();
@@ -193,13 +195,13 @@ function insertImageFromPicker(editor: Editor) {
 }
 
 function insertFileFromPicker(editor: Editor) {
-  const plusRange = consumePlusInsertRange(editor);
+  const plusRange = (editor as any).__plusInsertRange as { from: number; to: number } | null | undefined;
   const slashRange = getSlashRange(editor);
   const insertAt = plusRange?.from ?? slashRange.from;
-  if (plusRange) editor.chain().focus().deleteRange(plusRange).run();
-  else editor.chain().focus().deleteRange(slashRange).run();
 
   pickFile('video/*,application/*,*/*', file => {
+    if (plusRange) editor.chain().focus().deleteRange(plusRange).run();
+    else editor.chain().focus().deleteRange(slashRange).run();
     dispatchMediaInsert([file], insertAt);
   });
 }
