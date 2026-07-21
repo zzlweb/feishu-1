@@ -332,6 +332,69 @@ test('document import API restores zip html content and bundled assets', async (
   });
 });
 
+test('document import API parses Markdown structure and removes active content', async () => {
+  await withApi(async (api) => {
+    const markdown = [
+      '---',
+      'title: "Markdown 项目周报"',
+      '---',
+      '# 正文标题',
+      '',
+      '- [x] 已完成',
+      '- [ ] 待处理',
+      '',
+      '| 门店 | 销售额 |',
+      '| --- | ---: |',
+      '| A | 75640 |',
+      '',
+      '```typescript',
+      'const safe = true;',
+      '```',
+      '',
+      '[危险链接](javascript:alert(1))',
+      '![缺失图](./assets/missing.png)',
+      '<iframe src="https://example.com"></iframe>',
+    ].join('\n');
+    const form = new FormData();
+    form.append('file', new Blob([markdown], { type: 'text/markdown' }), 'weekly-report.md');
+
+    const imported = await api<any>('/api/documents/import', {
+      method: 'POST',
+      headers: {},
+      body: form as any,
+    });
+
+    assert.equal(imported.status, 201);
+    assert.equal(imported.body.data.document.title, 'Markdown 项目周报');
+    assert.equal(imported.body.data.import_quality, 'partial');
+    assert.match(imported.body.data.document.content, /data-type="taskList"/);
+    assert.match(imported.body.data.document.content, /class="feishu-table/);
+    assert.match(imported.body.data.document.content, /language-typescript/);
+    assert.match(imported.body.data.document.content, /图片资源未包含/);
+    assert.doesNotMatch(imported.body.data.document.content, /javascript:|iframe/);
+  });
+});
+
+test('document import API rejects ZIP entries with suspicious compression ratios', async () => {
+  await withApi(async (api) => {
+    const zip = new JSZip();
+    zip.file('index.md', '# 安全检查\n');
+    zip.file('assets/repeated.txt', 'A'.repeat(1024 * 1024));
+    const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 9 } });
+    const form = new FormData();
+    form.append('file', new Blob([buffer], { type: 'application/zip' }), 'suspicious.zip');
+
+    const imported = await api<any>('/api/documents/import', {
+      method: 'POST',
+      headers: {},
+      body: form as any,
+    });
+
+    assert.equal(imported.status, 400);
+    assert.match(imported.body.message, /压缩比异常/);
+  });
+});
+
 test('document import-url API rejects invalid domains', async () => {
   await withApi(async (api) => {
     const invalid = await api<any>('/api/documents/import-url', {

@@ -224,17 +224,6 @@ function FieldForm({
                   onSelect={handleFieldTypeChange}
                 />
               </div>
-              <button
-                type="button"
-                className="base-b-field-type base-b-field-type--shortcut"
-                onClick={() => window.alert('字段捷径功能即将推出。')}
-              >
-                <span className="base-b-field-type__left">
-                  <span>探索字段捷径</span>
-                  <span className="base-b-field-type__info" aria-hidden><GlyphInfo /></span>
-                </span>
-                <span className="base-b-field-type__arrow" aria-hidden><GlyphChevronRight /></span>
-              </button>
             </div>
           </div>
 

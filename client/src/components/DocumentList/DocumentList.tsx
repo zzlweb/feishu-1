@@ -212,10 +212,14 @@ export default function DocumentList() {
   const [fileImportResult, setFileImportResult] = useState<ImportDocumentResult | null>(null);
   const [isUploadDragging, setIsUploadDragging] = useState(false);
   const [isImportingFile, setIsImportingFile] = useState(false);
+  const [fileImportName, setFileImportName] = useState('');
+  const [fileImportProgress, setFileImportProgress] = useState(0);
   const [isImportingUrl, setIsImportingUrl] = useState(false);
   const rowMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadDragDepthRef = useRef(0);
+  const fileImportControllerRef = useRef<AbortController | null>(null);
+  const urlImportControllerRef = useRef<AbortController | null>(null);
   const navigate = useNavigate();
 
   const loadDocuments = useCallback(async () => {
@@ -238,6 +242,11 @@ export default function DocumentList() {
   useEffect(() => {
     void loadDocuments();
   }, [loadDocuments]);
+
+  useEffect(() => () => {
+    fileImportControllerRef.current?.abort();
+    urlImportControllerRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     if (!rowMenu) return undefined;
@@ -303,9 +312,17 @@ export default function DocumentList() {
       return;
     }
 
+    fileImportControllerRef.current?.abort();
+    const controller = new AbortController();
+    fileImportControllerRef.current = controller;
+    setFileImportName(file.name);
+    setFileImportProgress(0);
     setIsImportingFile(true);
     try {
-      const res = await importDocumentFile(file, CURRENT_USER);
+      const res = await importDocumentFile(file, CURRENT_USER, {
+        signal: controller.signal,
+        onProgress: setFileImportProgress,
+      });
       if (res.code === 0 && res.data?.document) {
         const quality = res.data.import_quality || 'fallback';
         if (quality === 'fallback') {
@@ -314,15 +331,24 @@ export default function DocumentList() {
           void MessagePlugin.success('已导入为新文档，请确认导入详情');
         }
         setFileImportResult(res.data);
-      } else {
+      } else if (res.code !== -2) {
         void MessagePlugin.error(res.message || '导入失败');
+      } else {
+        void MessagePlugin.info('已取消导入');
       }
     } catch {
-      void MessagePlugin.error('读取文件失败，请重试');
+      if (!controller.signal.aborted) void MessagePlugin.error('读取文件失败，请重试');
     } finally {
-      setIsImportingFile(false);
+      if (fileImportControllerRef.current === controller) {
+        fileImportControllerRef.current = null;
+        setIsImportingFile(false);
+      }
     }
-  }, [navigate]);
+  }, []);
+
+  const cancelFileImport = () => {
+    fileImportControllerRef.current?.abort();
+  };
 
   const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -347,11 +373,15 @@ export default function DocumentList() {
       return;
     }
 
+    urlImportControllerRef.current?.abort();
+    const controller = new AbortController();
+    urlImportControllerRef.current = controller;
     setIsImportingUrl(true);
     try {
       const res = await importDocumentUrl(url, {
         author: CURRENT_USER,
         saveAsTemplate: saveImportedAsTemplate,
+        signal: controller.signal,
       });
       if (res.code === 0 && res.data?.document) {
         const quality = res.data.import_quality || 'fallback';
@@ -366,16 +396,21 @@ export default function DocumentList() {
           void MessagePlugin.success(`${qualityText}成功，请确认导入详情`);
         }
         setFeishuImportResult(res.data);
-      } else {
+      } else if (res.code !== -2) {
         void MessagePlugin.error(res.message || '飞书导入失败');
       }
     } finally {
-      setIsImportingUrl(false);
+      if (urlImportControllerRef.current === controller) {
+        urlImportControllerRef.current = null;
+        setIsImportingUrl(false);
+      }
     }
   };
 
   const closeFeishuImportDialog = () => {
-    if (isImportingUrl) return;
+    urlImportControllerRef.current?.abort();
+    urlImportControllerRef.current = null;
+    setIsImportingUrl(false);
     setFeishuImportVisible(false);
     setFeishuImportResult(null);
     setFeishuImportUrl('');
@@ -769,7 +804,7 @@ export default function DocumentList() {
           content: feishuImportResult?.document ? '打开导入文档' : isImportingUrl ? '导入中...' : '开始导入',
           loading: isImportingUrl,
         }}
-        cancelBtn="取消"
+        cancelBtn={isImportingUrl ? '取消导入' : '取消'}
         onClose={closeFeishuImportDialog}
         onCancel={closeFeishuImportDialog}
         onConfirm={() => void handleImportFeishuUrl()}
@@ -798,6 +833,27 @@ export default function DocumentList() {
             />
             同时保存为模板
           </label>
+        </div>
+      </Dialog>
+
+      <Dialog
+        visible={isImportingFile}
+        destroyOnClose
+        header="正在导入本地文件"
+        width={480}
+        confirmBtn={null}
+        cancelBtn="取消导入"
+        closeOnEscKeydown={false}
+        closeOnOverlayClick={false}
+        onClose={cancelFileImport}
+        onCancel={cancelFileImport}
+      >
+        <div className="file-import-progress" role="status" aria-live="polite">
+          <strong title={fileImportName}>{fileImportName}</strong>
+          <div className="file-import-progress__track" aria-label="导入进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={fileImportProgress} role="progressbar">
+            <span style={{ width: `${fileImportProgress}%` }} />
+          </div>
+          <p>{fileImportProgress < 100 ? `正在上传 ${fileImportProgress}%` : '上传完成，正在解析文档结构和资源…'}</p>
         </div>
       </Dialog>
 

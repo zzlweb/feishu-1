@@ -14,10 +14,23 @@ const HTML_EXTENSIONS = new Set(['.html', '.htm', '.xhtml']);
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
 const TEXT_EXTENSIONS = new Set(['.txt', '.csv', '.log']);
 const ASSET_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
   '.mp4', '.webm', '.mov', '.mp3', '.wav', '.ogg',
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
 ]);
+const FORBIDDEN_ELEMENTS = 'script, style, iframe, frame, frameset, object, embed, applet, form, button, textarea, select, option, meta, link, base, title';
+const SAFE_ATTRIBUTES = new Set([
+  'alt', 'checked', 'class', 'colspan', 'data-align', 'data-checked', 'data-type',
+  'height', 'href', 'id', 'rel', 'rowspan', 'src', 'style', 'target', 'title', 'type', 'width',
+]);
+const SAFE_STYLES = new Set(['background-color', 'color', 'height', 'max-width', 'min-width', 'text-align', 'width']);
+const MAX_ZIP_ENTRIES = 2_000;
+const MAX_ZIP_TOTAL_BYTES = 100 * 1024 * 1024;
+const MAX_ZIP_ENTRY_BYTES = 25 * 1024 * 1024;
+const MAX_ZIP_COMPRESSION_RATIO = 100;
+const MAX_TEXT_BYTES = 10 * 1024 * 1024;
+
+marked.setOptions({ gfm: true, breaks: false });
 
 export interface ImportedDocumentPayload {
   title: string;
@@ -30,12 +43,28 @@ export interface ImportedDocumentPayload {
   importMetadata?: ImportMetadata;
 }
 
+interface ZipSizeMetadata {
+  compressedSize?: number;
+  uncompressedSize?: number;
+}
+
 function ensureUploadDir() {
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 function normalizeZipPath(value: string) {
-  return value.replace(/\\/g, '/').replace(/^\.?\//, '');
+  return value.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function assertSafeZipPath(value: string) {
+  const normalized = normalizeZipPath(value);
+  if (!normalized || normalized.includes('\0') || normalized.startsWith('/') || /^[a-z]:\//i.test(normalized)) {
+    throw new Error('压缩包包含无效文件路径');
+  }
+  if (normalized.split('/').some(part => part === '..')) {
+    throw new Error('压缩包包含不安全的跨目录路径');
+  }
+  return normalized;
 }
 
 function stripExtension(name: string) {
@@ -56,6 +85,40 @@ function buildPlainTextDocument(text: string) {
     .split(/\n{2,}/)
     .map(part => `<p>${part.split('\n').map(line => escapeHtml(line)).join('<br>') || '<br>'}</p>`)
     .join('');
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"' && quoted && text[index + 1] === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === ',' && !quoted) {
+      row.push(cell);
+      cell = '';
+    } else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && text[index + 1] === '\n') index += 1;
+      row.push(cell);
+      if (row.some(value => value.length > 0)) rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += char;
+    }
+  }
+  row.push(cell);
+  if (row.some(value => value.length > 0)) rows.push(row);
+  if (!rows.length) return '<p></p>';
+  const [header, ...body] = rows;
+  return `<table><thead><tr>${header.map(value => `<th>${escapeHtml(value)}</th>`).join('')}</tr></thead><tbody>${body
+    .map(values => `<tr>${values.map(value => `<td>${escapeHtml(value)}</td>`).join('')}</tr>`)
+    .join('')}</tbody></table>`;
 }
 
 function localFileImportMetadata(note: string): ImportMetadata {
@@ -111,8 +174,13 @@ function chooseMainDocument(files: string[]) {
 }
 
 function resolveAssetKey(src: string, documentPath: string, assetMap: Map<string, string>) {
-  if (!src || /^(https?:|data:|blob:|\/static\/)/i.test(src)) return src;
-  const clean = decodeURIComponent(src.split('#')[0].split('?')[0]);
+  if (!src || /^(https?:|\/static\/)/i.test(src)) return src;
+  let clean = src.split('#')[0].split('?')[0];
+  try {
+    clean = decodeURIComponent(clean);
+  } catch {
+    return '';
+  }
   const candidates = [
     normalizeZipPath(clean),
     normalizeZipPath(path.posix.join(path.posix.dirname(documentPath), clean)),
@@ -124,14 +192,68 @@ function resolveAssetKey(src: string, documentPath: string, assetMap: Map<string
     const bySuffix = Array.from(assetMap.entries()).find(([key]) => key.endsWith(`/${candidate}`) || path.posix.basename(key) === candidate);
     if (bySuffix) return bySuffix[1];
   }
-  return src;
+  return '';
+}
+
+function sanitizeUrl(value: string, kind: 'href' | 'src') {
+  const compact = value.trim().replace(/[\u0000-\u001f\u007f\s]+/g, '');
+  if (!compact) return '';
+  if (kind === 'src' && compact.startsWith('/static/uploads/')) return compact;
+  if (/^https?:\/\//i.test(compact)) return compact;
+  if (kind === 'href' && /^(mailto:|tel:|#|\/)/i.test(compact)) return compact;
+  return '';
+}
+
+function sanitizeStyle(value: string) {
+  return value
+    .split(';')
+    .map(declaration => declaration.trim())
+    .filter(Boolean)
+    .map(declaration => {
+      const separator = declaration.indexOf(':');
+      if (separator < 1) return '';
+      const property = declaration.slice(0, separator).trim().toLowerCase();
+      const styleValue = declaration.slice(separator + 1).trim();
+      if (!SAFE_STYLES.has(property) || /url\s*\(|expression\s*\(|javascript:|@import/i.test(styleValue)) return '';
+      return `${property}: ${styleValue}`;
+    })
+    .filter(Boolean)
+    .join('; ');
 }
 
 function sanitizeElement(element: HTMLElement) {
   for (const attr of Object.keys(element.attributes)) {
     const lower = attr.toLowerCase();
-    if (lower.startsWith('on') || lower === 'contenteditable' || lower === 'spellcheck') {
+    if (lower.startsWith('on') || !SAFE_ATTRIBUTES.has(lower)) {
       element.removeAttribute(attr);
+      continue;
+    }
+    if (lower === 'href' || lower === 'src') {
+      const safe = sanitizeUrl(element.getAttribute(attr) || '', lower);
+      if (safe) element.setAttribute(attr, safe);
+      else element.removeAttribute(attr);
+    } else if (lower === 'style') {
+      const safe = sanitizeStyle(element.getAttribute(attr) || '');
+      if (safe) element.setAttribute(attr, safe);
+      else element.removeAttribute(attr);
+    } else if (lower === 'class') {
+      const safe = (element.getAttribute(attr) || '')
+        .split(/\s+/)
+        .filter(name => /^(language-[\w-]+|task-list-item|contains-task-list|feishu-[\w-]+)$/.test(name))
+        .join(' ');
+      if (safe) element.setAttribute(attr, safe);
+      else element.removeAttribute(attr);
+    }
+  }
+  if (element.tagName.toLowerCase() === 'a' && element.getAttribute('target') === '_blank') {
+    element.setAttribute('rel', 'noopener noreferrer');
+  }
+  if (element.tagName.toLowerCase() === 'input') {
+    if (element.getAttribute('type') !== 'checkbox') element.remove();
+    else {
+      for (const attr of Object.keys(element.attributes)) {
+        if (!['type', 'checked'].includes(attr.toLowerCase())) element.removeAttribute(attr);
+      }
     }
   }
 }
@@ -145,12 +267,19 @@ function normalizeTables(root: HTMLElement) {
 }
 
 function normalizeImages(root: HTMLElement, documentPath: string, assetMap: Map<string, string>) {
+  let missingImages = 0;
   root.querySelectorAll('img').forEach(img => {
-    const src = img.getAttribute('src') || '';
-    img.setAttribute('src', resolveAssetKey(src, documentPath, assetMap));
+    const src = resolveAssetKey(img.getAttribute('src') || '', documentPath, assetMap);
+    if (!src) {
+      missingImages += 1;
+      img.replaceWith(`<p>[图片资源未包含在导入文件中：${escapeHtml(img.getAttribute('alt') || '未命名图片')}]</p>`);
+      return;
+    }
+    img.setAttribute('src', src);
     img.classList.add('feishu-image');
     if (!img.getAttribute('data-align')) img.setAttribute('data-align', 'center');
   });
+  return missingImages;
 }
 
 function normalizeTaskLists(root: HTMLElement) {
@@ -170,9 +299,9 @@ export function extractHtmlBody(rawHtml: string, sourceName: string, documentPat
     blockTextElements: { script: false, noscript: false, style: false, pre: true },
     comment: false,
   });
-  root.querySelectorAll('script, style, meta, link, title').forEach(node => node.remove());
+  root.querySelectorAll(FORBIDDEN_ELEMENTS).forEach(node => node.remove());
+  const missingImages = normalizeImages(root, documentPath, assetMap);
   root.querySelectorAll('*').forEach(sanitizeElement);
-  normalizeImages(root, documentPath, assetMap);
   normalizeTables(root);
   normalizeTaskLists(root);
 
@@ -184,41 +313,97 @@ export function extractHtmlBody(rawHtml: string, sourceName: string, documentPat
   return {
     title: title || stripExtension(path.basename(sourceName)),
     content: html || '<p></p>',
+    missingImages,
   };
+}
+
+function extractMarkdownFrontMatter(markdown: string) {
+  const normalized = markdown.replace(/^\uFEFF/, '');
+  const match = normalized.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/);
+  if (!match) return { markdown: normalized, title: '' };
+  const titleLine = match[1].split('\n').find(line => /^title\s*:/i.test(line));
+  const title = titleLine?.replace(/^title\s*:\s*/i, '').trim().replace(/^(['"])(.*)\1$/, '$2') || '';
+  return { markdown: normalized.slice(match[0].length), title };
+}
+
+async function parseMarkdownDocument(markdown: string, sourceName: string, documentPath = '', assetMap = new Map<string, string>()) {
+  const frontMatter = extractMarkdownFrontMatter(markdown);
+  const rendered = await marked.parse(frontMatter.markdown);
+  const parsed = extractHtmlBody(rendered, sourceName, documentPath, assetMap);
+  return { ...parsed, title: frontMatter.title || parsed.title };
+}
+
+function assertTextSize(buffer: Buffer) {
+  if (buffer.byteLength > MAX_TEXT_BYTES) throw new Error('正文文件超过 10MB，无法安全解析');
+}
+
+function validateZip(zip: JSZip) {
+  const entries = Object.entries(zip.files);
+  if (entries.length > MAX_ZIP_ENTRIES) throw new Error(`压缩包文件数超过 ${MAX_ZIP_ENTRIES} 个限制`);
+  const normalizedNames = new Set<string>();
+  let totalBytes = 0;
+  for (const [rawName, file] of entries) {
+    const name = assertSafeZipPath(rawName);
+    if (normalizedNames.has(name)) throw new Error('压缩包包含重复文件路径');
+    normalizedNames.add(name);
+    if (file.dir) continue;
+    const metadata = (file as unknown as { _data?: ZipSizeMetadata })._data;
+    const uncompressed = metadata?.uncompressedSize ?? 0;
+    const compressed = metadata?.compressedSize ?? 0;
+    if (uncompressed > MAX_ZIP_ENTRY_BYTES) throw new Error('压缩包包含超过 25MB 的单个文件');
+    totalBytes += uncompressed;
+    if (totalBytes > MAX_ZIP_TOTAL_BYTES) throw new Error('压缩包解压后超过 100MB 限制');
+    if (compressed > 0 && uncompressed / compressed > MAX_ZIP_COMPRESSION_RATIO) {
+      throw new Error('压缩包压缩比异常，已停止导入');
+    }
+  }
+  return entries.map(([rawName]) => ({ rawName, name: assertSafeZipPath(rawName) }));
 }
 
 async function importZip(buffer: Buffer, sourceName: string): Promise<ImportedDocumentPayload> {
   const zip = await JSZip.loadAsync(buffer);
-  const names = Object.keys(zip.files).map(normalizeZipPath);
-  const mainPath = chooseMainDocument(names);
+  const entries = validateZip(zip);
+  const mainPath = chooseMainDocument(entries.map(entry => entry.name));
   if (!mainPath) throw new Error('压缩包中没有找到可导入的 HTML / Markdown / 文本正文');
 
   const assetMap = new Map<string, string>();
-  for (const name of names) {
-    const file = zip.file(name);
-    if (!file || !isLikelyAsset(name)) continue;
+  let skippedSvgCount = 0;
+  for (const entry of entries) {
+    const file = zip.file(entry.rawName);
+    if (!file) continue;
+    if (path.extname(entry.name).toLowerCase() === '.svg') {
+      skippedSvgCount += 1;
+      continue;
+    }
+    if (!isLikelyAsset(entry.name)) continue;
     const data = await file.async('nodebuffer');
-    assetMap.set(name, await writeAsset(name, data));
+    assetMap.set(entry.name, await writeAsset(entry.name, data));
   }
 
-  const mainFile = zip.file(mainPath);
+  const mainEntry = entries.find(entry => entry.name === mainPath);
+  const mainFile = mainEntry ? zip.file(mainEntry.rawName) : null;
   if (!mainFile) throw new Error('压缩包正文读取失败');
-  const text = await mainFile.async('string');
+  const mainBuffer = await mainFile.async('nodebuffer');
+  assertTextSize(mainBuffer);
+  const text = mainBuffer.toString('utf-8');
   const ext = path.extname(mainPath).toLowerCase();
   const parsed = MARKDOWN_EXTENSIONS.has(ext)
-    ? { title: stripExtension(path.basename(mainPath)), content: await marked.parse(text) }
+    ? await parseMarkdownDocument(text, sourceName, mainPath, assetMap)
     : HTML_EXTENSIONS.has(ext)
       ? extractHtmlBody(text, sourceName, mainPath, assetMap)
-      : { title: stripExtension(path.basename(mainPath)), content: buildPlainTextDocument(text) };
+      : extractHtmlBody(ext === '.csv' ? parseCsv(text) : buildPlainTextDocument(text), sourceName);
+  const warnings = [
+    assetMap.size ? `已从 ZIP 中还原 ${assetMap.size} 个本地资源。` : 'ZIP 中没有检测到可还原的本地资源。',
+  ];
+  if (parsed.missingImages) warnings.push(`有 ${parsed.missingImages} 个图片资源缺失，已在正文中标记。`);
+  if (skippedSvgCount) warnings.push(`有 ${skippedSvgCount} 个 SVG 主动内容资源未导入。`);
 
   return {
     title: parsed.title || stripExtension(sourceName),
     content: parsed.content || '<p></p>',
     sourceName,
     assetCount: assetMap.size,
-    warnings: assetMap.size
-      ? [`已从 ZIP 中还原 ${assetMap.size} 个本地资源。`]
-      : ['ZIP 中没有检测到可还原的本地资源。'],
+    warnings,
     importQuality: 'partial',
     importMetadata: localFileImportMetadata('本地导出文件不包含飞书实时权限与评论线程，已作为可编辑副本导入。'),
   };
@@ -229,42 +414,53 @@ export async function importDocumentFile(file: Express.Multer.File): Promise<Imp
   const ext = path.extname(sourceName).toLowerCase();
 
   if (ext === '.zip') return assertImportQualityContract(await importZip(file.buffer, sourceName));
-
+  assertTextSize(file.buffer);
   const text = file.buffer.toString('utf-8');
   if (HTML_EXTENSIONS.has(ext)) {
+    const parsed = extractHtmlBody(text, sourceName);
     return assertImportQualityContract({
-      ...extractHtmlBody(text, sourceName),
+      title: parsed.title,
+      content: parsed.content,
       sourceName,
       assetCount: 0,
-      warnings: ['已导入 HTML 正文；飞书私有块数据可能无法完整还原。'],
+      warnings: [
+        '已导入 HTML 正文；飞书私有块数据可能无法完整还原。',
+        ...(parsed.missingImages ? [`有 ${parsed.missingImages} 个本地图片资源缺失，已在正文中标记。`] : []),
+      ],
       importQuality: 'partial',
       importMetadata: localFileImportMetadata('HTML 文件导入不包含飞书实时权限与评论线程。'),
     });
   }
   if (MARKDOWN_EXTENSIONS.has(ext)) {
+    const parsed = await parseMarkdownDocument(text, sourceName);
     return assertImportQualityContract({
-      title: stripExtension(sourceName),
-      content: await marked.parse(text),
+      title: parsed.title,
+      content: parsed.content,
       sourceName,
       assetCount: 0,
-      warnings: ['Markdown 导入仅保留文本结构和基础格式，飞书块级 UI 会降级。'],
-      importQuality: 'fallback',
-      unsupportedBlocks: [{ type: 'feishu-blocks', reason: 'Markdown 文件不包含飞书结构化 block 数据。' }],
+      warnings: [
+        '已保留 Markdown 的标题、列表、表格、任务列表、引用和代码块结构。',
+        ...(parsed.missingImages ? [`有 ${parsed.missingImages} 个本地图片资源缺失；可改用包含图片的 ZIP 导入。`] : []),
+      ],
+      importQuality: 'partial',
+      unsupportedBlocks: [{ type: 'feishu-private-blocks', reason: 'Markdown 文件不包含飞书私有 block 数据。' }],
       importMetadata: localFileImportMetadata('Markdown 文件不包含飞书权限与评论线程。'),
     });
   }
   if (TEXT_EXTENSIONS.has(ext)) {
+    const content = ext === '.csv' ? parseCsv(text) : buildPlainTextDocument(text);
+    const parsed = extractHtmlBody(content, sourceName);
     return assertImportQualityContract({
       title: stripExtension(sourceName),
-      content: buildPlainTextDocument(text),
+      content: parsed.content,
       sourceName,
       assetCount: 0,
-      warnings: ['纯文本导入仅保留段落和换行，所有飞书块级样式都会降级。'],
+      warnings: [ext === '.csv' ? '已将 CSV 首行识别为表头并导入为表格。' : '纯文本导入仅保留段落和换行。'],
       importQuality: 'fallback',
-      unsupportedBlocks: [{ type: 'rich-formatting', reason: '纯文本文件不包含富文本或飞书块结构。' }],
-      importMetadata: localFileImportMetadata('纯文本文件不包含飞书权限与评论线程。'),
+      unsupportedBlocks: [{ type: 'rich-formatting', reason: '源文件不包含飞书富文本或块结构。' }],
+      importMetadata: localFileImportMetadata('文本文件不包含飞书权限与评论线程。'),
     });
   }
 
-  throw new Error('暂不支持该文件类型。请导入飞书导出的 HTML/Markdown/TXT 或包含这些文件的 ZIP');
+  throw new Error('暂不支持该文件类型。请导入飞书导出的 HTML/Markdown/TXT/CSV 或包含这些文件的 ZIP');
 }

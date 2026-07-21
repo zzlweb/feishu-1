@@ -11,9 +11,11 @@ interface ApiRequestOptions extends RequestInit {
 }
 
 async function request<T>(url: string, options?: ApiRequestOptions): Promise<ApiResponse<T>> {
-  const { timeoutMs = REQUEST_TIMEOUT_MS, timeoutMessage, ...fetchOptions } = options || {};
+  const { timeoutMs = REQUEST_TIMEOUT_MS, timeoutMessage, signal: externalSignal, ...fetchOptions } = options || {};
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromCaller = () => controller.abort();
+  externalSignal?.addEventListener('abort', abortFromCaller, { once: true });
 
   try {
     const res = await fetch(`${BASE_URL}${url}`, {
@@ -34,6 +36,7 @@ async function request<T>(url: string, options?: ApiRequestOptions): Promise<Api
     return body as ApiResponse<T>;
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
+      if (externalSignal?.aborted) return { code: -2, message: '操作已取消' };
       return { code: -1, message: timeoutMessage || '请求超时，请确认后端服务已启动' };
     }
     return {
@@ -42,6 +45,7 @@ async function request<T>(url: string, options?: ApiRequestOptions): Promise<Api
     };
   } finally {
     window.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener('abort', abortFromCaller);
   }
 }
 
@@ -56,41 +60,66 @@ export const createDocument = (data?: Partial<Document>) =>
     body: JSON.stringify(data || {}),
   });
 
-export async function importDocumentFile(file: File, author?: string): Promise<ApiResponse<ImportDocumentResult>> {
+export async function importDocumentFile(
+  file: File,
+  author?: string,
+  options?: { signal?: AbortSignal; onProgress?: (progress: number) => void },
+): Promise<ApiResponse<ImportDocumentResult>> {
   const form = new FormData();
   form.append('file', file);
   if (author) form.append('author', author);
 
-  try {
-    const res = await fetch(`${BASE_URL}/documents/import`, {
-      method: 'POST',
-      body: form,
-      headers: { Accept: 'application/json; charset=utf-8' },
-    });
-    const body = await readApiPayload<ImportDocumentResult>(res);
-    if (!res.ok) {
-      return {
-        code: body.code ?? res.status,
-        message: body.message || `导入失败 (${res.status})`,
-      };
-    }
-    return body as ApiResponse<ImportDocumentResult>;
-  } catch (error) {
-    return {
-      code: -1,
-      message: error instanceof Error ? error.message : '导入失败',
+  return new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    const finish = (result: ApiResponse<ImportDocumentResult>) => {
+      if (settled) return;
+      settled = true;
+      options?.signal?.removeEventListener('abort', handleAbort);
+      resolve(result);
     };
-  }
+    const handleAbort = () => {
+      xhr.abort();
+      finish({ code: -2, message: '导入已取消' });
+    };
+
+    xhr.open('POST', `${BASE_URL}/documents/import`);
+    xhr.setRequestHeader('Accept', 'application/json; charset=utf-8');
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable) options?.onProgress?.(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+    };
+    xhr.onload = () => {
+      let body: ApiResponse<ImportDocumentResult>;
+      try {
+        body = JSON.parse(xhr.responseText) as ApiResponse<ImportDocumentResult>;
+      } catch {
+        finish({ code: xhr.status || -1, message: '服务器返回了无法解析的导入结果' });
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        finish({ code: body.code ?? xhr.status, message: body.message || `导入失败 (${xhr.status})` });
+        return;
+      }
+      options?.onProgress?.(100);
+      finish(body);
+    };
+    xhr.onerror = () => finish({ code: -1, message: '网络请求失败，导入未完成' });
+    xhr.onabort = () => finish({ code: -2, message: '导入已取消' });
+    options?.signal?.addEventListener('abort', handleAbort, { once: true });
+    if (options?.signal?.aborted) handleAbort();
+    else xhr.send(form);
+  });
 }
 
 export async function importDocumentUrl(
   url: string,
-  options?: { author?: string; saveAsTemplate?: boolean },
+  options?: { author?: string; saveAsTemplate?: boolean; signal?: AbortSignal },
 ): Promise<ApiResponse<ImportDocumentResult>> {
   return request<ImportDocumentResult>('/documents/import-url', {
     method: 'POST',
     timeoutMs: IMPORT_URL_TIMEOUT_MS,
     timeoutMessage: '飞书导入耗时较长已超时，请确认文档已公开或后端飞书配置可用后重试',
+    signal: options?.signal,
     body: JSON.stringify({
       url,
       author: options?.author,
