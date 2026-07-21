@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import 'tdesign-react/es/style/index.css';
 import App from './App';
+import './shared/design-tokens/index.less';
 import './styles/global.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

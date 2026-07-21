@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider } from 'tdesign-react';
 import zhCN from 'tdesign-react/es/locale/zh_CN';
 import DocumentList from './components/DocumentList/DocumentList';
+import { OverlayProvider } from './shared/overlay';
 
 const DocumentPage = lazy(() => import('./components/Layout/DocumentPage'));
 
@@ -28,18 +29,20 @@ function DocumentPageFallback() {
 function App() {
   return (
     <ConfigProvider globalConfig={zhCN}>
-      <Routes>
-        <Route path="/" element={<DocumentList />} />
-        <Route
-          path="/doc/:id"
-          element={(
-            <Suspense fallback={<DocumentPageFallback />}>
-              <DocumentPage />
-            </Suspense>
-          )}
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <OverlayProvider>
+        <Routes>
+          <Route path="/" element={<DocumentList />} />
+          <Route
+            path="/doc/:id"
+            element={(
+              <Suspense fallback={<DocumentPageFallback />}>
+                <DocumentPage />
+              </Suspense>
+            )}
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </OverlayProvider>
     </ConfigProvider>
   );
 }

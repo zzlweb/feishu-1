@@ -1,11 +1,12 @@
 import {
-  useEffect,
+  useCallback,
   useMemo,
   type CSSProperties,
   type ReactNode,
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useOverlayRegistration } from '../../../shared/overlay';
 import {
   FLOATING_Z_INDEX,
   bindFloatingLayoutListeners,
@@ -105,30 +106,18 @@ export function useFloatingMenuShell({
     onClose: dismissByHover,
   });
 
-  useEffect(() => {
-    const isInsideShell = (target: Node) => {
-      if (panelRef.current?.contains(target)) return true;
-      if (!(target instanceof Element)) return false;
-      return insideSelectors.some(selector => Boolean(target.closest(selector)));
-    };
+  const isInsideShell = useCallback((target: Node) => {
+    if (panelRef.current?.contains(target) || anchorRef?.current?.contains(target)) return true;
+    if (!(target instanceof Element)) return false;
+    return insideSelectors.some(selector => Boolean(target.closest(selector)));
+  }, [anchorRef, insideSelectors, panelRef]);
 
-    const handleClick = (event: MouseEvent) => {
-      if (event.button !== 0) return;
-      const target = event.target as Node;
-      if (isInsideShell(target)) return;
-      if (anchorRef?.current?.contains(target)) return;
-      onClose();
-    };
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('mousedown', handleClick);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [anchorRef, insideSelectors, onClose, panelRef]);
+  useOverlayRegistration({
+    open: true,
+    onClose,
+    contains: isInsideShell,
+    restoreFocusRef: anchorRef,
+  });
 
   const panelStyle = useMemo(
     () => floatingMenuPanelStyle(finalPos, posVisible, zIndex),
