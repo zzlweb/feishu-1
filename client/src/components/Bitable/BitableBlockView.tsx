@@ -273,6 +273,7 @@ function ViewSidebarMenu({
   contextMenuViewId,
   contextMenuRef,
   canDeleteView,
+  readOnly,
   onSelectView,
   onCreateView,
   onOpenContextMenu,
@@ -296,6 +297,7 @@ function ViewSidebarMenu({
   contextMenuViewId: string | null;
   contextMenuRef: RefObject<HTMLDivElement>;
   canDeleteView: boolean;
+  readOnly: boolean;
   onSelectView: (viewId: string) => void;
   onCreateView: (type: 'grid' | 'gallery' | 'kanban') => void;
   onOpenContextMenu: (btn: HTMLElement, viewId: string) => void;
@@ -323,12 +325,12 @@ function ViewSidebarMenu({
               draggingViewIndex === index ? 'is-dragging' : '',
               dragOverIndex === index && draggingViewIndex !== index ? 'is-drag-over' : '',
             ].filter(Boolean).join(' ')}
-            onDragOver={event => onDragOver(event, index)}
-            onDrop={event => onDrop(event, index)}
+            onDragOver={event => !readOnly && onDragOver(event, index)}
+            onDrop={event => !readOnly && onDrop(event, index)}
           >
             <span
               className="base-view-sidebar__drag"
-              draggable
+              draggable={!readOnly && !view.locked}
               aria-hidden
               onDragStart={event => onDragStart(event, index)}
               onDragEnd={onDragEnd}
@@ -368,7 +370,7 @@ function ViewSidebarMenu({
                 {view.name}
               </button>
             )}
-            {!view.locked && renamingViewId !== view.id && (
+            {!readOnly && !view.locked && renamingViewId !== view.id && (
               <button
                 type="button"
                 className={`base-view-sidebar__more${contextMenuViewId === view.id ? ' is-open' : ''}`}
@@ -393,7 +395,7 @@ function ViewSidebarMenu({
           </li>
         ))}
       </ul>
-      <div className="base-view-sidebar__create">
+      {!readOnly && <div className="base-view-sidebar__create">
         <button type="button" className="base-view-sidebar__new">
           <span className="base-view-sidebar__new-icon" aria-hidden><GlyphAdd /></span>
           <span className="base-view-sidebar__new-text">新建</span>
@@ -411,7 +413,7 @@ function ViewSidebarMenu({
             </li>
           ))}
         </ul>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -615,9 +617,16 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const parsedTable = useMemo(() => parseBaseTable(node.attrs), [node.attrs.model, node.attrs.columns, node.attrs.rows, node.attrs.covers, node.attrs.view]);
   const tableRef = useRef(parsedTable);
   const blockRef = useRef<HTMLDivElement>(null);
+  const [documentEditable, setDocumentEditable] = useState(editor.isEditable);
+  const [readOnlyViewId, setReadOnlyViewId] = useState<string | null>(null);
   tableRef.current = parsedTable;
   const table = parsedTable;
-  const activeView = getActiveView(table);
+  const storedActiveView = readOnlyViewId
+    ? table.views.find(view => view.id === readOnlyViewId) || getActiveView(table)
+    : getActiveView(table);
+  const activeView = documentEditable
+    ? storedActiveView
+    : { ...storedActiveView, locked: true };
   const galleryConfig = getGalleryConfig(table, activeView);
   const hasActiveFilters = useMemo(
     () => (activeView.filters || []).some(isFilterRuleActive),
@@ -705,6 +714,19 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const viewHoverZoneRef = useRef<HTMLDivElement>(null);
   const viewToolsLeaveTimerRef = useRef<number | null>(null);
 
+  useEffect(() => {
+    const syncEditable = () => setDocumentEditable(editor.isEditable);
+    syncEditable();
+    editor.on('transaction', syncEditable);
+    return () => {
+      editor.off('transaction', syncEditable);
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    if (documentEditable) setReadOnlyViewId(null);
+  }, [documentEditable]);
+
   const showViewTools = useCallback(() => {
     if (viewToolsLeaveTimerRef.current != null) {
       window.clearTimeout(viewToolsLeaveTimerRef.current);
@@ -785,7 +807,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     return () => observer.disconnect();
   }, [hideViewTools, showViewTools]);
 
-  const commit = (next: BaseTable) => {
+  const commit = (next: BaseTable, allowReadOnlyMigration = false) => {
+    if (!documentEditable && !allowReadOnlyMigration) return;
     tableRef.current = next;
     const view = getActiveView(next);
     updateAttributes({
@@ -802,7 +825,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const mutate = (operation: (current: BaseTable) => BaseTable) => commit(operation(tableRef.current));
 
   useEffect(() => {
-    if (!node.attrs.model) commit(parsedTable);
+    if (!node.attrs.model) commit(parsedTable, true);
   }, []); // migrate legacy nodes once on mount
 
   useEffect(() => {
@@ -923,7 +946,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   }, []);
 
   const setView = (viewId: string) => {
-    mutate(current => ({ ...current, activeViewId: viewId }));
+    if (documentEditable) mutate(current => ({ ...current, activeViewId: viewId }));
+    else setReadOnlyViewId(viewId);
     setCollapsedGroups(new Set());
     setShowViewMenu(false);
     setShowSettings(false);
@@ -2446,6 +2470,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
                 contextMenuViewId={viewContextMenuId}
                 contextMenuRef={viewContextMenuRef}
                 canDeleteView
+                readOnly={!documentEditable}
                 onSelectView={setView}
                 onCreateView={createView}
                 onOpenContextMenu={openViewContextMenu}
