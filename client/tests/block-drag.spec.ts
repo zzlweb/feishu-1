@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 const dragDocument = {
   id: 'block-drag-e2e',
   title: 'Block Drag E2E',
-  content: '<p>Alpha block</p><p>Beta block</p><table><tbody><tr><td><p>Table cell</p></td></tr></tbody></table><p>Omega block</p>',
+  content: '<p>Alpha block</p><p>Beta block</p><img src="/static/uploads/sample-crop.png" alt="拖拽图片"><table><tbody><tr><td><p>Table cell</p></td></tr></tbody></table><div class="feishu-columns-node" data-local-block="columns"><div class="feishu-columns-block__col-wrap" data-width-ratio="50" data-local-column="true"><div class="feishu-columns-block__col"><p>Left column</p></div></div><div class="feishu-columns-block__col-wrap" data-width-ratio="50" data-local-column="true"><div class="feishu-columns-block__col"><p>Right column</p></div></div></div><p>Omega block</p>',
   author: 'E2E',
   created_at: '2026-05-25T00:00:00.000Z',
   updated_at: '2026-05-25T00:00:00.000Z',
@@ -19,6 +19,9 @@ test.beforeEach(async ({ page }) => {
   );
   await page.route('**/api/documents/block-drag-e2e', route =>
     route.fulfill({ json: { code: 0, data: dragDocument } }),
+  );
+  await page.route('**/static/uploads/sample-crop.png', route =>
+    route.fulfill({ path: new URL('./fixtures/sample-crop.png', import.meta.url).pathname }),
   );
   await page.goto('/doc/block-drag-e2e');
 });
@@ -56,7 +59,28 @@ test('drags a paragraph block using the left block handle', async ({ page }) => 
   const order = await page.locator('.ProseMirror > *').evaluateAll(nodes =>
     nodes.map(node => node.textContent?.trim()).filter(Boolean),
   );
-  expect(order).toEqual(['Beta block', 'Table cell', 'Omega block', 'Alpha block']);
+  expect(order).toEqual(['Beta block', 'Table cell', 'Left columnRight column', 'Omega block', 'Alpha block']);
+});
+
+test('drags an image directly into another column with a thumbnail preview', async ({ page }) => {
+  const image = page.locator('.feishu-image').first();
+  const rightColumnText = page.locator('.feishu-columns-block__col', { hasText: 'Right column' }).locator('p');
+  const imageBox = await image.boundingBox();
+  const targetBox = await rightColumnText.boundingBox();
+  expect(imageBox).not.toBeNull();
+  expect(targetBox).not.toBeNull();
+  if (!imageBox || !targetBox) return;
+
+  await page.mouse.move(imageBox.x + imageBox.width / 2, imageBox.y + imageBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + 20, targetBox.y + targetBox.height - 2, { steps: 12 });
+  await expect(page.locator('.block-drag-preview--media')).toBeVisible();
+  await expect(page.locator('.block-drag-drop-indicator')).toBeVisible();
+  await page.mouse.up();
+
+  const rightColumn = page.locator('.feishu-columns-block__col', { hasText: 'Right column' });
+  await expect(rightColumn.locator('.feishu-image-block-wrap')).toHaveCount(1);
+  await expect(page.locator('.ProseMirror > .feishu-image-block-wrap')).toHaveCount(0);
 });
 
 test('drags a table block using its top-left block handle', async ({ page }) => {

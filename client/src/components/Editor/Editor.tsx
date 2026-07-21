@@ -2873,6 +2873,7 @@ export default function Editor({
     dragging: boolean;
     dropTarget: HTMLElement | null;
     placement: BlockDragPlacement;
+    directMedia: boolean;
   } | null>(null);
 
   const setBlockGutterHoveredState = useCallback((value: boolean) => {
@@ -3598,13 +3599,19 @@ export default function Editor({
     revealBlockToolsFromInfo,
   ]);
 
-  const beginBlockDrag = useCallback((event: React.PointerEvent<HTMLButtonElement> | PointerEvent, sourceOverride?: HTMLElement) => {
+  const beginBlockDrag = useCallback((
+    event: React.PointerEvent<HTMLButtonElement> | PointerEvent,
+    sourceOverride?: HTMLElement,
+    options?: { directMedia?: boolean },
+  ) => {
     if (!editor || readOnly) return;
     const source = sourceOverride ?? activeBlockElRef.current;
     if (!source?.isConnected || !resolveDraggableBlockPos(editor, source)) return;
 
-    event.preventDefault();
-    event.stopPropagation();
+    if (!options?.directMedia) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     setContextMenu(null);
     setBlockGutterHoveredState(true);
     blockDragStateRef.current = {
@@ -3614,15 +3621,17 @@ export default function Editor({
       dragging: false,
       dropTarget: null,
       placement: 'before',
+      directMedia: Boolean(options?.directMedia),
     };
 
     const clearDragPreview = () => {
       blockDragPreviewRef.current?.remove();
       blockDragPreviewRef.current = null;
       document.body.classList.remove('feishu-block-dragging');
+      source.classList.remove('is-block-drag-source');
     };
 
-    const syncDragPreview = (clientY: number) => {
+    const syncDragPreview = (clientX: number, clientY: number) => {
       const area = editorAreaRef.current;
       if (!area) return;
       const sourceRect = source.getBoundingClientRect();
@@ -3630,16 +3639,20 @@ export default function Editor({
       let preview = blockDragPreviewRef.current;
       if (!preview) {
         preview = source.cloneNode(true) as HTMLElement;
+        preview.classList.remove('is-block-drag-source');
         preview.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
         preview.querySelectorAll('.feishu-table-chrome-mount, .docx-menu-container').forEach(node => node.remove());
         preview.classList.add('block-drag-preview');
+        if (blockDragStateRef.current?.directMedia) preview.classList.add('block-drag-preview--media');
         preview.setAttribute('aria-hidden', 'true');
-        preview.style.width = `${sourceRect.width}px`;
+        preview.style.width = blockDragStateRef.current?.directMedia
+          ? `${Math.min(240, sourceRect.width)}px`
+          : `${sourceRect.width}px`;
         area.appendChild(preview);
         blockDragPreviewRef.current = preview;
         document.body.classList.add('feishu-block-dragging');
       }
-      preview.style.left = `${sourceRect.left - areaRect.left}px`;
+      preview.style.left = `${blockDragStateRef.current?.directMedia ? clientX - areaRect.left + 14 : sourceRect.left - areaRect.left}px`;
       preview.style.top = `${clientY - areaRect.top + 12}px`;
     };
 
@@ -3687,10 +3700,11 @@ export default function Editor({
         setContextMenu(null);
         closeSlashMenu();
         setRowHighlightBand(null);
+        dragState.source.classList.add('is-block-drag-source');
       }
       dragState.dragging = true;
       moveEvent.preventDefault();
-      syncDragPreview(moveEvent.clientY);
+      syncDragPreview(moveEvent.clientX, moveEvent.clientY);
       resolveDrop(moveEvent.clientX, moveEvent.clientY);
     };
 
@@ -3722,6 +3736,16 @@ export default function Editor({
     resolveHoveredBlockInfo,
     setBlockGutterHoveredState,
   ]);
+
+  const handleDirectMediaPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!editor || readOnly || event.button !== 0 || !event.isPrimary) return;
+    const target = event.target;
+    if (!(target instanceof HTMLImageElement)) return;
+    if (!target.matches('.feishu-image, .feishu-media-preview__image')) return;
+    const source = target.closest('.feishu-image-block-wrap, .feishu-file-block--image') as HTMLElement | null;
+    if (!source || source.classList.contains('is-cropping')) return;
+    beginBlockDrag(event.nativeEvent, source, { directMedia: true });
+  }, [beginBlockDrag, editor, readOnly]);
 
   const handleBlockToolsMouseLeave = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -4610,6 +4634,7 @@ export default function Editor({
             ref={editorAreaRef}
             className="editor-content-area"
             aria-label="文档正文编辑区"
+            onPointerDownCapture={handleDirectMediaPointerDown}
             onPointerOver={handleEditorPointerOver}
             onPointerMove={handleEditorPointerMove}
             onContextMenu={handleEditorContextMenu}

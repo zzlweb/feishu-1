@@ -60,6 +60,7 @@
 | FG-039 | 上传生命周期 | 删除文档块/记录中的附件后检查服务端文件 | 文件留在全局 public 目录，无资产归属和 DELETE/清理 | [uploads.ts](../../server/src/routes/uploads.ts) | 缺失 | REF-UPLOAD-03 |
 | FG-040 | 媒体失败恢复 | 上传失败、刷新页面，再点重试 | 重试依赖内存中的原始 `File`，刷新后失效；应提示重选或支持可恢复上传 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[mediaUploadRegistry.ts](../../client/src/components/Editor/media/mediaUploadRegistry.ts) | 部分：[media-file-blocks.spec.ts](../../client/tests/media-file-blocks.spec.ts) 未刷新 | REF-UPLOAD-02 |
 | FG-041 | 图片/视频交互 | 图片加载失败，或缩放视频后保存刷新 | 图片现保留可重试失败面板；视频右下角等比缩放会持久化宽高，并在浏览器支持时提供画中画；待真实浏览器视觉基线和刷新 E2E | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[VideoResizeHandle.tsx](../../client/src/components/Editor/media/VideoResizeHandle.tsx) | 单元测试已覆盖尺寸算法，浏览器契约已补 | MEDIA-001 |
+| FG-042 | 图片拖拽排版 | 按住图片本体拖到其它正文块或分栏 | 已接入统一块拖拽状态机，超过阈值后显示缩略图和插入线，支持跨正文/分栏父容器移动；飞书不支持的浮动和文字环绕明确不实现 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[feishuBlockDrag.ts](../../client/src/components/Editor/blocks/feishuBlockDrag.ts) | 跨分栏浏览器契约已补 | MEDIA-001 |
 
 ## P2 候选
 
@@ -67,6 +68,6 @@
 
 ## 数量与覆盖
 
-- 共 41 条：P0 8 条，P1 33 条。
+- 共 42 条：P0 8 条，P1 34 条。
 - 全部 13 类计划流均有代码归属和测试状态：文档输入、Slash、块菜单、标题折叠、目录、评论、普通表格、Grid、Gallery、Kanban、Record Modal、导入、上传。
 - 主要空白集中在真实持久化、权限、安全、键盘路径和失败恢复；现有强项是局部渲染、指针交互和 portal 几何。

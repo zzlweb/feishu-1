@@ -1,4 +1,4 @@
-import { NodeSelection, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/react';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 
@@ -199,6 +199,22 @@ function computeMoveInsertPos(
   return insertPos;
 }
 
+function resolveMappedInsertPos(
+  tr: Transaction,
+  source: BlockPos,
+  target: BlockPos,
+  placement: BlockDragPlacement,
+): number | null {
+  const originalTargetPos = placement === 'before' ? target.pos : target.pos + target.node.nodeSize;
+  const mappedPos = tr.mapping.map(originalTargetPos, placement === 'before' ? -1 : 1);
+  if (mappedPos === source.pos) return null;
+  if (mappedPos < 0 || mappedPos > tr.doc.content.size) return null;
+  const $insert = tr.doc.resolve(mappedPos);
+  const index = $insert.index();
+  if (!$insert.parent.canReplaceWith(index, index, source.node.type, source.node.marks)) return null;
+  return mappedPos;
+}
+
 export function moveDraggableBlock(
   editor: Editor,
   sourceEl: HTMLElement | null,
@@ -210,15 +226,25 @@ export function moveDraggableBlock(
   if (!source || !target) return false;
   if (source.parentPos !== target.parentPos) return false;
 
-  let insertPos = computeMoveInsertPos(source, target, placement);
+  const sourceFrom = source.pos;
+  const sourceTo = source.pos + source.node.nodeSize;
+  const tr = editor.state.tr.delete(sourceFrom, sourceTo);
+  let insertPos = source.parentPos === target.parentPos
+    ? computeMoveInsertPos(source, target, placement)
+    : resolveMappedInsertPos(tr, source, target, placement);
   if (insertPos == null) {
-    insertPos = computeMoveInsertPos(source, target, placement === 'before' ? 'after' : 'before');
+    const fallbackPlacement = placement === 'before' ? 'after' : 'before';
+    insertPos = source.parentPos === target.parentPos
+      ? computeMoveInsertPos(source, target, fallbackPlacement)
+      : resolveMappedInsertPos(tr, source, target, fallbackPlacement);
   }
   if (insertPos == null) return false;
 
-  const sourceFrom = source.pos;
-  const sourceTo = source.pos + source.node.nodeSize;
-  const tr = editor.state.tr.delete(sourceFrom, sourceTo).insert(insertPos, source.node);
+  try {
+    tr.insert(insertPos, source.node);
+  } catch {
+    return false;
+  }
   try {
     if (NodeSelection.isSelectable(source.node)) {
       tr.setSelection(NodeSelection.create(tr.doc, insertPos));
