@@ -454,7 +454,7 @@ export default function DocumentPage() {
   }, [activeCommentBlockId, commentInput, comments, doc?.author, id, pendingCommentAnchor]);
 
   const handleToggleResolveComment = useCallback(async (comment: Comment) => {
-    if (!id) return;
+    if (!id) return false;
     const res = await updateComment(id, comment.id, { resolved: comment.resolved ? 0 : 1 });
     if (res.code === 0 && res.data) {
       const threadKey = comment.thread_id || comment.block_id || comment.id;
@@ -463,7 +463,9 @@ export default function DocumentPage() {
           ? { ...item, resolved: res.data!.resolved, status: res.data!.resolved ? 'resolved' : 'open' }
           : item
       )));
+      return true;
     }
+    return false;
   }, [id]);
 
   const handleUpdateComment = useCallback(async (comment: Comment, content: string): Promise<boolean> => {

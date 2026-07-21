@@ -269,3 +269,56 @@ test('preserves orphaned comments with an anchor-lost state', async ({ page }) =
   await expect(page.getByText('原评论位置已被删除，评论内容已保留')).toBeVisible();
   await expect(page.locator('.comment-sidebar-positioned')).toBeVisible();
 });
+
+test('keeps a failed comment draft and retries it in place', async ({ page }) => {
+  let attempts = 0;
+  await page.route('**/api/documents/comment-threads-e2e/comments', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    attempts += 1;
+    if (attempts === 1) {
+      return route.fulfill({ status: 503, json: { code: -1, message: 'temporary unavailable' } });
+    }
+    const body = JSON.parse(route.request().postData() || '{}');
+    const now = new Date().toISOString();
+    return route.fulfill({
+      status: 201,
+      json: {
+        code: 0,
+        data: {
+          ...body,
+          id: body.id || 'retry-comment',
+          document_id: 'comment-threads-e2e',
+          created_at: now,
+          updated_at: now,
+          resolved: 0,
+          status: 'open',
+          visibility: 'public',
+        },
+      },
+    });
+  });
+
+  await page.goto('/doc/comment-threads-e2e');
+  const anchor = page.locator('.ProseMirror p', { hasText: 'www.baidu.com' }).first();
+  const box = await anchor.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+  await page.mouse.move(box.x + 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + Math.min(box.width - 2, 120), box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.locator('.selection-bubble-btn--icon-quiet').last().click();
+
+  const panel = page.locator('.comment-panel').first();
+  const editor = panel.locator('.comment-panel__textarea-editor');
+  await editor.fill('不会丢失的评论草稿');
+  await panel.locator('.comment-panel__textarea-btn-submit').click();
+
+  await expect(panel.getByText('发送失败，草稿已保留')).toBeVisible();
+  await expect(editor).toHaveValue('不会丢失的评论草稿');
+  await panel.getByRole('button', { name: '重试' }).click();
+
+  await expect(panel.getByText('发送失败，草稿已保留')).toHaveCount(0);
+  await expect(panel.locator('.comment-panel__reply-content')).toContainText('不会丢失的评论草稿');
+  expect(attempts).toBe(2);
+});

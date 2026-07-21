@@ -39,6 +39,8 @@ interface CommentPanelComposerProps {
   placeholder?: string;
   idlePlaceholder?: string;
   disabled?: boolean;
+  submitting?: boolean;
+  error?: string;
   autoFocus?: boolean;
   submitLabel?: string;
   cancelLabel?: string;
@@ -47,6 +49,7 @@ interface CommentPanelComposerProps {
   onSubmit: () => void;
   onCancel?: () => void;
   onAttach?: () => void;
+  onRetry?: () => void;
 }
 
 export const CommentPanelMoreGlyph = () => (
@@ -151,6 +154,8 @@ export function CommentPanelComposer({
   placeholder = '回复',
   idlePlaceholder = '回复',
   disabled = false,
+  submitting = false,
+  error = '',
   autoFocus = false,
   submitLabel = '回复',
   cancelLabel = '取消',
@@ -159,6 +164,7 @@ export function CommentPanelComposer({
   onSubmit,
   onCancel,
   onAttach,
+  onRetry,
 }: CommentPanelComposerProps) {
   const submit = () => {
     if (!value.trim() || disabled) return;
@@ -195,20 +201,28 @@ export function CommentPanelComposer({
               />
               <div className="comment-panel__textarea-operation">
                 <div className="comment-panel__textarea-operation-inner">
-                  <div className="comment-panel__textarea-image-select">
-                    <span className="comment-panel__textarea-image-icon" aria-hidden>
-                      <CommentPanelImageGlyph />
-                    </span>
-                    <button type="button" tabIndex={-1} className="comment-panel__textarea-file-hitbox" aria-label="插入图片" onClick={onAttach} disabled={disabled} />
-                  </div>
+                  {onAttach ? (
+                    <div className="comment-panel__textarea-image-select">
+                      <span className="comment-panel__textarea-image-icon" aria-hidden>
+                        <CommentPanelImageGlyph />
+                      </span>
+                      <button type="button" tabIndex={-1} className="comment-panel__textarea-file-hitbox" aria-label="插入图片" onClick={onAttach} disabled={disabled || submitting} />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
           </div>
+          {error ? (
+            <div className="comment-panel__submit-error" role="alert">
+              <span>{error}</span>
+              {onRetry ? <button type="button" onClick={onRetry} disabled={submitting}>重试</button> : null}
+            </div>
+          ) : null}
           {value.trim().length > 0 && (
             <div className="comment-panel__textarea-actions">
               {onCancel ? <button type="button" className="comment-panel__textarea-btn-cancel" onClick={onCancel}>{cancelLabel}</button> : null}
-              <button type="button" className="comment-panel__textarea-btn-submit" disabled={disabled} onClick={submit}>{submitLabel}</button>
+              <button type="button" className="comment-panel__textarea-btn-submit" disabled={disabled || submitting} onClick={submit}>{submitting ? '发送中…' : submitLabel}</button>
             </div>
           )}
         </div>
@@ -230,12 +244,14 @@ export function CommentPanelComposer({
               <span className="comment-panel__textarea-placeholder">{idlePlaceholder}</span>
               <div className="comment-panel__textarea-operation">
                 <div className="comment-panel__textarea-operation-inner">
-                  <div className="comment-panel__textarea-image-select">
-                    <span className="comment-panel__textarea-image-icon" aria-hidden>
-                      <CommentPanelImageGlyph />
-                    </span>
-                    <button type="button" tabIndex={-1} className="comment-panel__textarea-file-hitbox" aria-label="插入图片" onClick={event => { event.stopPropagation(); onOpen(); }} disabled={disabled} />
-                  </div>
+                  {onAttach ? (
+                    <div className="comment-panel__textarea-image-select">
+                      <span className="comment-panel__textarea-image-icon" aria-hidden>
+                        <CommentPanelImageGlyph />
+                      </span>
+                      <button type="button" tabIndex={-1} className="comment-panel__textarea-file-hitbox" aria-label="插入图片" onClick={event => { event.stopPropagation(); onOpen(); }} disabled={disabled} />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>

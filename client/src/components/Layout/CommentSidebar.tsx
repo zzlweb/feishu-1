@@ -24,7 +24,7 @@ interface CommentSidebarProps {
   inputValue: string;
   onInputChange: (value: string) => void;
   onSubmit: (threadKey?: string) => boolean | Promise<boolean>;
-  onResolve: (comment: Comment) => void;
+  onResolve: (comment: Comment) => boolean | Promise<boolean>;
   onUpdateComment: (comment: Comment, content: string) => boolean | Promise<boolean>;
   onDeleteComment: (comment: Comment) => boolean | Promise<boolean>;
   currentUserName: string;
@@ -159,13 +159,16 @@ export default function CommentSidebar({
 }: CommentSidebarProps) {
   const panelsContainerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
-  const attachInputRef = useRef<HTMLInputElement>(null);
   const [positions, setPositions] = useState<Map<string, number>>(new Map());
   const [replyingBlockId, setReplyingBlockId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [likedCommentIds, setLikedCommentIds] = useState<Record<string, true>>({});
   const [showHistory, setShowHistory] = useState(false);
+  const [submitStateByThread, setSubmitStateByThread] = useState<Record<string, 'submitting' | 'error'>>({});
+  const [editState, setEditState] = useState<'idle' | 'submitting' | 'error'>('idle');
+  const [resolveErrorByThread, setResolveErrorByThread] = useState<Record<string, true>>({});
+  const [resolvingThreadId, setResolvingThreadId] = useState<string | null>(null);
 
   const unresolvedCount = comments.filter(c => !Number(c.resolved)).length + externalUnresolvedCount;
   const visibleComments = comments.filter(c => showHistory ? Number(c.resolved) || c.status === 'deleted' || c.status === 'anchor_lost' : !Number(c.resolved) && c.status !== 'deleted');
@@ -197,9 +200,25 @@ export default function CommentSidebar({
   }, [pendingThread?.threadId]);
 
   const submitReply = useCallback(async (threadKey?: string) => {
-    const ok = await Promise.resolve(onSubmit(threadKey || replyingBlockId || activeBlockId));
-    if (ok !== false) setReplyingBlockId(null);
-  }, [activeBlockId, onSubmit, replyingBlockId]);
+    const resolvedThreadKey = threadKey || replyingBlockId || activeBlockId;
+    if (!resolvedThreadKey || submitStateByThread[resolvedThreadKey] === 'submitting') return;
+    setSubmitStateByThread(current => ({ ...current, [resolvedThreadKey]: 'submitting' }));
+    try {
+      const ok = await Promise.resolve(onSubmit(resolvedThreadKey));
+      if (ok !== false) {
+        setReplyingBlockId(null);
+        setSubmitStateByThread(current => {
+          const next = { ...current };
+          delete next[resolvedThreadKey];
+          return next;
+        });
+      } else {
+        setSubmitStateByThread(current => ({ ...current, [resolvedThreadKey]: 'error' }));
+      }
+    } catch {
+      setSubmitStateByThread(current => ({ ...current, [resolvedThreadKey]: 'error' }));
+    }
+  }, [activeBlockId, onSubmit, replyingBlockId, submitStateByThread]);
 
   const toggleLike = useCallback((commentId: string) => {
     setLikedCommentIds(prev => {
@@ -213,15 +232,41 @@ export default function CommentSidebar({
   const cancelEdit = useCallback(() => {
     setEditingCommentId(null);
     setEditDraft('');
+    setEditState('idle');
   }, []);
 
   const saveEdit = useCallback(
     async (comment: Comment) => {
-      const ok = await Promise.resolve(onUpdateComment(comment, editDraft));
-      if (ok) cancelEdit();
+      if (editState === 'submitting') return;
+      setEditState('submitting');
+      try {
+        const ok = await Promise.resolve(onUpdateComment(comment, editDraft));
+        if (ok) cancelEdit();
+        else setEditState('error');
+      } catch {
+        setEditState('error');
+      }
     },
-    [editDraft, onUpdateComment, cancelEdit],
+    [editDraft, editState, onUpdateComment, cancelEdit],
   );
+
+  const toggleResolve = useCallback(async (threadKey: string, comment: Comment) => {
+    if (resolvingThreadId) return;
+    setResolvingThreadId(threadKey);
+    setResolveErrorByThread(current => {
+      const next = { ...current };
+      delete next[threadKey];
+      return next;
+    });
+    try {
+      const ok = await Promise.resolve(onResolve(comment));
+      if (ok === false) setResolveErrorByThread(current => ({ ...current, [threadKey]: true }));
+    } catch {
+      setResolveErrorByThread(current => ({ ...current, [threadKey]: true }));
+    } finally {
+      setResolvingThreadId(null);
+    }
+  }, [onResolve, resolvingThreadId]);
 
   const grouped = groupByBlock(displayComments);
   const blockIds = Array.from(grouped.keys());
@@ -329,7 +374,6 @@ export default function CommentSidebar({
             className="comment-sidebar-pos__track"
             style={{ minHeight: `max(100%, ${Math.max(panelsScrollExtent, 1)}px)` }}
           >
-            <input ref={attachInputRef} type="file" multiple accept="image/gif,image/jpg,image/jpeg,image/bmp,image/png" className="comment-panel__file-input" tabIndex={-1} aria-hidden />
             {showDocumentTrack && resolvedPanels.map(({ blockId, anchorBlockId, comments: blockComments, top }, panelIdx) => {
               const isActive = blockId === activeBlockId;
               const anchorLost = blockComments.some(comment => comment.status === 'anchor_lost');
@@ -339,9 +383,8 @@ export default function CommentSidebar({
 
               const openComposer = () => {
                 // 草稿按 thread key 隔离；正文定位仍由 onJumpToBlock 内部解析真实锚点。
-                if (!anchorLost) onJumpToBlock(blockId);
+                onJumpToBlock(blockId);
                 setReplyingBlockId(blockId);
-                onInputChange('');
               };
 
               const quotePreview = blockComments[0]?.quote || getBlockQuotePreview(blockComments[0]?.block_id || blockId, mainScrollRef.current);
@@ -383,7 +426,7 @@ export default function CommentSidebar({
                           </span>
                         </button>
                         <div>
-                          <button type="button" disabled={!firstUnresolved} className="comment-panel-controls__btn comment-panel-controls__resolve-btn" title="标记已解决" aria-label="标记已解决" onClick={() => firstUnresolved && onResolve(firstUnresolved)}>
+                          <button type="button" disabled={!firstUnresolved || resolvingThreadId === blockId} className="comment-panel-controls__btn comment-panel-controls__resolve-btn" title="标记已解决" aria-label="标记已解决" onClick={() => firstUnresolved && void toggleResolve(blockId, firstUnresolved)}>
                             <span className="universe-icon" style={{ fontSize: 14 }}>
                               <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                                 <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 2C5.925 23 1 18.075 1 12S5.925 1 12 1s11 4.925 11 11-4.925 11-11 11Zm-1.16-8.72 4.952-4.952a.996.996 0 0 1 1.409.005 1 1 0 0 1 .007 1.41c-1.888 1.905-3.752 3.842-5.685 5.7a.98.98 0 0 1-1.364-.001c-1.01-.98-1.993-1.992-2.983-2.993a1.003 1.003 0 0 1 .005-1.414.998.998 0 0 1 1.412-.002l2.247 2.247Z" fill="currentColor" />
@@ -394,6 +437,12 @@ export default function CommentSidebar({
                         </div>
                       )}
                     />
+                    {resolveErrorByThread[blockId] && firstUnresolved ? (
+                      <div className="comment-panel__action-error" role="alert">
+                        <span>状态更新失败，评论仍保持未解决</span>
+                        <button type="button" onClick={() => void toggleResolve(blockId, firstUnresolved)}>重试</button>
+                      </div>
+                    ) : null}
 
                     <div className="comment-panel__reply-list">
                       {blockComments.filter(comment => comment.content.trim().length > 0).map(comment => {
@@ -469,7 +518,10 @@ export default function CommentSidebar({
                                       value={editDraft}
                                       rows={3}
                                       autoFocus
-                                      onChange={e => setEditDraft(e.target.value)}
+                                      onChange={e => {
+                                        setEditDraft(e.target.value);
+                                        if (editState === 'error') setEditState('idle');
+                                      }}
                                       onKeyDown={e => {
                                         if (e.key === 'Escape') {
                                           e.preventDefault();
@@ -477,12 +529,13 @@ export default function CommentSidebar({
                                         }
                                       }}
                                     />
+                                    {editState === 'error' ? <div className="comment-panel__edit-error" role="alert">保存失败，修改内容已保留</div> : null}
                                     <div className="comment-panel__reply-edit-actions">
                                       <button type="button" className="comment-panel__reply-edit-btn-cancel" onClick={cancelEdit}>
                                         取消
                                       </button>
-                                      <button type="button" className="comment-panel__reply-edit-btn-send" disabled={!editDraft.trim()} onClick={() => void saveEdit(comment)}>
-                                        保存
+                                      <button type="button" className="comment-panel__reply-edit-btn-send" disabled={!editDraft.trim() || editState === 'submitting'} onClick={() => void saveEdit(comment)}>
+                                        {editState === 'submitting' ? '保存中…' : editState === 'error' ? '重试' : '保存'}
                                       </button>
                                     </div>
                                   </div>
@@ -501,10 +554,21 @@ export default function CommentSidebar({
                       idlePlaceholder="回复"
                       autoFocus
                       onOpen={openComposer}
-                      onChange={onInputChange}
+                      onChange={value => {
+                        onInputChange(value);
+                        if (submitStateByThread[blockId] === 'error') {
+                          setSubmitStateByThread(current => {
+                            const next = { ...current };
+                            delete next[blockId];
+                            return next;
+                          });
+                        }
+                      }}
                       onSubmit={() => void submitReply(blockId)}
                       onCancel={() => setReplyingBlockId(null)}
-                      onAttach={() => attachInputRef.current?.click()}
+                      submitting={submitStateByThread[blockId] === 'submitting'}
+                      error={submitStateByThread[blockId] === 'error' ? '发送失败，草稿已保留' : ''}
+                      onRetry={() => void submitReply(blockId)}
                     />
                   </CommentPanelShell>
                 </div>
