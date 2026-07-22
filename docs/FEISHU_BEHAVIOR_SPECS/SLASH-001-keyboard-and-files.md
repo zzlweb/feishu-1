@@ -23,4 +23,4 @@
 
 - `slashTrigger.test.ts` 覆盖合法边界、URL、路径、单词和空白查询。
 - Client unit suite 与 production build。
-- 后续增加 Playwright 子菜单焦点路径和文件选择取消测试。
+- `slash-menu-keyboard.spec.ts` 覆盖表格子菜单的进入、移动、返回和确认，以及取消图片选择后保留 Slash 文本。

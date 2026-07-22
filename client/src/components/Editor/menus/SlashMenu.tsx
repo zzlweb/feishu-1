@@ -152,17 +152,22 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        e.stopPropagation();
         setActiveIdx(i => Math.min(i + 1, Math.max(0, allItems.length - 1)));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        e.stopPropagation();
         setActiveIdx(i => Math.max(i - 1, 0));
       } else if (e.key === 'Enter') {
         e.preventDefault();
+        e.stopPropagation();
         onBeforeSelect?.();
         allItems[activeIdx]?.action(editor);
         (editor as any).__plusInsertRange = null;
         onClose();
       } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
         onClose();
       }
     };
@@ -292,6 +297,8 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
       ? createPortal(
         <div
           className={`slash-submenu-portal${activeSubmenu.kind === 'templateList' ? ' slash-submenu-portal--template' : ''}`}
+          role="menu"
+          aria-label="插入选项"
           style={{
             position: 'fixed',
             left: submenuPosition.left,
@@ -365,6 +372,8 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
     <Fragment>
       <div
         className={`slash-menu slash-menu-feishu${variant === 'anchored' ? ' slash-menu--anchored' : ''}${anchorRef ? ' slash-menu--plus-anchor' : ''}`}
+        role="menu"
+        aria-label="插入块"
         ref={menuRef}
         style={variant === 'anchored' ? undefined : { top: renderPos.top, left: renderPos.left, transform: renderPos.transform }}
         onMouseEnter={onMouseEnter}
@@ -391,6 +400,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                       key={`${section.title}-${item.label}`}
                       type="button"
                       className={`slash-basic-cell ${idx === activeIdx ? 'active' : ''}`}
+                      role="menuitem"
                       aria-label={item.label}
                       onMouseEnter={e => {
                         setActiveIdx(idx);
@@ -424,7 +434,7 @@ export default function SlashMenu({ editor, position, query, onClose, onBeforeSe
                   <div
                     key={`${section.title}-${item.label}`}
                     className={`slash-item ${idx === activeIdx ? 'active' : ''}${hasSubmenu ? ' slash-item--has-submenu' : ''}`}
-                    role="button"
+                    role="menuitem"
                     tabIndex={0}
                     aria-label={item.label}
                     aria-haspopup={hasSubmenu ? 'menu' : undefined}
