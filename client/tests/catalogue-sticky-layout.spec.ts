@@ -43,6 +43,7 @@ test('keeps the catalogue inside the workspace while scrolling and growing', asy
 
   await workspace.evaluate(element => element.scrollTo({ top: 500 }));
   await expect.poll(async () => workspace.evaluate(element => element.scrollTop)).toBeGreaterThan(400);
+  await expect.poll(async () => page.locator('.catalogue__list-item.active').getAttribute('data-id')).not.toBe('heading-0');
 
   const bounds = await page.evaluate(() => {
     const workspaceRect = document.querySelector('.doc-page-workspace')!.getBoundingClientRect();
@@ -73,4 +74,10 @@ test('keeps the catalogue inside the workspace while scrolling and growing', asy
     return element.getBoundingClientRect().height;
   });
   expect(Math.abs(heightAfterGrowth - bounds.catalogueHeight)).toBeLessThanOrEqual(1);
+
+  await workspace.evaluate(element => element.scrollTo({ top: element.scrollHeight }));
+  await expect.poll(async () => {
+    const activeId = await page.locator('.catalogue__list-item.active').getAttribute('data-id');
+    return Number(activeId?.replace('heading-', '') || '-1');
+  }).toBeGreaterThan(25);
 });

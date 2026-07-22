@@ -107,6 +107,7 @@ export default function DocumentPage() {
   const collapsedPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadRequestSequenceRef = useRef(0);
   const commentRequestSequenceRef = useRef(0);
+  const catalogueScrollFrameRef = useRef<number | null>(null);
   const [titleInputSnapshot, setTitleInputSnapshot] = useState('');
   const [catalogueActiveId, setCatalogueActiveId] = useState<string | null>(null);
   const [collapsedHeadingIds, setCollapsedHeadingIds] = useState<Set<string>>(() => new Set());
@@ -269,9 +270,36 @@ export default function DocumentPage() {
     });
   }, []);
 
+  const syncCatalogueScrollspy = useCallback(() => {
+    if (catalogueScrollFrameRef.current != null) window.cancelAnimationFrame(catalogueScrollFrameRef.current);
+    catalogueScrollFrameRef.current = window.requestAnimationFrame(() => {
+      catalogueScrollFrameRef.current = null;
+      const root = mainScrollRef.current;
+      if (!root || headings.length === 0) return;
+      const rootRect = root.getBoundingClientRect();
+      const anchorY = rootRect.top + Math.min(160, rootRect.height * 0.25);
+      let nextActiveId = catalogueTitleDisplay ? DOC_TITLE_CATALOGUE_ID : headings[0].id;
+      for (const heading of headings) {
+        const element = resolveBlockElement(root, heading.id);
+        if (!(element instanceof HTMLElement) || element.getClientRects().length === 0) continue;
+        if (element.getBoundingClientRect().top <= anchorY) nextActiveId = heading.id;
+        else break;
+      }
+      setCatalogueActiveId(current => current === nextActiveId ? current : nextActiveId);
+    });
+  }, [catalogueTitleDisplay, headings]);
+
   const handleWorkspaceScroll = useCallback(() => {
     window.dispatchEvent(new CustomEvent(FEISHU_LAYOUT_SCROLL_EVENT));
-  }, []);
+    syncCatalogueScrollspy();
+  }, [syncCatalogueScrollspy]);
+
+  useEffect(() => {
+    syncCatalogueScrollspy();
+    return () => {
+      if (catalogueScrollFrameRef.current != null) window.cancelAnimationFrame(catalogueScrollFrameRef.current);
+    };
+  }, [syncCatalogueScrollspy]);
 
   useEffect(() => {
     if (!showOutlineSidebar) return;
