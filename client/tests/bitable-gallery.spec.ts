@@ -367,6 +367,9 @@ test('dragging an image to gallery creates a shared record and cover', async ({ 
   );
   await openGallery(page);
 
+  const failedUpload = page.waitForResponse(response => (
+    response.url().endsWith('/api/uploads') && response.status() === 500
+  ));
   await page.locator('.base-gallery-surface').evaluate(element => {
     const transfer = new DataTransfer();
     transfer.items.add(new File(['image'], 'new-card.jpg', { type: 'image/jpeg' }));
@@ -378,6 +381,24 @@ test('dragging an image to gallery creates a shared record and cover', async ({ 
   await expect(page.locator('.base-gallery-card').last().locator('img')).toHaveAttribute('src', /\/static\/uploads\/new-card\.jpg$/);
 
   await expect(page.locator('.base-gallery-card')).toHaveCount(4);
+});
+
+test('rolls back a gallery record when every dropped upload fails', async ({ page }) => {
+  await page.route('**/api/uploads', route =>
+    route.fulfill({ status: 500, json: { code: 1, message: '上传失败' } }),
+  );
+  await openGallery(page);
+
+  await page.locator('.base-gallery-surface').evaluate(element => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['broken'], 'broken-card.jpg', { type: 'image/jpeg' }));
+    element.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    element.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  });
+
+  await failedUpload;
+  await expect(page.locator('.base-gallery-card')).toHaveCount(3);
+  await expect(page.locator('.base-gallery-card__title', { hasText: 'broken-card' })).toHaveCount(0);
 });
 
 test('keeps gallery usable without an attachment field and can add one from settings', async ({ page }) => {
