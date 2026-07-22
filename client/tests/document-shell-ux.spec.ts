@@ -123,3 +123,55 @@ test('a slow previous document response cannot replace the current route', async
   await expect(page.getByText('应保留的 B 正文')).toBeVisible();
   await expect(page.getByText('不应出现的 A 正文')).toHaveCount(0);
 });
+
+test('preserves a local draft when another writer wins the version race', async ({ page }) => {
+  const initialDocument = {
+    ...editableDocument,
+    id: 'shell-version-conflict-e2e',
+    title: '冲突测试文档',
+    content: '<p>版本一正文</p>',
+    version: 1,
+  };
+  const latestServerDocument = {
+    ...initialDocument,
+    content: '<p>另一标签页的正文</p>',
+    updated_at: '2026-07-22T10:00:00.000Z',
+    version: 2,
+  };
+  let currentServerDocument = initialDocument;
+  let receivedBaseVersion: number | undefined;
+  await page.route('**/api/documents/shell-version-conflict-e2e/comments', route =>
+    route.fulfill({ json: { code: 0, data: [] } }),
+  );
+  await page.route('**/api/documents/shell-version-conflict-e2e', route => {
+    if (route.request().method() === 'GET') {
+      return route.fulfill({ json: { code: 0, data: currentServerDocument } });
+    }
+    const body = route.request().postDataJSON() as { base_version?: number };
+    receivedBaseVersion = body.base_version;
+    currentServerDocument = latestServerDocument;
+    return route.fulfill({
+      status: 409,
+      json: { code: 409, message: '文档已被其他会话更新', data: latestServerDocument },
+    });
+  });
+
+  await page.goto('/doc/shell-version-conflict-e2e');
+  const saveRequest = page.waitForRequest(request => (
+    request.url().endsWith('/api/documents/shell-version-conflict-e2e') && request.method() === 'PUT'
+  ));
+  const paragraph = page.locator('.ProseMirror p').first();
+  await paragraph.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' 本地未上传变更');
+  await saveRequest;
+
+  expect(receivedBaseVersion).toBe(1);
+  const conflict = page.getByRole('button', { name: '版本冲突，点击刷新' });
+  await expect(conflict).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('feishu-document-draft:v1:shell-version-conflict-e2e'))).not.toBeNull();
+
+  await conflict.click();
+  await expect(page.getByText('已恢复一份尚未上传的本地草稿')).toBeVisible();
+  await expect(page.locator('.ProseMirror')).toContainText('本地未上传变更');
+});
