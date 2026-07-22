@@ -13,8 +13,19 @@ export interface TableCellHandleState {
   cursorPos: number;
 }
 
-/** 块柄显示在当前块内容起始位置（字的前面），而非光标位置 */
-const HANDLE_OFFSET_LEFT = 36;
+/** 块柄的右边缘与当前块内容/首列边界保持间距，宽度交给 DOM 自身决定。 */
+const HANDLE_GAP = 4;
+
+export function computeTableCellHandleAnchorLeft(
+  contentLeft: number,
+  cellLeft: number,
+  mountLeft: number,
+  col: number,
+  gap = HANDLE_GAP,
+): number {
+  const anchorLeft = col === 0 ? Math.min(contentLeft, cellLeft) : contentLeft;
+  return anchorLeft - mountLeft - gap;
+}
 
 function mapNodeTypeToBlockType(node: { type: { name: string }; attrs: Record<string, unknown> }): string {
   const name = node.type.name;
@@ -196,7 +207,13 @@ export function resolveTableCellHandle(
   if (!handleCoords) return null;
 
   const mountRect = getTableChromeMountFromHost(tableHost).getBoundingClientRect();
-  const left = handleCoords.left - mountRect.left - HANDLE_OFFSET_LEFT;
+  const cellRect = cellEl.getBoundingClientRect();
+  const left = computeTableCellHandleAnchorLeft(
+    handleCoords.left,
+    cellRect.left,
+    mountRect.left,
+    indices.col,
+  );
   const top = handleCoords.top - mountRect.top;
 
   return {

@@ -2843,6 +2843,7 @@ export default function Editor({
     x: number;
     y: number;
     variant: 'block' | 'table' | 'image' | 'bitable';
+    anchorKind?: 'table-cell';
   } | null>(null);
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
   const [slashMenuPos, setSlashMenuPos] = useState({ top: 0, left: 0 });
@@ -2850,6 +2851,7 @@ export default function Editor({
   const [slashMenuFromPlus, setSlashMenuFromPlus] = useState(false);
   const [slashMenuFromTableCellPlus, setSlashMenuFromTableCellPlus] = useState(false);
   const tableCellSlashAnchorRef = useRef<HTMLElement | null>(null);
+  const tableCellBlockAnchorRef = useRef<HTMLButtonElement | null>(null);
   const [pageLinkDialogVisible, setPageLinkDialogVisible] = useState(false);
   const [pageLinkPopPos, setPageLinkPopPos] = useState({ top: 0, left: 0 });
   const [pageLinkText, setPageLinkText] = useState('');
@@ -4103,7 +4105,12 @@ export default function Editor({
   useEffect(() => {
     const openTableCellBlockMenu = (ev: Event) => {
       if (!editor || readOnly) return;
-      const detail = (ev as CustomEvent<{ x?: number; y?: number; cursorPos?: number }>).detail ?? {};
+      const detail = (ev as CustomEvent<{
+        x?: number;
+        y?: number;
+        cursorPos?: number;
+        anchorEl?: HTMLButtonElement;
+      }>).detail ?? {};
       cancelContextMenuClose();
       closeSlashMenu();
       setSlashMenuFromTableCellPlus(false);
@@ -4136,8 +4143,11 @@ export default function Editor({
 
       const anchorX = typeof detail.x === 'number' ? detail.x : 24;
       const anchorY = typeof detail.y === 'number' ? detail.y : 24;
-      const pos = computeBlockPanelPosition(new DOMRect(anchorX, anchorY, 1, 1));
-      setContextMenu({ ...pos, variant: 'block' });
+      const anchorEl = detail.anchorEl?.isConnected ? detail.anchorEl : null;
+      tableCellBlockAnchorRef.current = anchorEl;
+      const anchorRect = anchorEl?.getBoundingClientRect() ?? new DOMRect(anchorX, anchorY, 1, 1);
+      const pos = computeBlockPanelPosition(anchorRect);
+      setContextMenu({ ...pos, variant: 'block', anchorKind: 'table-cell' });
     };
     window.addEventListener('feishu-open-table-cell-block-menu', openTableCellBlockMenu as EventListener);
     return () => window.removeEventListener('feishu-open-table-cell-block-menu', openTableCellBlockMenu as EventListener);
@@ -4350,6 +4360,7 @@ export default function Editor({
 
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
+    tableCellBlockAnchorRef.current = null;
     setTableHandleHovered(false);
     menuClosedAtRef.current = Date.now();
   }, []);
@@ -4523,7 +4534,7 @@ export default function Editor({
       setContextMenu(prev => {
         if (!prev) return null;
         if (prev.x === next.x && prev.y === next.y) return prev;
-        return { ...next, variant: prev.variant };
+        return { ...prev, ...next };
       });
     };
     updatePos();
@@ -4982,7 +4993,7 @@ export default function Editor({
           editor={editor}
           x={contextMenu.x}
           y={contextMenu.y}
-          anchorRef={blockDragRowRef}
+          anchorRef={contextMenu.anchorKind === 'table-cell' ? tableCellBlockAnchorRef : blockDragRowRef}
           blockAnchorRef={activeBlockElRef}
           onClose={closeContextMenu}
           onHoverDismiss={dismissContextMenuFromHover}

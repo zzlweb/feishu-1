@@ -404,7 +404,34 @@ test('opens block context menu from the text cell handle', async ({ page }) => {
   const handle = page.locator('.feishu-table-chrome__cell-handle--block').first();
   await expect(handle).toBeVisible();
   await handle.hover();
-  await expect(page.locator('.context-menu').first()).toBeVisible();
+  const menu = page.locator('.context-menu').first();
+  await expect(menu).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const cell = document.querySelector('td[data-table-cell="true"]');
+    const handleEl = document.querySelector('.feishu-table-chrome__cell-handle--block');
+    const menuEl = document.querySelector('.context-menu');
+    if (!(cell instanceof HTMLElement) || !(handleEl instanceof HTMLElement) || !(menuEl instanceof HTMLElement)) {
+      return null;
+    }
+    const cellRect = cell.getBoundingClientRect();
+    const handleRect = handleEl.getBoundingClientRect();
+    const menuRect = menuEl.getBoundingClientRect();
+    return {
+      cellLeft: cellRect.left,
+      handleLeft: handleRect.left,
+      handleRight: handleRect.right,
+      handleCenterY: handleRect.top + handleRect.height / 2,
+      menuRight: menuRect.right,
+      menuTop: menuRect.top,
+      menuBottom: menuRect.bottom,
+    };
+  });
+  expect(geometry).not.toBeNull();
+  expect(geometry!.handleRight).toBeLessThanOrEqual(geometry!.cellLeft - 2);
+  expect(geometry!.menuRight).toBeLessThanOrEqual(geometry!.handleLeft - 2);
+  expect(geometry!.handleCenterY).toBeGreaterThanOrEqual(geometry!.menuTop);
+  expect(geometry!.handleCenterY).toBeLessThanOrEqual(geometry!.menuBottom);
 });
 
 test('deletes the whole table from its block menu', async ({ page }) => {

@@ -438,12 +438,14 @@ function FeishuTableOverlay({
   );
 
   const openCellBlockMenu = useCallback(
-    (handle: TableCellHandleState, clientX: number, clientY: number) => {
+    (handle: TableCellHandleState, anchorEl: HTMLButtonElement) => {
       editor.chain().focus().run();
+      const rect = anchorEl.getBoundingClientRect();
       window.dispatchEvent(new CustomEvent('feishu-open-table-cell-block-menu', {
         detail: {
-          x: clientX,
-          y: clientY,
+          x: rect.left,
+          y: rect.top,
+          anchorEl,
           blockType: handle.blockType,
           cursorPos: handle.cursorPos,
         },
@@ -1548,8 +1550,7 @@ function FeishuTableOverlay({
             onMouseEnter={e => {
               activateTableChrome();
               onCancelCloseBlockMenu();
-              const rect = e.currentTarget.getBoundingClientRect();
-              openCellBlockMenu(cellHandle, rect.left, rect.bottom);
+              openCellBlockMenu(cellHandle, e.currentTarget);
             }}
             onMouseLeave={e => {
               const next = e.relatedTarget;
@@ -1560,8 +1561,7 @@ function FeishuTableOverlay({
               e.preventDefault();
               e.stopPropagation();
               activateTableChrome();
-              const rect = e.currentTarget.getBoundingClientRect();
-              openCellBlockMenu(cellHandle, rect.left, rect.bottom);
+              openCellBlockMenu(cellHandle, e.currentTarget);
             }}
           >
             <div className="feishu-table-chrome__cell-handle-drag">

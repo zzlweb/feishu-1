@@ -498,7 +498,8 @@
   cursor: pointer;
   line-height: 1;
   pointer-events: auto;
-  transform: translate(0, -50%);
+  /* left 是内容前的锚点，按真实按钮宽度整体移到锚点左侧。 */
+  transform: translate(-100%, -50%);
   z-index: 24;
   box-shadow: none;
   opacity: 1;
