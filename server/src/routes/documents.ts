@@ -406,6 +406,8 @@ router.post('/:id/comments', (req: Request, res: Response) => {
 // PATCH /api/documents/:id/comments/:commentId
 router.patch('/:id/comments/:commentId', (req: Request, res: Response) => {
   try {
+    const bodyError = getCommentBodyError(req.body);
+    if (bodyError) return res.status(400).json({ code: -1, message: bodyError });
     const updates: any = {};
     if (req.body.content !== undefined) {
       const t = String(req.body.content).trim();
@@ -421,6 +423,13 @@ router.patch('/:id/comments/:commentId', (req: Request, res: Response) => {
       }
       updates.status = req.body.status;
     }
+    for (const field of ['block_id', 'quote', 'anchor_json'] as const) {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+    for (const field of ['position_from', 'position_to'] as const) {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+    if (req.body.anchor_type !== undefined) updates.anchor_type = req.body.anchor_type;
     const comment = updateCommentRecord(req.params.commentId, updates);
     if (!comment || comment.document_id !== req.params.id) {
       return res.status(404).json({ code: -1, message: '评论不存在' });

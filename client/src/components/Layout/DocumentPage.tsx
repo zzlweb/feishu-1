@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Loading } from 'tdesign-react';
+import { Loading, MessagePlugin } from 'tdesign-react';
 import { addComment, deleteComment, getComments, getDocument, updateComment } from '../../api/documents';
 import type { Comment, Document, HeadingItem } from '../../types';
 import { DOC_TITLE_CATALOGUE_ID } from '../../types';
@@ -24,6 +24,11 @@ import {
   isCommentAnchorPresentInHtml,
 } from '../Editor/blocks/commentDocumentSync';
 import { resolveBlockElement } from '../Editor/blocks/blockDom';
+import {
+  COMMENT_REANCHOR_REQUEST_EVENT,
+  COMMENT_REANCHOR_SELECTED_EVENT,
+  type CommentReanchorSelection,
+} from '../Editor/blocks/commentBlockAnchor';
 import { useDocumentSaveQueue, type DocumentPatch } from '../../features/documents/session/useDocumentSaveQueue';
 import {
   clearDocumentDraft,
@@ -585,6 +590,42 @@ export default function DocumentPage() {
     return false;
   }, [comments, id]);
 
+  const handleRequestCommentReanchor = useCallback((comment: Comment) => {
+    if (!id) return;
+    window.dispatchEvent(new CustomEvent(COMMENT_REANCHOR_REQUEST_EVENT, {
+      detail: { documentId: id, threadId: getCommentThreadKey(comment) },
+    }));
+  }, [id]);
+
+  useEffect(() => {
+    const handleSelected = (event: Event) => {
+      const detail = (event as CustomEvent<CommentReanchorSelection>).detail;
+      if (!id || detail?.documentId !== id || !detail.threadId) return;
+      const threadComments = comments.filter(comment => getCommentThreadKey(comment) === detail.threadId);
+      if (!threadComments.length) return;
+      void Promise.all(threadComments.map(comment => updateComment(id, comment.id, {
+        block_id: detail.blockId,
+        position_from: detail.positionFrom,
+        position_to: detail.positionTo,
+        quote: detail.quote,
+        anchor_type: 'text-range',
+        anchor_json: detail.anchorJson,
+        status: comment.resolved ? 'resolved' : 'open',
+      }))).then(results => {
+        if (results.some(result => result.code !== 0 || !result.data)) {
+          void MessagePlugin.error('评论位置更新失败，请重新选择后重试');
+          return;
+        }
+        const updated = new Map(results.map(result => [result.data!.id, result.data!]));
+        setComments(current => current.map(comment => updated.get(comment.id) || comment));
+        setActiveCommentBlockId(detail.threadId);
+        void MessagePlugin.success('已关联到新的评论位置');
+      });
+    };
+    window.addEventListener(COMMENT_REANCHOR_SELECTED_EVENT, handleSelected);
+    return () => window.removeEventListener(COMMENT_REANCHOR_SELECTED_EVENT, handleSelected);
+  }, [comments, id]);
+
   const handleJumpToCommentBlock = useCallback((blockId: string) => {
     setActiveCommentBlockId(blockId);
     const root = mainScrollRef.current;
@@ -705,6 +746,7 @@ export default function DocumentPage() {
                 onResolve={handleToggleResolveComment}
                 onUpdateComment={handleUpdateComment}
                 onDeleteComment={handleDeleteComment}
+                onReanchor={handleRequestCommentReanchor}
                 currentUserName={doc.author}
                 onClose={closeCommentSidebar}
                 onJumpToBlock={handleJumpToCommentBlock}

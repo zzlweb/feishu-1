@@ -213,13 +213,15 @@ test('preserves orphaned comments with an anchor-lost state', async ({ page }) =
   };
 
   let anchorLost = false;
+  let reanchored = false;
   let savedDocument = false;
 
   await page.route('**/api/documents/comment-threads-e2e/comments/comment-on-text', route => {
     if (route.request().method() === 'PATCH') {
       const body = JSON.parse(route.request().postData() || '{}');
       anchorLost = body.status === 'anchor_lost';
-      comments[0].status = body.status;
+      reanchored = body.status === 'open' && body.quote === 'after';
+      Object.assign(comments[0], body);
       return route.fulfill({ json: { code: 0, data: comments[0] } });
     }
     return route.continue();
@@ -268,6 +270,12 @@ test('preserves orphaned comments with an anchor-lost state', async ({ page }) =
   await expect(page.locator('.comment-panel__reply-content')).toContainText('将被同步删除');
   await expect(page.getByText('原评论位置已被删除，评论内容已保留')).toBeVisible();
   await expect(page.locator('.comment-sidebar-positioned')).toBeVisible();
+
+  await page.locator('.ProseMirror p', { hasText: 'after' }).click({ clickCount: 3 });
+  await page.getByRole('button', { name: '关联到当前选区' }).click();
+  await expect(page.locator('.feishu-comment-highlight', { hasText: 'after' })).toBeVisible();
+  await expect.poll(() => reanchored, { timeout: 5000 }).toBe(true);
+  await expect(page.getByText('原评论位置已被删除，评论内容已保留')).toHaveCount(0);
 });
 
 test('keeps a failed comment draft and retries it in place', async ({ page }) => {

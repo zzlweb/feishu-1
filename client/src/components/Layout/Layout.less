@@ -777,12 +777,33 @@
   }
 
   .comment-panel__anchor-lost {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     padding: 7px 10px;
     border-bottom: 1px solid #f7dfb8;
     color: #8f5b16;
     background: #fff7e8;
     font-size: 12px;
     line-height: 18px;
+
+    button {
+      flex: none;
+      padding: 2px 6px;
+      border: 0;
+      border-radius: 4px;
+      color: #245bdb;
+      background: transparent;
+      font-size: 12px;
+      cursor: pointer;
+
+      &:hover,
+      &:focus-visible {
+        background: #eaf2ff;
+        outline: none;
+      }
+    }
   }
 
   .comment-panel {

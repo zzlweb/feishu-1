@@ -39,6 +39,11 @@ import { useImageBlockInteractions } from './media/useImageBlockInteractions';
 import { getActiveImageCropSession } from './media/imageCropSession';
 import { normalizeImageAlign, type ImageAlign } from './media/imageBlockUtils';
 import { removeCommentHighlightsFromEditor } from './blocks/commentDocumentSync';
+import {
+  COMMENT_REANCHOR_REQUEST_EVENT,
+  COMMENT_REANCHOR_SELECTED_EVENT,
+  reanchorCommentThreadAtSelection,
+} from './blocks/commentBlockAnchor';
 import { DOC_TITLE_CATALOGUE_ID, type HeadingItem } from '../../types';
 import { HelpCircleIcon, BookOpenIcon } from 'tdesign-icons-react';
 import { wrapIcon } from '../../icons/wrap';
@@ -4259,6 +4264,23 @@ export default function Editor({
     window.addEventListener('feishu-remove-comment-highlights', handleRemoveCommentHighlights);
     return () => window.removeEventListener('feishu-remove-comment-highlights', handleRemoveCommentHighlights);
   }, [editor, onSave, readOnly]);
+
+  useEffect(() => {
+    if (!editor || readOnly) return;
+    const handleReanchorComment = (event: Event) => {
+      const detail = (event as CustomEvent<{ documentId?: string; threadId?: string }>).detail;
+      if (!detail?.threadId || detail.documentId !== documentId) return;
+      const selection = reanchorCommentThreadAtSelection(editor, documentId, detail.threadId);
+      if (!selection) {
+        void MessagePlugin.warning('请先在正文中选择新的评论位置');
+        return;
+      }
+      onSave({ content: sanitizeEditorHtmlForSave(editor.getHTML()) });
+      window.dispatchEvent(new CustomEvent(COMMENT_REANCHOR_SELECTED_EVENT, { detail: selection }));
+    };
+    window.addEventListener(COMMENT_REANCHOR_REQUEST_EVENT, handleReanchorComment);
+    return () => window.removeEventListener(COMMENT_REANCHOR_REQUEST_EVENT, handleReanchorComment);
+  }, [documentId, editor, onSave, readOnly]);
 
   useEffect(() => {
     if (!editor || readOnly) return undefined;

@@ -27,6 +27,7 @@ interface CommentSidebarProps {
   onResolve: (comment: Comment) => boolean | Promise<boolean>;
   onUpdateComment: (comment: Comment, content: string) => boolean | Promise<boolean>;
   onDeleteComment: (comment: Comment) => boolean | Promise<boolean>;
+  onReanchor: (comment: Comment) => void;
   currentUserName: string;
   onClose: () => void;
   onJumpToBlock: (blockId: string) => void;
@@ -148,6 +149,7 @@ export default function CommentSidebar({
   onResolve,
   onUpdateComment,
   onDeleteComment,
+  onReanchor,
   currentUserName,
   onClose,
   onJumpToBlock,
@@ -377,6 +379,7 @@ export default function CommentSidebar({
             {showDocumentTrack && resolvedPanels.map(({ blockId, anchorBlockId, comments: blockComments, top }, panelIdx) => {
               const isActive = blockId === activeBlockId;
               const anchorLost = blockComments.some(comment => comment.status === 'anchor_lost');
+              const lostAnchorComment = blockComments.find(comment => comment.status === 'anchor_lost');
               const firstUnresolved = blockComments.find(c => !Number(c.resolved));
               const prevPanelBlockId = panelIdx > 0 ? resolvedPanels[panelIdx - 1]!.blockId : null;
               const nextPanelBlockId = panelIdx >= 0 && panelIdx < resolvedPanels.length - 1 ? resolvedPanels[panelIdx + 1]!.blockId : null;
@@ -393,7 +396,14 @@ export default function CommentSidebar({
               return (
                 <div key={blockId} className={`comment-panel-wrapper${isActive ? ' comment-panel-wrapper--active' : ''}${anchorLost ? ' comment-panel-wrapper--anchor-lost' : ''}`} style={{ transform: `translate3d(0px, ${top}px, 0px)` }}>
                   <CommentPanelShell id={blockId} active={isActive}>
-                    {anchorLost && <div className="comment-panel__anchor-lost" role="status">原评论位置已被删除，评论内容已保留</div>}
+                    {anchorLost && (
+                      <div className="comment-panel__anchor-lost" role="status">
+                        <span>原评论位置已被删除，评论内容已保留</span>
+                        {lostAnchorComment ? (
+                          <button type="button" onClick={() => onReanchor(lostAnchorComment)}>关联到当前选区</button>
+                        ) : null}
+                      </div>
+                    )}
                     <CommentPanelHeader
                       quoteLabel={quoteLabel}
                       title={quoteLabel}

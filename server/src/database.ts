@@ -448,6 +448,10 @@ export function updateCommentRecord(commentId: string, updates: Partial<CommentR
   if (updates.visibility !== undefined) comment.visibility = updates.visibility;
   if (updates.anchor_json !== undefined) comment.anchor_json = updates.anchor_json;
   if (updates.quote !== undefined) comment.quote = updates.quote;
+  if (updates.block_id !== undefined) comment.block_id = updates.block_id;
+  if (updates.position_from !== undefined) comment.position_from = updates.position_from;
+  if (updates.position_to !== undefined) comment.position_to = updates.position_to;
+  if (updates.anchor_type !== undefined) comment.anchor_type = updates.anchor_type;
   if (updates.deleted_at !== undefined) comment.deleted_at = updates.deleted_at;
   if (updates.is_edited !== undefined) comment.is_edited = updates.is_edited;
   comment.updated_at = nowStr();

@@ -15,6 +15,66 @@ function makeCommentThreadId() {
   return `comment-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+export const COMMENT_REANCHOR_REQUEST_EVENT = 'feishu-comment-reanchor-request';
+export const COMMENT_REANCHOR_SELECTED_EVENT = 'feishu-comment-reanchor-selected';
+
+export interface CommentReanchorSelection {
+  documentId: string;
+  threadId: string;
+  blockId: string;
+  positionFrom: number;
+  positionTo: number;
+  quote: string;
+  anchorJson: string;
+}
+
+/** 用当前非空文本选区替换丢失的评论高亮，并沿用原 thread id。 */
+export function reanchorCommentThreadAtSelection(
+  editor: Editor,
+  documentId: string,
+  threadId: string,
+): CommentReanchorSelection | null {
+  const { from, to, empty } = editor.state.selection;
+  const markType = editor.state.schema.marks.commentHighlight;
+  if (!documentId || !threadId || empty || from === to || !markType) return null;
+
+  const selectedText = editor.state.doc.textBetween(from, to, ' ', ' ').replace(/\s+/g, ' ').trim();
+  if (!selectedText) return null;
+  const quote = selectedText.length > 120 ? `${selectedText.slice(0, 120)}...` : selectedText;
+  let tr = editor.state.tr;
+  editor.state.doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    node.marks.forEach(mark => {
+      if (mark.type === markType && mark.attrs.threadId === threadId) {
+        tr = tr.removeMark(pos, pos + node.nodeSize, markType);
+      }
+    });
+  });
+  tr = tr.addMark(from, to, markType.create({
+    threadId,
+    blockId: threadId,
+    status: 'open',
+    quote,
+  }));
+  tr.setMeta('addToHistory', true);
+  editor.view.dispatch(tr);
+
+  return {
+    documentId,
+    threadId,
+    blockId: threadId,
+    positionFrom: from,
+    positionTo: to,
+    quote,
+    anchorJson: JSON.stringify({
+      type: 'text-range',
+      textRange: { startOffset: from, endOffset: to },
+      quote,
+      anchorSnapshot: { selectedText },
+    }),
+  };
+}
+
 function readStoredBlockId(node: ProseNode): string | null {
   const id = node.attrs?.blockId as string | undefined;
   return typeof id === 'string' && id.length > 0 ? id : null;

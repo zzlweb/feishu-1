@@ -307,16 +307,40 @@ test('comment creation validates its target and persists client comment fields',
     assert.equal(anchorLost.status, 200);
     assert.equal(anchorLost.body.data.status, 'anchor_lost');
 
+    const reanchorPayload = {
+      status: 'open',
+      block_id: 'client-thread-id',
+      position_from: 20,
+      position_to: 28,
+      quote: '新的引用',
+      anchor_type: 'text-range',
+      anchor_json: '{"from":20,"to":28}',
+    };
+    const reanchored = await api<any>(`/api/documents/${documentId}/comments/${payload.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(reanchorPayload),
+    });
+    assert.equal(reanchored.status, 200);
+    for (const [field, value] of Object.entries(reanchorPayload)) {
+      assert.equal(reanchored.body.data[field], value);
+    }
+
     const invalidStatus = await api<any>(`/api/documents/${documentId}/comments/${payload.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'missing' }),
     });
     assert.equal(invalidStatus.status, 400);
 
+    const invalidPosition = await api<any>(`/api/documents/${documentId}/comments/${payload.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ position_from: '20' }),
+    });
+    assert.equal(invalidPosition.status, 400);
+
     const persisted = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
     const savedComment = persisted.comments.find((item: any) => item.id === payload.id);
     assert.ok(savedComment);
-    for (const [field, value] of Object.entries(payload)) {
+    for (const [field, value] of Object.entries({ ...payload, ...reanchorPayload })) {
       assert.equal(savedComment[field], value);
     }
 
