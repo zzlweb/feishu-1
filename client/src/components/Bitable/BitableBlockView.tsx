@@ -18,6 +18,7 @@ import { BITABLE_TD_PORTAL_SELECTOR, BITABLE_TD_SELECT_POPUP_PROPS } from './sha
 import { parseJsonPayload } from '../../api/http';
 import {
   addView,
+  analyzeFieldDeletion,
   appendRecordHistory,
   attachmentFromUpload,
   collectRecordSubtreeIds,
@@ -26,6 +27,7 @@ import {
   createRecord,
   createRecordComment,
   deleteView,
+  deleteFieldWithMigration,
   duplicateFieldName,
   findInsertIndexAfterSubtree,
   isFilterRuleActive,
@@ -40,6 +42,7 @@ import {
   getAttachments,
   getGanttConfig,
   getGalleryConfig,
+  getCompatibleFieldMigrationTargets,
   getVisibleViews,
   isViewTypeVisible,
   getGridGroupFieldIds,
@@ -62,6 +65,7 @@ import {
   type BaseView,
   type CellValue,
   type FilterRule,
+  type FieldDeletionImpact,
   type GalleryViewConfig,
   type GanttViewConfig,
   type GridRowHeightMode,
@@ -451,6 +455,67 @@ function DeleteRecordsDialog({
   );
 }
 
+function DeleteFieldDialog({
+  fieldName,
+  impact,
+  migrationTargets,
+  migrationTargetId,
+  onMigrationTargetChange,
+  onCancel,
+  onConfirm,
+}: {
+  fieldName: string;
+  impact: FieldDeletionImpact;
+  migrationTargets: BaseField[];
+  migrationTargetId: string;
+  onMigrationTargetChange: (fieldId: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const referenceCount = impact.filterReferences
+    + impact.sortReferences
+    + impact.groupReferences
+    + impact.configReferences;
+  return (
+    <Dialog
+      visible
+      theme="danger"
+      header={`删除字段「${fieldName}」`}
+      width={480}
+      placement="center"
+      destroyOnClose
+      closeOnOverlayClick
+      confirmBtn={{ content: migrationTargetId ? '迁移并删除' : '删除并清空', theme: 'danger' }}
+      cancelBtn="取消"
+      onClose={onCancel}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+      className="bitable-td-dialog"
+    >
+      <div className="bitable-field-delete-dialog" data-e2e="bitable-field-delete-dialog">
+        <p className="bitable-td-dialog__body">删除后无法直接撤销，请先确认以下影响：</p>
+        <ul className="bitable-field-delete-dialog__impact">
+          <li>{impact.recordsWithValue} 条记录包含字段值</li>
+          <li>{impact.filterReferences} 条筛选、{impact.sortReferences} 条排序引用</li>
+          <li>{impact.groupReferences} 条分组、{impact.configReferences} 条视图配置引用</li>
+        </ul>
+        {migrationTargets.length > 0 ? (
+          <label className="bitable-field-delete-dialog__migration">
+            <span>删除前迁移到兼容字段</span>
+            <select value={migrationTargetId} onChange={event => onMigrationTargetChange(event.target.value)}>
+              <option value="">不迁移，清空数据并移除 {referenceCount} 个引用</option>
+              {migrationTargets.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
+            </select>
+            {migrationTargetId && <small>源字段的非空值会覆盖目标字段，并同步迁移兼容的筛选、排序、分组和视图引用。</small>}
+          </label>
+        ) : (
+          <p className="bitable-field-delete-dialog__notice">没有类型兼容的目标字段；确认后将清空数据并移除相关引用。</p>
+        )}
+      </div>
+    </Dialog>
+  );
+}
+
 function DeleteViewDialog({
   viewName,
   isLastView,
@@ -664,6 +729,8 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const [viewContextMenuId, setViewContextMenuId] = useState<string | null>(null);
   const [deleteViewTarget, setDeleteViewTarget] = useState<{ id: string; name: string } | null>(null);
   const [pendingDeleteRecordIds, setPendingDeleteRecordIds] = useState<string[] | null>(null);
+  const [pendingDeleteFieldId, setPendingDeleteFieldId] = useState<string | null>(null);
+  const [fieldMigrationTargetId, setFieldMigrationTargetId] = useState('');
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [draggingViewIndex, setDraggingViewIndex] = useState<number | null>(null);
   const dragFromIndexRef = useRef<number | null>(null);
@@ -1375,55 +1442,23 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     if (fieldId === table.primaryFieldId || table.fields.length <= 1) return;
     const target = table.fields.find(field => field.id === fieldId);
     if (!target) return;
-    mutate(current => ({
-      ...current,
-      fields: current.fields.filter(field => field.id !== fieldId),
-      records: current.records.map(record => {
-        const nextFields = { ...record.fields };
-        delete nextFields[fieldId];
-        return { ...record, fields: nextFields };
-      }),
-      views: current.views.map(view => ({
-        ...view,
-        fieldOrder: view.fieldOrder?.filter(id => id !== fieldId),
-        hiddenFieldIds: view.hiddenFieldIds?.filter(id => id !== fieldId),
-        filters: view.filters?.filter(filter => filter.fieldId !== fieldId),
-        sorts: view.sorts?.filter(sort => sort.fieldId !== fieldId),
-        config: view.type === 'gallery'
-          ? (() => {
-              const config = { ...getGalleryConfig(current, view) };
-              if (config.coverFieldId === fieldId) delete config.coverFieldId;
-              if (config.groupByFieldId === fieldId) delete config.groupByFieldId;
-              return config;
-            })()
-          : view.type === 'gantt'
-            ? (() => {
-                const config = { ...getGanttConfig(current, view) };
-                if (config.titleFieldId === fieldId) config.titleFieldId = current.primaryFieldId;
-                if (config.startDateFieldId === fieldId) delete config.startDateFieldId;
-                if (config.endDateFieldId === fieldId) delete config.endDateFieldId;
-                return config;
-              })()
-            : view.type === 'grid'
-              ? (() => {
-                  const config = { ...(view.config as GridViewConfig) };
-                  if (config.groupByFieldIds?.includes(fieldId)) {
-                    const removeIndex = config.groupByFieldIds.indexOf(fieldId);
-                    config.groupByFieldIds = config.groupByFieldIds.filter(id => id !== fieldId);
-                    if (removeIndex >= 0 && config.groupSortDirections?.length) {
-                      config.groupSortDirections = config.groupSortDirections.filter((_, index) => index !== removeIndex);
-                    }
-                    if (!config.groupByFieldIds.length) {
-                      delete config.groupByFieldIds;
-                      delete config.groupSortDirections;
-                    }
-                  }
-                  if (config.parentFieldId === fieldId) delete config.parentFieldId;
-                  return config;
-                })()
-              : view.config,
-      })),
-    }));
+    setPendingDeleteFieldId(fieldId);
+    setFieldMigrationTargetId('');
+  };
+
+  const cancelDeleteField = () => {
+    setPendingDeleteFieldId(null);
+    setFieldMigrationTargetId('');
+  };
+
+  const confirmDeleteField = () => {
+    if (!pendingDeleteFieldId) return;
+    mutate(current => deleteFieldWithMigration(
+      current,
+      pendingDeleteFieldId,
+      fieldMigrationTargetId || undefined,
+    ));
+    cancelDeleteField();
   };
 
   const reorderFields = (fromIndex: number, toIndex: number) => {
@@ -2948,6 +2983,21 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           onConfirm={confirmDeleteRecords}
         />
       )}
+      {pendingDeleteFieldId && (() => {
+        const field = table.fields.find(item => item.id === pendingDeleteFieldId);
+        if (!field) return null;
+        return (
+          <DeleteFieldDialog
+            fieldName={field.name}
+            impact={analyzeFieldDeletion(table, field.id)}
+            migrationTargets={getCompatibleFieldMigrationTargets(table, field.id)}
+            migrationTargetId={fieldMigrationTargetId}
+            onMigrationTargetChange={setFieldMigrationTargetId}
+            onCancel={cancelDeleteField}
+            onConfirm={confirmDeleteField}
+          />
+        );
+      })()}
       {addFieldPanel && createPortal(
         <div
           className="base-field-edit-popover-portal"
@@ -3287,7 +3337,6 @@ function FieldConfigPanel({
           }}
           onDelete={() => {
             if (!canDeleteField || fieldMoreTarget.id === table.primaryFieldId) return;
-            if (!window.confirm(`确认删除字段「${fieldMoreTarget.name}」？`)) return;
             closeFieldMoreMenu();
             onDeleteField(fieldMoreTarget.id);
           }}
@@ -3845,7 +3894,6 @@ function GalleryFieldCustomizePanel({
           }}
           onDelete={() => {
             if (!canDeleteField || fieldMoreTarget.id === titleFieldId) return;
-            if (!window.confirm(`确认删除字段「${fieldMoreTarget.name}」？`)) return;
             closeFieldMoreMenu();
             onDeleteField(fieldMoreTarget.id);
           }}

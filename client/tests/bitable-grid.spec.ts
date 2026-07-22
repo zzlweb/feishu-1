@@ -78,6 +78,39 @@ test('grid marks field types without strict semantics as unavailable', async ({ 
   await expect(popover.getByRole('button', { name: '负责人员' })).toHaveCount(0);
 });
 
+test('grid field deletion reports impact and can migrate values', async ({ page }) => {
+  const block = await openGrid(page);
+
+  const openStatusDelete = async () => {
+    await block.getByRole('button', { name: '字段配置' }).click();
+    const panel = page.locator('[data-e2e="bitable-field-customize-panel"]');
+    const statusRow = panel.locator('.base-view-sidebar__item').filter({ hasText: '状态' });
+    await statusRow.getByRole('button', { name: '更多操作' }).click();
+    await page.locator('.base-view-contextmenu--portal').getByRole('menuitem', { name: '删除' }).click();
+  };
+
+  await openStatusDelete();
+  const dialog = page.locator('[data-e2e="bitable-field-delete-dialog"]');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('3 条记录包含字段值');
+  await page.getByRole('button', { name: '取消' }).last().click();
+  await expect(block.locator('.base-grid-field-name', { hasText: '状态' })).toBeVisible();
+
+  await openStatusDelete();
+  await page.locator('[data-e2e="bitable-field-delete-dialog"] select').selectOption({ label: '优先级' });
+  const saveRequest = page.waitForRequest(request =>
+    request.url().endsWith('/api/documents/bitable-grid-e2e') && request.method() === 'PUT',
+  );
+  await page.getByRole('button', { name: '迁移并删除' }).click();
+  await expect(block.locator('.base-grid-field-name', { hasText: '状态' })).toHaveCount(0);
+  const saveBody = (await saveRequest).postDataJSON() as { content?: string };
+  expect(saveBody.content).not.toContain('状态');
+  expect(saveBody.content).toContain('优先级');
+  expect(saveBody.content).toContain('待处理');
+  expect(saveBody.content).toContain('进行中');
+  expect(saveBody.content).toContain('已完成');
+});
+
 test('grid field menu portals to body without clipping', async ({ page }) => {
   const block = await openGrid(page);
 

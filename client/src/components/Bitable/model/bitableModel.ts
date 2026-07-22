@@ -378,6 +378,145 @@ export function reorderViewFields(table: BaseTable, viewId: string, fromIndex: n
   };
 }
 
+export interface FieldDeletionImpact {
+  recordsWithValue: number;
+  filterReferences: number;
+  sortReferences: number;
+  groupReferences: number;
+  configReferences: number;
+}
+
+function hasStoredCellValue(value: CellValue | undefined): boolean {
+  if (value == null || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== false;
+}
+
+export function analyzeFieldDeletion(table: BaseTable, fieldId: FieldId): FieldDeletionImpact {
+  const impact: FieldDeletionImpact = {
+    recordsWithValue: table.records.filter(record => hasStoredCellValue(record.fields[fieldId])).length,
+    filterReferences: 0,
+    sortReferences: 0,
+    groupReferences: 0,
+    configReferences: 0,
+  };
+  table.views.forEach(view => {
+    impact.filterReferences += (view.filters || []).filter(rule => rule.fieldId === fieldId).length;
+    impact.sortReferences += (view.sorts || []).filter(rule => rule.fieldId === fieldId).length;
+    if (view.type === 'grid') {
+      const config = view.config as GridViewConfig;
+      impact.groupReferences += (config.groupByFieldIds || []).filter(id => id === fieldId).length;
+      if (config.parentFieldId === fieldId) impact.configReferences += 1;
+    } else if (view.type === 'gallery' || view.type === 'kanban') {
+      const config = view.config as GalleryViewConfig;
+      if (config.groupByFieldId === fieldId) impact.groupReferences += 1;
+      if (config.coverFieldId === fieldId) impact.configReferences += 1;
+      if (config.titleFieldId === fieldId) impact.configReferences += 1;
+      impact.configReferences += (config.visibleFieldIds || []).filter(id => id === fieldId).length;
+    } else if (view.type === 'gantt') {
+      const config = view.config as GanttViewConfig;
+      if (config.titleFieldId === fieldId) impact.configReferences += 1;
+      if (config.startDateFieldId === fieldId) impact.configReferences += 1;
+      if (config.endDateFieldId === fieldId) impact.configReferences += 1;
+    }
+  });
+  return impact;
+}
+
+export function getCompatibleFieldMigrationTargets(table: BaseTable, fieldId: FieldId): BaseField[] {
+  const source = table.fields.find(field => field.id === fieldId);
+  if (!source) return [];
+  const sourceChoiceIds = new Set((source.options?.choices || []).map(choice => choice.id));
+  return table.fields.filter(field => {
+    if (field.id === fieldId || field.type !== source.type) return false;
+    if (source.type !== 'single_select' && source.type !== 'multi_select') return true;
+    const targetChoiceIds = new Set((field.options?.choices || []).map(choice => choice.id));
+    return [...sourceChoiceIds].every(choiceId => targetChoiceIds.has(choiceId));
+  });
+}
+
+function replaceFieldIdList(ids: FieldId[] | undefined, sourceId: FieldId, targetId?: FieldId): FieldId[] | undefined {
+  if (!ids) return undefined;
+  const next = ids.flatMap(id => id === sourceId ? (targetId ? [targetId] : []) : [id]);
+  return Array.from(new Set(next));
+}
+
+export function deleteFieldWithMigration(table: BaseTable, fieldId: FieldId, migrateToFieldId?: FieldId): BaseTable {
+  if (fieldId === table.primaryFieldId || table.fields.length <= 1) return table;
+  const source = table.fields.find(field => field.id === fieldId);
+  const migrationTarget = getCompatibleFieldMigrationTargets(table, fieldId)
+    .find(field => field.id === migrateToFieldId);
+  if (!source) return table;
+  const targetId = migrationTarget?.id;
+
+  const views = table.views.map(view => {
+    const filters = (view.filters || [])
+      .flatMap(rule => rule.fieldId === fieldId ? (targetId ? [{ ...rule, fieldId: targetId }] : []) : [rule]);
+    const seenSortFields = new Set<FieldId>();
+    const sorts = (view.sorts || [])
+      .flatMap(rule => rule.fieldId === fieldId ? (targetId ? [{ ...rule, fieldId: targetId }] : []) : [rule])
+      .filter(rule => !seenSortFields.has(rule.fieldId) && Boolean(seenSortFields.add(rule.fieldId)));
+    let config = { ...view.config } as BaseView['config'] & Record<string, unknown>;
+    if (view.type === 'grid') {
+      const grid = config as GridViewConfig;
+      const groupRules = (grid.groupByFieldIds || []).map((id, index) => ({
+        id: id === fieldId ? targetId : id,
+        direction: grid.groupSortDirections?.[index] === 'desc' ? 'desc' as const : 'asc' as const,
+      })).filter((rule): rule is { id: FieldId; direction: 'asc' | 'desc' } => Boolean(rule.id));
+      const seenGroups = new Set<FieldId>();
+      const uniqueGroups = groupRules.filter(rule => !seenGroups.has(rule.id) && Boolean(seenGroups.add(rule.id)));
+      config = {
+        ...grid,
+        groupByFieldIds: uniqueGroups.length ? uniqueGroups.map(rule => rule.id) : undefined,
+        groupSortDirections: uniqueGroups.length ? uniqueGroups.map(rule => rule.direction) : undefined,
+        parentFieldId: grid.parentFieldId === fieldId ? targetId : grid.parentFieldId,
+      };
+    } else if (view.type === 'gallery' || view.type === 'kanban') {
+      const gallery = config as GalleryViewConfig;
+      config = {
+        ...gallery,
+        coverFieldId: gallery.coverFieldId === fieldId ? targetId : gallery.coverFieldId,
+        titleFieldId: gallery.titleFieldId === fieldId ? (targetId || table.primaryFieldId) : gallery.titleFieldId,
+        groupByFieldId: gallery.groupByFieldId === fieldId ? targetId : gallery.groupByFieldId,
+        visibleFieldIds: replaceFieldIdList(gallery.visibleFieldIds, fieldId, targetId) || [],
+      };
+    } else if (view.type === 'gantt') {
+      const gantt = config as GanttViewConfig;
+      config = {
+        ...gantt,
+        titleFieldId: gantt.titleFieldId === fieldId ? (targetId || table.primaryFieldId) : gantt.titleFieldId,
+        startDateFieldId: gantt.startDateFieldId === fieldId ? targetId : gantt.startDateFieldId,
+        endDateFieldId: gantt.endDateFieldId === fieldId ? targetId : gantt.endDateFieldId,
+      };
+    }
+    return {
+      ...view,
+      config,
+      filters,
+      sorts,
+      fieldOrder: replaceFieldIdList(view.fieldOrder, fieldId),
+      hiddenFieldIds: replaceFieldIdList(view.hiddenFieldIds, fieldId),
+    };
+  });
+
+  return {
+    ...table,
+    fields: table.fields.filter(field => field.id !== fieldId),
+    records: table.records.map(record => {
+      const nextFields = { ...record.fields };
+      if (targetId && hasStoredCellValue(nextFields[fieldId])) {
+        const value = nextFields[fieldId];
+        nextFields[targetId] = Array.isArray(value)
+          ? JSON.parse(JSON.stringify(value)) as CellValue
+          : value;
+      }
+      delete nextFields[fieldId];
+      return { ...record, fields: nextFields };
+    }),
+    views,
+  };
+}
+
 type LegacyAttrs = Record<string, unknown>;
 
 function uid(prefix: string) {

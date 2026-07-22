@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
+  analyzeFieldDeletion,
+  deleteFieldWithMigration,
+  getCompatibleFieldMigrationTargets,
   GRID_ROW_HEIGHT_PRESETS,
   filterRecordsForView,
   insertRecordsIntoTable,
@@ -148,5 +151,77 @@ describe('Bitable model contracts', () => {
     };
     expect(resolveViewFields(current, view).map(field => field.id))
       .toEqual(['title', 'tags', 'new-field']);
+  });
+
+  test('field deletion impact counts record data and view references', () => {
+    const current = table([record('a', 'A', ['promotion']), record('b', 'B')]);
+    current.views = [{
+      id: 'grid',
+      tableId: current.id,
+      name: '表格',
+      type: 'grid',
+      config: { groupByFieldIds: ['tags'], groupSortDirections: ['asc'] },
+      filters: [{ id: 'filter', fieldId: 'tags', operator: 'contains', value: '推广' }],
+      sorts: [{ fieldId: 'tags', direction: 'asc' }],
+    }];
+    expect(analyzeFieldDeletion(current, 'tags')).toEqual({
+      recordsWithValue: 1,
+      filterReferences: 1,
+      sortReferences: 1,
+      groupReferences: 1,
+      configReferences: 0,
+    });
+  });
+
+  test('field deletion can migrate values and compatible references', () => {
+    const current = table([record('a', 'A', ['promotion'])]);
+    const backup: BaseField = {
+      id: 'backup-tags',
+      name: '备用标签',
+      type: 'multi_select',
+      options: fields[1].options,
+    };
+    current.fields = [...fields, backup];
+    current.records[0].fields['backup-tags'] = [];
+    current.views = [{
+      id: 'grid',
+      tableId: current.id,
+      name: '表格',
+      type: 'grid',
+      config: { groupByFieldIds: ['tags'], groupSortDirections: ['desc'] },
+      filters: [{ id: 'filter', fieldId: 'tags', operator: 'contains', value: '推广' }],
+      sorts: [{ fieldId: 'tags', direction: 'asc' }],
+      fieldOrder: ['title', 'tags', 'backup-tags'],
+    }];
+
+    expect(getCompatibleFieldMigrationTargets(current, 'tags').map(field => field.id))
+      .toEqual(['backup-tags']);
+    const next = deleteFieldWithMigration(current, 'tags', 'backup-tags');
+    expect(next.fields.map(field => field.id)).toEqual(['title', 'backup-tags']);
+    expect(next.records[0].fields['backup-tags']).toEqual(['promotion']);
+    expect(next.records[0].fields.tags).toBeUndefined();
+    expect(next.views[0].filters?.[0].fieldId).toBe('backup-tags');
+    expect(next.views[0].sorts?.[0].fieldId).toBe('backup-tags');
+    expect((next.views[0].config as { groupByFieldIds?: string[] }).groupByFieldIds)
+      .toEqual(['backup-tags']);
+    expect(next.views[0].fieldOrder).toEqual(['title', 'backup-tags']);
+  });
+
+  test('field deletion without migration removes dangling references', () => {
+    const current = table([record('a', 'A', ['promotion'])]);
+    current.views = [{
+      id: 'grid',
+      tableId: current.id,
+      name: '表格',
+      type: 'grid',
+      config: { groupByFieldIds: ['tags'], groupSortDirections: ['asc'] },
+      filters: [{ id: 'filter', fieldId: 'tags', operator: 'contains', value: '推广' }],
+      sorts: [{ fieldId: 'tags', direction: 'asc' }],
+    }];
+    const next = deleteFieldWithMigration(current, 'tags');
+    expect(next.records[0].fields.tags).toBeUndefined();
+    expect(next.views[0].filters).toEqual([]);
+    expect(next.views[0].sorts).toEqual([]);
+    expect((next.views[0].config as { groupByFieldIds?: string[] }).groupByFieldIds).toBeUndefined();
   });
 });
