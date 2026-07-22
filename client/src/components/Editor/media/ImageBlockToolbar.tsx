@@ -122,6 +122,7 @@ export default function ImageBlockToolbar({
     if (blockId && onEnsureBlockId) onEnsureBlockId(blockId);
     void copyCurrentBlockLink(editor).then(url => {
       if (url) MessagePlugin.success('已复制块链接');
+      else MessagePlugin.error('复制失败，请从地址栏复制链接');
     });
   };
 

@@ -165,6 +165,7 @@ export function FormulaBlockView({ node, updateAttributes, selected, editor, get
     ensureBlockId();
     void copyCurrentBlockLink(editor).then(url => {
       if (url) void MessagePlugin.success('已复制块链接');
+      else void MessagePlugin.error('复制失败，请从地址栏复制链接');
     });
   };
 

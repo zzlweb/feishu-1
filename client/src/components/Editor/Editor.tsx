@@ -245,13 +245,17 @@ function MediaFileToolbar({
     ensureLinkableBlock();
     void copyCurrentBlockLink(editor).then(url => {
       if (url) MessagePlugin.success('已复制块链接');
+      else MessagePlugin.error('复制失败，请从地址栏复制链接');
     });
   };
 
   const handleShareLink = async () => {
     ensureLinkableBlock();
     const url = await copyCurrentBlockLink(editor);
-    if (!url) return;
+    if (!url) {
+      void MessagePlugin.error('复制失败，请从地址栏复制链接');
+      return;
+    }
     if (navigator.share) {
       await navigator.share({ title: fileName || document.title, url });
       return;

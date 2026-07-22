@@ -8,6 +8,7 @@ import {
   IndentLeftIcon,
 } from 'tdesign-icons-react';
 import { MessagePlugin } from 'tdesign-react';
+import { copyTextToClipboard, executeClipboardCommand } from '../../../shared/clipboard';
 import { wrapIcon } from '../../../icons/wrap';
 import {
   ContextGlyphCut,
@@ -202,13 +203,16 @@ export default function TableContextMenu({
 
   const handleCut = () => {
     alignSelectionToBlockAnchor();
-    document.execCommand('cut');
+    if (!executeClipboardCommand('cut')) {
+      void MessagePlugin.error('剪切失败，请使用 Ctrl+X 重试');
+    }
     onClose();
   };
 
   const handleCopy = () => {
     alignSelectionToBlockAnchor();
-    document.execCommand('copy');
+    if (executeClipboardCommand('copy')) void MessagePlugin.success('已复制');
+    else void MessagePlugin.error('复制失败，请使用 Ctrl+C 重试');
     onClose();
   };
 
@@ -218,15 +222,20 @@ export default function TableContextMenu({
     onClose();
   };
 
-  const handleCopyBlockLink = () => {
+  const handleCopyBlockLink = async () => {
     alignSelectionToBlockAnchor();
-    copyCurrentBlockLink(editor);
+    const url = await copyCurrentBlockLink(editor);
+    if (url) void MessagePlugin.success('块链接已复制');
+    else void MessagePlugin.error('复制失败，请从地址栏复制链接');
     onClose();
   };
 
   const handleShare = async () => {
-    await navigator.clipboard.writeText(window.location.href);
-    void MessagePlugin.success('分享链接已复制');
+    if (await copyTextToClipboard(window.location.href)) {
+      void MessagePlugin.success('分享链接已复制');
+    } else {
+      void MessagePlugin.error('复制失败，请从地址栏复制链接');
+    }
     onClose();
   };
 
