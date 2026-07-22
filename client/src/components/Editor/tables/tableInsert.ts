@@ -534,6 +534,9 @@ interface ParsedTableCell {
   html?: Element;
   isHeader?: boolean;
   backgroundColor?: string;
+  rowspan?: number;
+  colspan?: number;
+  covered?: boolean;
 }
 
 type ParsedTableMatrix = ParsedTableCell[][];
@@ -543,10 +546,18 @@ function emptyParsedCell(): ParsedTableCell {
 }
 
 function readCellBackground(cell: Element): string {
-  if (cell instanceof HTMLElement) {
-    return cell.style.backgroundColor || cell.getAttribute('bgcolor') || '';
-  }
-  return cell.getAttribute('bgcolor') || '';
+  if (!(cell instanceof HTMLElement)) return '';
+  if (cell.style.backgroundColor) return cell.style.backgroundColor;
+  const legacyColor = cell.getAttribute('bgcolor');
+  if (!legacyColor) return '';
+  const probe = document.createElement('span');
+  probe.style.backgroundColor = legacyColor;
+  return probe.style.backgroundColor;
+}
+
+function readClipboardSpan(value: string | null, max: number): number {
+  const parsed = Number.parseInt(value || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : 1;
 }
 
 function parseHtmlTable(html: string): ParsedTableMatrix | null {
@@ -555,43 +566,43 @@ function parseHtmlTable(html: string): ParsedTableMatrix | null {
   const table = doc.querySelector('table');
   if (!table) return null;
 
-  const matrix: ParsedTableMatrix = [];
-  const rowSpans: number[] = [];
-  table.querySelectorAll('tr').forEach((tr, rowIndex) => {
-    const row: ParsedTableCell[] = [];
+  const sourceRows = Array.from(table.querySelectorAll('tr'));
+  const matrix: ParsedTableMatrix = Array.from({ length: sourceRows.length }, () => []);
+  sourceRows.forEach((tr, rowIndex) => {
+    const row = matrix[rowIndex];
     let colIndex = 0;
-    const flushRowSpanPlaceholders = () => {
-      while ((rowSpans[colIndex] || 0) > 0) {
-        row.push(emptyParsedCell());
-        rowSpans[colIndex] -= 1;
-        colIndex += 1;
-      }
-    };
-
-    flushRowSpanPlaceholders();
     tr.querySelectorAll('th,td').forEach(cell => {
-      const colspan = Math.max(1, Number(cell.getAttribute('colspan') || 1));
-      const rowspan = Math.max(1, Number(cell.getAttribute('rowspan') || 1));
+      while (row[colIndex]?.covered) colIndex += 1;
+      const colspan = readClipboardSpan(cell.getAttribute('colspan'), 100);
+      const rowspan = readClipboardSpan(cell.getAttribute('rowspan'), sourceRows.length - rowIndex);
       const text = normalizeCellText(cell.textContent || '');
-      row.push({
+      row[colIndex] = {
         text,
         html: cell,
         isHeader: cell.tagName.toLowerCase() === 'th' || rowIndex === 0 && tr.querySelectorAll('th').length > 0,
         backgroundColor: readCellBackground(cell),
-      });
-      if (rowspan > 1) rowSpans[colIndex] = Math.max(rowSpans[colIndex] || 0, rowspan - 1);
-      colIndex += 1;
-      for (let i = 1; i < colspan; i += 1) {
-        row.push(emptyParsedCell());
-        if (rowspan > 1) rowSpans[colIndex] = Math.max(rowSpans[colIndex] || 0, rowspan - 1);
-        colIndex += 1;
+        rowspan,
+        colspan,
+      };
+      for (let rowOffset = 0; rowOffset < rowspan; rowOffset += 1) {
+        const targetRow = matrix[rowIndex + rowOffset];
+        if (!targetRow) break;
+        for (let colOffset = 0; colOffset < colspan; colOffset += 1) {
+          if (rowOffset === 0 && colOffset === 0) continue;
+          targetRow[colIndex + colOffset] = { text: '', covered: true };
+        }
       }
-      flushRowSpanPlaceholders();
+      colIndex += colspan;
     });
-    if (row.length > 0) matrix.push(row);
   });
 
-  return matrix.length > 0 ? matrix : null;
+  const cols = Math.max(...matrix.map(row => row.length), 0);
+  matrix.forEach(row => {
+    for (let colIndex = 0; colIndex < cols; colIndex += 1) {
+      if (!row[colIndex]) row[colIndex] = emptyParsedCell();
+    }
+  });
+  return matrix.some(row => row.length > 0) ? matrix : null;
 }
 
 function parseDelimitedTable(text: string): ParsedTableMatrix | null {
@@ -664,8 +675,9 @@ function createTableNodeFromMatrix(editor: Editor, matrix: ParsedTableMatrix): P
   const cols = Math.max(...matrix.map(row => row.length));
   if (matrix.length === 0 || cols === 0) return null;
 
-  const rows = matrix.map(row => rowType.create(null, Array.from({ length: cols }, (_, colIndex) => {
-    const cell = row[colIndex] ?? emptyParsedCell();
+  const rows = matrix.map(row => rowType.create(null, Array.from({ length: cols }, (_, colIndex) => (
+    row[colIndex] ?? emptyParsedCell()
+  )).filter(cell => !cell.covered).map(cell => {
     const inlineContent = collectCellInlineNodes(editor, cell.html);
     const paragraph = inlineContent.length > 0
       ? paragraphType.create(null, inlineContent)
@@ -673,8 +685,12 @@ function createTableNodeFromMatrix(editor: Editor, matrix: ParsedTableMatrix): P
         ? paragraphType.create(null, textNodesWithBreaks(editor, cell.text))
         : paragraphType.create();
     const type = cell.isHeader && headerType ? headerType : cellType;
-    const attrs = cell.backgroundColor ? { backgroundColor: cell.backgroundColor } : null;
-    return type.create(attrs, paragraph);
+    const attrs = {
+      ...(cell.backgroundColor ? { backgroundColor: cell.backgroundColor } : {}),
+      ...(cell.rowspan && cell.rowspan > 1 ? { rowspan: cell.rowspan } : {}),
+      ...(cell.colspan && cell.colspan > 1 ? { colspan: cell.colspan } : {}),
+    };
+    return type.create(Object.keys(attrs).length > 0 ? attrs : null, paragraph);
   })));
 
   return tableType.create(null, rows);

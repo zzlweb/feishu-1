@@ -201,26 +201,67 @@ function cellHtml(node: ProseMirrorNode, schema: ProseMirrorNode['type']['schema
 interface ClipboardMatrixCell {
   text: string;
   json?: unknown;
+  backgroundColor?: string;
+  covered?: boolean;
 }
 
 type ClipboardMatrix = ClipboardMatrixCell[][];
+
+function safeClipboardBackground(cell: HTMLElement): string {
+  if (cell.style.backgroundColor) return cell.style.backgroundColor;
+  const legacyColor = cell.getAttribute('bgcolor');
+  if (!legacyColor) return '';
+  const probe = document.createElement('span');
+  probe.style.backgroundColor = legacyColor;
+  return probe.style.backgroundColor;
+}
+
+function readClipboardSpan(value: unknown, max: number): number {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : 1;
+}
+
+function markCoveredClipboardCells(
+  matrix: ClipboardMatrix,
+  row: number,
+  col: number,
+  rowspan: number,
+  colspan: number,
+) {
+  for (let rowOffset = 0; rowOffset < rowspan; rowOffset += 1) {
+    const targetRow = matrix[row + rowOffset];
+    if (!targetRow) break;
+    for (let colOffset = 0; colOffset < colspan; colOffset += 1) {
+      if (rowOffset === 0 && colOffset === 0) continue;
+      targetRow[col + colOffset] = { text: '', covered: true };
+    }
+  }
+}
 
 function matrixFromClipboard(html: string, text: string): ClipboardMatrix | null {
   if (html && /<table[\s>]/i.test(html)) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const table = doc.querySelector('table');
     if (table) {
-      const rows: ClipboardMatrix = [];
-      table.querySelectorAll('tr').forEach(tr => {
-        const row: ClipboardMatrixCell[] = [];
-        tr.querySelectorAll('th,td').forEach(cell => {
-          const colspan = Math.max(1, Number(cell.getAttribute('colspan') || 1));
+      const sourceRows = Array.from(table.rows);
+      const rows: ClipboardMatrix = Array.from({ length: sourceRows.length }, () => []);
+      sourceRows.forEach((tr, rowIndex) => {
+        const row = rows[rowIndex];
+        let colIndex = 0;
+        Array.from(tr.cells).forEach(cell => {
+          while (row[colIndex]?.covered) colIndex += 1;
+          const colspan = readClipboardSpan(cell.getAttribute('colspan'), 100);
+          const rowspan = readClipboardSpan(cell.getAttribute('rowspan'), sourceRows.length - rowIndex);
           const value = (cell.textContent || '').replace(/\r\n?/g, '\n').trim();
-          for (let i = 0; i < colspan; i += 1) row.push({ text: i === 0 ? value : '' });
+          row[colIndex] = {
+            text: value,
+            backgroundColor: safeClipboardBackground(cell),
+          };
+          markCoveredClipboardCells(rows, rowIndex, colIndex, rowspan, colspan);
+          colIndex += colspan;
         });
-        if (row.length) rows.push(row);
       });
-      if (rows.length) return rows;
+      if (rows.some(row => row.length > 0)) return rows;
     }
   }
 
@@ -232,11 +273,39 @@ function matrixFromClipboard(html: string, text: string): ClipboardMatrix | null
 function matrixFromCustomClipboard(raw: string): ClipboardMatrix | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { type?: string; rows?: Array<Array<{ text?: string; json?: unknown }>> };
+    const parsed = JSON.parse(raw) as {
+      type?: string;
+      rows?: Array<Array<{
+        text?: string;
+        json?: unknown;
+        attrs?: Record<string, unknown>;
+        rowspan?: number;
+        colspan?: number;
+      }>>;
+    };
     if (parsed.type !== 'table-cell-range' || !Array.isArray(parsed.rows)) return null;
-    const rows = parsed.rows.map(row =>
-      Array.isArray(row) ? row.map(cell => ({ text: cell?.text ?? '', json: cell?.json })) : [],
-    );
+    const rows: ClipboardMatrix = Array.from({ length: parsed.rows.length }, () => []);
+    parsed.rows.forEach((sourceRow, rowIndex) => {
+      if (!Array.isArray(sourceRow)) return;
+      let colIndex = 0;
+      sourceRow.forEach(cell => {
+        while (rows[rowIndex][colIndex]?.covered) colIndex += 1;
+        const attrs = cell?.attrs ?? (
+          cell?.json && typeof cell.json === 'object' && 'attrs' in cell.json
+            ? (cell.json as { attrs?: Record<string, unknown> }).attrs
+            : undefined
+        );
+        const rowspan = readClipboardSpan(cell?.rowspan ?? attrs?.rowspan, rows.length - rowIndex);
+        const colspan = readClipboardSpan(cell?.colspan ?? attrs?.colspan, 100);
+        rows[rowIndex][colIndex] = {
+          text: cell?.text ?? '',
+          json: cell?.json,
+          backgroundColor: typeof attrs?.backgroundColor === 'string' ? attrs.backgroundColor : undefined,
+        };
+        markCoveredClipboardCells(rows, rowIndex, colIndex, rowspan, colspan);
+        colIndex += colspan;
+      });
+    });
     return rows.length ? rows : null;
   } catch {
     return null;
@@ -297,6 +366,7 @@ function writeCellMatrix(editor: any, matrix: ClipboardMatrix): boolean {
       const cell = table.nodeAt(cellOffset);
       if (!cell) continue;
       const source = matrix[r][c] ?? { text: '' };
+      if (source.covered) continue;
       let content = paragraphFragmentFromText(editor, source.text);
       if (source.json) {
         try {
@@ -306,7 +376,10 @@ function writeCellMatrix(editor: any, matrix: ClipboardMatrix): boolean {
           // Invalid structured clipboard data falls back to its plain text form.
         }
       }
-      const nextCell = cell.type.createChecked(cell.attrs, content, cell.marks);
+      const nextAttrs = source.backgroundColor
+        ? { ...cell.attrs, backgroundColor: source.backgroundColor }
+        : cell.attrs;
+      const nextCell = cell.type.createChecked(nextAttrs, content, cell.marks);
       tr = tr.replaceWith(cellPos, cellPos + cell.nodeSize, nextCell);
     }
   }

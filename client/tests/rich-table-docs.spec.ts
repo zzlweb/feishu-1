@@ -188,6 +188,78 @@ test('inserts and deletes rows and columns from a cell selection toolbar', async
   await expect(page.locator('td[data-table-cell="true"]', { hasText: 'Theta' })).toHaveCount(0);
 });
 
+test('preserves merged spans and background when pasting an external HTML table', async ({ page }) => {
+  await openRichTable(page);
+  await page.getByText('after', { exact: true }).click();
+
+  await page.evaluate(() => {
+    const paragraphs = Array.from(document.querySelectorAll('.ProseMirror > p'));
+    const after = paragraphs.find(paragraph => paragraph.textContent?.trim() === 'after');
+    const editor = document.querySelector('.ProseMirror');
+    if (!(after instanceof HTMLElement) || !(editor instanceof HTMLElement)) return;
+    const range = document.createRange();
+    range.selectNodeContents(after);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const clipboard = new DataTransfer();
+    clipboard.setData('text/html', `
+      <table><tbody>
+        <tr><td rowspan="2" bgcolor="#ffeeaa">North</td><th colspan="2">Header</th></tr>
+        <tr><td>East</td><td>West</td></tr>
+      </tbody></table>
+    `);
+    clipboard.setData('text/plain', 'North\tHeader\t\n\tEast\tWest');
+    editor.dispatchEvent(new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: clipboard,
+    }));
+  });
+
+  const pastedTable = page.locator('table.feishu-table').last();
+  await expect(pastedTable).toBeVisible();
+  const north = pastedTable.locator('td', { hasText: 'North' });
+  const header = pastedTable.locator('th', { hasText: 'Header' });
+  await expect(north).toHaveAttribute('rowspan', '2');
+  await expect(north).toHaveCSS('background-color', 'rgb(255, 238, 170)');
+  await expect(header).toHaveAttribute('colspan', '2');
+  await expect(pastedTable.locator('td,th')).toHaveCount(4);
+});
+
+test('does not clear target cells covered by pasted HTML spans', async ({ page }) => {
+  await openRichTable(page);
+  await page.locator('td[data-table-cell="true"]').first().click();
+
+  await page.evaluate(() => {
+    const editor = document.querySelector('.ProseMirror');
+    if (!(editor instanceof HTMLElement)) return;
+    const clipboard = new DataTransfer();
+    clipboard.setData('text/html', `
+      <table><tbody>
+        <tr><td rowspan="2" colspan="2" style="background-color: rgb(255, 238, 170)">Pasted</td><td>Tail</td></tr>
+        <tr><td>Bottom</td></tr>
+      </tbody></table>
+    `);
+    clipboard.setData('text/plain', 'Pasted\t\tTail\n\t\tBottom');
+    editor.dispatchEvent(new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: clipboard,
+    }));
+  });
+
+  const cells = page.locator('td[data-table-cell="true"]');
+  await expect(cells.nth(0)).toContainText('Pasted');
+  await expect(cells.nth(0)).toHaveCSS('background-color', 'rgb(255, 238, 170)');
+  await expect(cells.nth(1)).toContainText('Beta');
+  await expect(cells.nth(2)).toContainText('Tail');
+  await expect(cells.nth(3)).toContainText('Delta');
+  await expect(cells.nth(4)).toContainText('Epsilon');
+  await expect(cells.nth(5)).toContainText('Bottom');
+});
+
 test('reorders rows by dragging the row rail', async ({ page }) => {
   await openRichTable(page);
 
