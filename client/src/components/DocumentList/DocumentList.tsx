@@ -7,8 +7,13 @@ import {
   DeleteIcon,
   EllipsisIcon,
   FileAddIcon,
+  FileCopyIcon,
   FilterIcon,
+  JumpIcon,
+  LinkIcon,
   SearchIcon,
+  StarFilledIcon,
+  StarIcon,
   TemplateIcon,
   UploadIcon,
   ViewListIcon,
@@ -260,7 +265,9 @@ export default function DocumentList() {
     const closeOnLayoutChange = () => setRowMenu(null);
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
-    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange);
+    const cleanupLayout = bindFloatingLayoutListeners(closeOnLayoutChange, undefined, {
+      runImmediately: false,
+    });
     return () => {
       document.removeEventListener('mousedown', handleClick);
       document.removeEventListener('keydown', handleKey);
@@ -785,13 +792,15 @@ export default function DocumentList() {
       {rowMenu && activeRowDoc && (
         <div ref={rowMenuRef} className="row-context-menu" style={{ left: rowMenu.x, top: rowMenu.y }}>
           <button className="rcm-item" type="button" onClick={() => void handleCopyLink(rowMenu.docId)}>
-            <span className="rcm-icon">🔗</span>复制链接
+            <span className="rcm-icon"><LinkIcon size="16px" /></span>复制链接
           </button>
           <button className="rcm-item" type="button" onClick={() => void handleDuplicate(rowMenu.docId)}>
-            <span className="rcm-icon">⧉</span>创建副本
+            <span className="rcm-icon"><FileCopyIcon size="16px" /></span>创建副本
           </button>
           <button className="rcm-item" type="button" onClick={() => handleFavorite(rowMenu.docId)}>
-            <span className="rcm-icon">{favorites.has(rowMenu.docId) ? '★' : '☆'}</span>
+            <span className="rcm-icon">
+              {favorites.has(rowMenu.docId) ? <StarFilledIcon size="16px" /> : <StarIcon size="16px" />}
+            </span>
             {favorites.has(rowMenu.docId) ? '取消收藏' : '收藏'}
           </button>
           <button
@@ -802,11 +811,11 @@ export default function DocumentList() {
               navigate(`/doc/${rowMenu.docId}`);
             }}
           >
-            <span className="rcm-icon">↗</span>打开
+            <span className="rcm-icon"><JumpIcon size="16px" /></span>打开
           </button>
           <div className="rcm-divider" />
           <button className="rcm-item rcm-danger" type="button" onClick={() => showDeleteModal(rowMenu.docId)}>
-            <span className="rcm-icon">⌫</span>删除
+            <span className="rcm-icon"><DeleteIcon size="16px" /></span>删除
           </button>
         </div>
       )}

@@ -651,9 +651,16 @@
 
   .rcm-icon {
     width: 18px;
-    text-align: center;
-    font-size: 14px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
+    color: @text-secondary;
+  }
+
+  .rcm-danger .rcm-icon {
+    color: inherit;
   }
 
   .rcm-divider {
