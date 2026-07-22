@@ -165,6 +165,33 @@ test('opens record modal from kanban card context menu', async ({ page }) => {
   await expect(page.locator('.bitable-record-card-mask')).toBeVisible();
 });
 
+test('reports affected records and migrates them before deleting a kanban group', async ({ page }) => {
+  await openKanban(page);
+
+  const openDelete = async () => {
+    await page.getByRole('button', { name: '未开始 更多操作' }).click();
+    await page.locator('.base-kanban__column-menu--portal').getByRole('button', { name: '删除分组' }).click();
+  };
+
+  await openDelete();
+  const dialog = page.locator('[data-e2e="kanban-group-delete-dialog"]');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('1 条记录位于该分组');
+  await page.getByRole('button', { name: '取消' }).last().click();
+  await expect(page.getByRole('button', { name: '未开始 更多操作' })).toBeVisible();
+
+  await openDelete();
+  await dialog.locator('select').selectOption({ label: '已完成' });
+  const saveRequest = page.waitForRequest(request =>
+    request.url().endsWith('/api/documents/bitable-kanban-e2e') && request.method() === 'PUT',
+  );
+  await page.getByRole('button', { name: '迁移并删除' }).click();
+  const body = (await saveRequest).postDataJSON() as { content?: string };
+  await expect(page.getByRole('button', { name: '未开始 更多操作' })).toHaveCount(0);
+  expect(body.content).toContain('done');
+  expect(body.content).not.toContain('未开始');
+});
+
 test('column menu portals to body and is not clipped by column', async ({ page }) => {
   await openKanban(page);
 

@@ -386,10 +386,104 @@ export interface FieldDeletionImpact {
   configReferences: number;
 }
 
+export interface SelectChoiceDeletionImpact {
+  recordsWithChoice: number;
+  filterReferences: number;
+  viewConfigReferences: number;
+}
+
 function hasStoredCellValue(value: CellValue | undefined): boolean {
   if (value == null || value === '') return false;
   if (Array.isArray(value)) return value.length > 0;
   return value !== false;
+}
+
+function resolveStoredChoiceId(field: BaseField, value: CellValue | undefined): string {
+  if (value == null) return '';
+  const text = valueText(value);
+  return findSelectChoice(field, text)?.id ?? text;
+}
+
+function replaceChoiceIdList(ids: string[] | undefined, sourceId: string, targetId?: string): string[] | undefined {
+  if (!ids) return undefined;
+  return Array.from(new Set(ids.flatMap(id => id === sourceId ? (targetId ? [targetId] : []) : [id])));
+}
+
+export function analyzeSelectChoiceDeletion(
+  table: BaseTable,
+  fieldId: FieldId,
+  choiceId: string,
+): SelectChoiceDeletionImpact {
+  const field = table.fields.find(item => item.id === fieldId && item.type === 'single_select');
+  const choice = field?.options?.choices?.find(item => item.id === choiceId);
+  if (!field || !choice) return { recordsWithChoice: 0, filterReferences: 0, viewConfigReferences: 0 };
+  const impact: SelectChoiceDeletionImpact = {
+    recordsWithChoice: table.records.filter(record => resolveStoredChoiceId(field, record.fields[fieldId]) === choiceId).length,
+    filterReferences: 0,
+    viewConfigReferences: 0,
+  };
+  table.views.forEach(view => {
+    impact.filterReferences += (view.filters || []).filter(rule => (
+      rule.fieldId === fieldId && resolveStoredChoiceId(field, rule.value) === choiceId
+    )).length;
+    if (view.type !== 'gallery' && view.type !== 'kanban') return;
+    const config = view.config as GalleryViewConfig;
+    if (config.groupByFieldId !== fieldId) return;
+    impact.viewConfigReferences += (config.groupOrderIds || []).filter(id => id === choiceId).length;
+    impact.viewConfigReferences += (config.hiddenGroupIds || []).filter(id => id === choiceId).length;
+    impact.viewConfigReferences += (config.visibleEmptyGroupIds || []).filter(id => id === choiceId).length;
+  });
+  return impact;
+}
+
+export function deleteSelectChoiceWithMigration(
+  table: BaseTable,
+  fieldId: FieldId,
+  choiceId: string,
+  migrateToChoiceId?: string,
+): BaseTable {
+  const field = table.fields.find(item => item.id === fieldId && item.type === 'single_select');
+  const choices = field?.options?.choices || [];
+  const source = choices.find(choice => choice.id === choiceId);
+  const target = choices.find(choice => choice.id === migrateToChoiceId && choice.id !== choiceId);
+  if (!field || !source || choices.length <= 1) return table;
+  const targetId = target?.id;
+
+  return {
+    ...table,
+    fields: table.fields.map(item => item.id === fieldId
+      ? { ...item, options: { ...item.options, choices: choices.filter(choice => choice.id !== choiceId) } }
+      : item),
+    records: table.records.map(record => {
+      if (resolveStoredChoiceId(field, record.fields[fieldId]) !== choiceId) return record;
+      return {
+        ...record,
+        updatedAt: new Date().toISOString(),
+        fields: { ...record.fields, [fieldId]: targetId || '' },
+      };
+    }),
+    views: table.views.map(view => {
+      const filters = (view.filters || []).flatMap(rule => {
+        const referencesChoice = rule.fieldId === fieldId
+          && resolveStoredChoiceId(field, rule.value) === choiceId;
+        if (!referencesChoice) return [rule];
+        return targetId ? [{ ...rule, value: targetId }] : [];
+      });
+      if (view.type !== 'gallery' && view.type !== 'kanban') return { ...view, filters };
+      const config = view.config as GalleryViewConfig;
+      if (config.groupByFieldId !== fieldId) return { ...view, filters };
+      return {
+        ...view,
+        filters,
+        config: {
+          ...config,
+          groupOrderIds: replaceChoiceIdList(config.groupOrderIds, choiceId, targetId),
+          hiddenGroupIds: replaceChoiceIdList(config.hiddenGroupIds, choiceId, targetId),
+          visibleEmptyGroupIds: replaceChoiceIdList(config.visibleEmptyGroupIds, choiceId, targetId),
+        },
+      };
+    }),
+  };
 }
 
 export function analyzeFieldDeletion(table: BaseTable, fieldId: FieldId): FieldDeletionImpact {

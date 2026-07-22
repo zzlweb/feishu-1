@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import {
   analyzeFieldDeletion,
+  analyzeSelectChoiceDeletion,
   deleteFieldWithMigration,
+  deleteSelectChoiceWithMigration,
   getCompatibleFieldMigrationTargets,
   GRID_ROW_HEIGHT_PRESETS,
   filterRecordsForView,
@@ -16,6 +18,7 @@ import {
   type BaseRecord,
   type BaseTable,
   type BaseView,
+  type GalleryViewConfig,
 } from './bitableModel';
 
 const fields: BaseField[] = [
@@ -223,5 +226,69 @@ describe('Bitable model contracts', () => {
     expect(next.views[0].filters).toEqual([]);
     expect(next.views[0].sorts).toEqual([]);
     expect((next.views[0].config as { groupByFieldIds?: string[] }).groupByFieldIds).toBeUndefined();
+  });
+
+  test('select choice deletion reports affected records and references', () => {
+    const current = table([record('a', 'A'), record('b', 'B')]);
+    const status: BaseField = {
+      id: 'status',
+      name: '状态',
+      type: 'single_select',
+      options: { choices: [
+        { id: 'todo', name: '待处理', color: '#dee8ff' },
+        { id: 'done', name: '已完成', color: '#c7effb' },
+      ] },
+    };
+    current.fields.push(status);
+    current.records[0].fields.status = 'todo';
+    current.records[1].fields.status = '待处理';
+    current.views = [{
+      id: 'kanban', tableId: current.id, name: '看板', type: 'kanban',
+      config: {
+        groupByFieldId: 'status', groupOrderIds: ['todo', 'done'], hiddenGroupIds: ['todo'],
+        visibleEmptyGroupIds: ['todo'], visibleFieldIds: [], coverFit: 'cover', cardSize: 'medium',
+        cardAspectRatio: '4:3', showFieldNames: true, showEmptyFields: false,
+        showAttachmentCount: true, showRecordActions: false, emptyCoverMode: 'placeholder',
+      },
+      filters: [{ id: 'filter', fieldId: 'status', operator: 'equals', value: '待处理' }],
+    }];
+    expect(analyzeSelectChoiceDeletion(current, 'status', 'todo')).toEqual({
+      recordsWithChoice: 2,
+      filterReferences: 1,
+      viewConfigReferences: 3,
+    });
+  });
+
+  test('select choice deletion migrates records and removes dangling view references', () => {
+    const current = table([record('a', 'A'), record('b', 'B')]);
+    const status: BaseField = {
+      id: 'status', name: '状态', type: 'single_select', options: { choices: [
+        { id: 'todo', name: '待处理', color: '#dee8ff' },
+        { id: 'done', name: '已完成', color: '#c7effb' },
+      ] },
+    };
+    current.fields.push(status);
+    current.records[0].fields.status = 'todo';
+    current.records[1].fields.status = '待处理';
+    current.views = [{
+      id: 'kanban', tableId: current.id, name: '看板', type: 'kanban',
+      config: {
+        groupByFieldId: 'status', groupOrderIds: ['todo', 'done'], hiddenGroupIds: ['todo'],
+        visibleEmptyGroupIds: ['todo'], visibleFieldIds: [], coverFit: 'cover', cardSize: 'medium',
+        cardAspectRatio: '4:3', showFieldNames: true, showEmptyFields: false,
+        showAttachmentCount: true, showRecordActions: false, emptyCoverMode: 'placeholder',
+      },
+      filters: [{ id: 'filter', fieldId: 'status', operator: 'equals', value: 'todo' }],
+    }];
+
+    const migrated = deleteSelectChoiceWithMigration(current, 'status', 'todo', 'done');
+    expect(migrated.records.map(item => item.fields.status)).toEqual(['done', 'done']);
+    expect(migrated.views[0].filters?.[0].value).toBe('done');
+    expect((migrated.views[0].config as GalleryViewConfig).groupOrderIds).toEqual(['done']);
+
+    const cleared = deleteSelectChoiceWithMigration(current, 'status', 'todo');
+    expect(cleared.records.map(item => item.fields.status)).toEqual(['', '']);
+    expect(cleared.views[0].filters).toEqual([]);
+    expect((cleared.views[0].config as GalleryViewConfig).hiddenGroupIds).toEqual([]);
   });
 });
