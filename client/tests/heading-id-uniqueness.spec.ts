@@ -62,3 +62,39 @@ test('prunes collapsed heading ids that no longer exist', async ({ page }) => {
   await expect(page.locator('.catalogue__list-item[data-id="heading-valid"]')).toHaveClass(/catalogue__list-item--collapsed/);
   await expect.poll(() => persistedIds).toEqual(['heading-valid']);
 });
+
+test('retries a failed collapsed-heading save without losing the state', async ({ page }) => {
+  const document = {
+    ...duplicateHeadingDocument,
+    id: 'heading-collapse-retry-e2e',
+    title: 'Heading collapse retry',
+    content: '<h1 data-heading-id="heading-parent" data-block-id="heading-parent">Parent heading</h1><h2 data-heading-id="heading-child" data-block-id="heading-child">Child heading</h2>',
+    collapsed_heading_ids: [],
+    version: 1,
+    schema_version: 1,
+  };
+  let writes = 0;
+  const collapsedWrites: string[][] = [];
+  await page.route('**/api/documents/heading-collapse-retry-e2e/comments', route =>
+    route.fulfill({ json: { code: 0, data: [] } }),
+  );
+  await page.route('**/api/documents/heading-collapse-retry-e2e', route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { code: 0, data: document } });
+    writes += 1;
+    const body = route.request().postDataJSON() as { collapsed_heading_ids?: string[] };
+    if (body.collapsed_heading_ids) collapsedWrites.push(body.collapsed_heading_ids);
+    if (writes === 1) return route.fulfill({ status: 500, json: { code: -1, message: 'mock save failed' } });
+    return route.fulfill({ json: { code: 0, data: { ...document, ...body, version: 2 } } });
+  });
+
+  await page.goto('/doc/heading-collapse-retry-e2e');
+  const parentItem = page.locator('.catalogue__list-item[data-id="heading-parent"]');
+  await parentItem.getByRole('button', { name: '收起' }).click();
+
+  const retry = page.getByRole('button', { name: '保存失败' });
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByText('已保存', { exact: true })).toBeVisible();
+  expect(collapsedWrites).toEqual([['heading-parent'], ['heading-parent']]);
+  await expect(parentItem).toHaveClass(/catalogue__list-item--collapsed/);
+});
