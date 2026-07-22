@@ -14,7 +14,7 @@
 
 | ID | 用户流 | 差距与复现 | 当前行为 / 期望 | 代码归属 | 自动化 | 参照 |
 | --- | --- | --- | --- | --- | --- | --- |
-| FG-001 | 文档加载 | 延迟文档 A 的 GET，快速切换 A→B，让 A 最后返回 | 响应无请求身份校验，会覆盖当前文档；应取消或拒绝陈旧响应 | [DocumentPage.tsx](../../client/src/components/Layout/DocumentPage.tsx)、[documents.ts](../../client/src/api/documents.ts) | 缺失：跨路由竞态 | REF-DOC-01 |
+| FG-001 | 文档加载 | 延迟文档 A 的 GET，快速切换 A→B，让 A 最后返回 | 路由切换会 abort 旧文档和评论请求，并以递增请求身份拒绝仍返回的陈旧响应 | [DocumentPage.tsx](../../client/src/components/Layout/DocumentPage.tsx)、[documents.ts](../../client/src/api/documents.ts) | 已覆盖：A 延迟返回时 B 内容保持不变 | REF-DOC-01 |
 | FG-002 | 文档保存 | 两个标签页编辑同一文档并先后自动保存 | 无版本号，后写静默覆盖；应使用版本与可恢复的 409 冲突 | [DocumentPage.tsx](../../client/src/components/Layout/DocumentPage.tsx)、[documents.ts](../../server/src/routes/documents.ts)、[database.ts](../../server/src/database.ts) | 缺失：真实服务并发保存 | REF-DOC-02 |
 | FG-003 | Grid 权限 | 以只读文档打开 Grid，编辑单元格或新增记录 | 服务端权限只读与用户阅读模式已分离；权限只读不可从页头解除，Editor 与 Bitable 统一锁定，只允许本地切换视图查看 | [DocumentPage.tsx](../../client/src/components/Layout/DocumentPage.tsx)、[Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[BitableBlockView.tsx](../../client/src/components/Bitable/BitableBlockView.tsx) | 已覆盖：页头不可解除、正文不可编辑、Grid 新增字段禁用 | REF-GRID-01 |
 | FG-004 | Bitable 持久化 | 编辑一个单元格并检查保存 HTML | 完整字段、记录、视图和历史写进 `data-model`；应只存 table ID，由服务端版本化 | [BitableBlockView.tsx](../../client/src/components/Bitable/BitableBlockView.tsx)、[Editor.tsx](../../client/src/components/Editor/Editor.tsx) | 部分：[bitable-model-regressions.spec.ts](../../client/tests/bitable-model-regressions.spec.ts) 仅测本地模型 | REF-GRID-02 |

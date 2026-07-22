@@ -52,7 +52,8 @@ async function request<T>(url: string, options?: ApiRequestOptions): Promise<Api
 // Documents
 export const getDocuments = () => request<Document[]>('/documents');
 
-export const getDocument = (id: string) => request<Document>(`/documents/${id}`);
+export const getDocument = (id: string, options?: { signal?: AbortSignal }) =>
+  request<Document>(`/documents/${id}`, { signal: options?.signal });
 
 export const createDocument = (data?: Partial<Document>) =>
   request<Document>('/documents', {
@@ -169,8 +170,10 @@ export const deleteTemplate = (id: string) =>
   request<void>(`/documents/templates/${id}`, { method: 'DELETE' });
 
 // Comments
-export const getComments = (docId: string, blockId?: string) =>
-  request<Comment[]>(`/documents/${docId}/comments${blockId ? `?block_id=${encodeURIComponent(blockId)}` : ''}`);
+export const getComments = (docId: string, blockId?: string, options?: { signal?: AbortSignal }) =>
+  request<Comment[]>(`/documents/${docId}/comments${blockId ? `?block_id=${encodeURIComponent(blockId)}` : ''}`, {
+    signal: options?.signal,
+  });
 
 export const addComment = (docId: string, data: Partial<Comment>) =>
   request<Comment>(`/documents/${docId}/comments`, {

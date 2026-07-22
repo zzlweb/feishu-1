@@ -106,6 +106,7 @@ export default function DocumentPage() {
   const collapsedPersistReadyRef = useRef(false);
   const collapsedPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadRequestSequenceRef = useRef(0);
+  const commentRequestSequenceRef = useRef(0);
   const [titleInputSnapshot, setTitleInputSnapshot] = useState('');
   const [catalogueActiveId, setCatalogueActiveId] = useState<string | null>(null);
   const [collapsedHeadingIds, setCollapsedHeadingIds] = useState<Set<string>>(() => new Set());
@@ -168,12 +169,12 @@ export default function DocumentPage() {
     outlineWasVisibleRef.current = showOutlineSidebar;
   }, [showOutlineSidebar]);
 
-  const loadDocument = useCallback(async () => {
+  const loadDocument = useCallback(async (signal?: AbortSignal) => {
     if (!id) return;
     const requestId = ++loadRequestSequenceRef.current;
     setLoading(true);
     try {
-      const res = await getDocument(id);
+      const res = await getDocument(id, { signal });
       if (requestId !== loadRequestSequenceRef.current) return;
       if (res.code === 0 && res.data) {
         const draft = readDocumentDraft(window.localStorage, id);
@@ -197,12 +198,16 @@ export default function DocumentPage() {
   }, [id, navigate]);
 
   useEffect(() => {
-    loadDocument();
+    const controller = new AbortController();
+    void loadDocument(controller.signal);
+    return () => controller.abort();
   }, [loadDocument]);
 
-  const loadComments = useCallback(async () => {
+  const loadComments = useCallback(async (signal?: AbortSignal) => {
     if (!id) return;
-    const res = await getComments(id);
+    const requestId = ++commentRequestSequenceRef.current;
+    const res = await getComments(id, undefined, { signal });
+    if (requestId !== commentRequestSequenceRef.current) return;
     if (res.code === 0 && res.data) setComments(res.data);
   }, [id]);
 
@@ -213,7 +218,9 @@ export default function DocumentPage() {
     setCommentSidebarVisible(false);
     setBitableCommentActive(false);
     setBitableUnresolvedCount(0);
-    loadComments();
+    const controller = new AbortController();
+    void loadComments(controller.signal);
+    return () => controller.abort();
   }, [loadComments]);
 
   const closeCommentSidebar = useCallback(() => {

@@ -85,3 +85,41 @@ test('server-enforced read-only cannot be switched back to edit mode', async ({ 
   await expect(page.getByRole('button', { name: '置顶' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '通知' })).toHaveCount(0);
 });
+
+test('a slow previous document response cannot replace the current route', async ({ page }) => {
+  const slowDocument = {
+    ...editableDocument,
+    id: 'shell-race-slow-e2e',
+    title: '慢文档 A',
+    content: '<p>不应出现的 A 正文</p>',
+  };
+  const currentDocument = {
+    ...editableDocument,
+    id: 'shell-race-current-e2e',
+    title: '当前文档 B',
+    content: '<p>应保留的 B 正文</p>',
+  };
+  await page.route('**/api/documents/shell-race-slow-e2e/comments', async route => {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    await route.fulfill({ json: { code: 0, data: [] } });
+  });
+  await page.route('**/api/documents/shell-race-slow-e2e', async route => {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    await route.fulfill({ json: { code: 0, data: slowDocument } });
+  });
+  await routeDocument(page, currentDocument);
+
+  const slowRequest = page.waitForRequest(request => request.url().endsWith('/api/documents/shell-race-slow-e2e'));
+  await page.goto('/doc/shell-race-slow-e2e');
+  await slowRequest;
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/doc/shell-race-current-e2e');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+
+  await expect(page).toHaveURL(/\/doc\/shell-race-current-e2e$/);
+  await expect(page.getByText('应保留的 B 正文')).toBeVisible();
+  await page.waitForTimeout(350);
+  await expect(page.getByText('应保留的 B 正文')).toBeVisible();
+  await expect(page.getByText('不应出现的 A 正文')).toHaveCount(0);
+});
