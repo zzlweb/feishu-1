@@ -1213,22 +1213,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
     setShowViewMenu(false);
     setShowSettings(false);
     setCommentPanelOpen(false);
-    const opening = activeToolbarPanel !== panel;
-    // 先打开面板，再异步补默认筛选条件，避免 mutate 重渲染触发假 mouseleave 立刻关掉面板。
     setActiveToolbarPanel(current => current === panel ? null : panel);
-    if (opening && panel === 'filter' && !activeView.locked && !(activeView.filters || []).length && table.fields[0]) {
-      const firstFieldId = table.fields[0].id;
-      window.setTimeout(() => {
-        mutate(current => {
-          const view = current.views.find(item => item.id === activeView.id);
-          if (!view || (view.filters || []).length) return current;
-          return updateView(current, activeView.id, item => ({
-            ...item,
-            filters: [{ id: `filter_${Date.now().toString(36)}`, fieldId: firstFieldId, operator: 'equals', value: '' }],
-          }));
-        });
-      }, 0);
-    }
   };
 
   const resolveCommentRecordId = useCallback(() => {

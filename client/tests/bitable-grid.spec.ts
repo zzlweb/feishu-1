@@ -23,13 +23,14 @@ const gridDocument = {
   icon: '',
 };
 
-async function openGrid(page: Page) {
+async function openGrid(page: Page, onDocumentWrite?: () => void) {
   await page.route('**/api/documents/bitable-grid-e2e/comments', route =>
     route.fulfill({ json: { code: 0, data: [] } }),
   );
-  await page.route('**/api/documents/bitable-grid-e2e', route =>
-    route.fulfill({ json: { code: 0, data: gridDocument } }),
-  );
+  await page.route('**/api/documents/bitable-grid-e2e', route => {
+    if (route.request().method() !== 'GET') onDocumentWrite?.();
+    return route.fulfill({ json: { code: 0, data: gridDocument } });
+  });
   await page.goto('/doc/bitable-grid-e2e');
   const block = page.locator('.feishu-bitable-block').first();
   await expect(block).toBeVisible();
@@ -140,7 +141,9 @@ test('grid cell menu portals to body without clipping', async ({ page }) => {
 });
 
 test('grid filter group sort panels portal and stay in viewport', async ({ page }) => {
-  const block = await openGrid(page);
+  let documentWrites = 0;
+  const block = await openGrid(page, () => { documentWrites += 1; });
+  documentWrites = 0;
   await block.hover();
 
   await block.getByRole('button', { name: '筛选' }).click();
@@ -152,6 +155,14 @@ test('grid filter group sort panels portal and stay in viewport', async ({ page 
   expect(filterBox!.x).toBeGreaterThanOrEqual(0);
   expect(filterBox!.y).toBeGreaterThanOrEqual(0);
   expect(filterBox!.x + filterBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
+  await expect(filterPanel.locator('.base-toolbar-panel__filter-row')).toHaveCount(0);
+  await filterPanel.getByRole('button', { name: '关闭' }).click();
+  await expect(filterPanel).toBeHidden();
+  await page.waitForTimeout(450);
+  expect(documentWrites).toBe(0);
+
+  await block.getByRole('button', { name: '筛选' }).click();
+  await filterPanel.getByRole('button', { name: '添加条件' }).click();
   const filterRow = filterPanel.locator('.base-toolbar-panel__filter-row').first();
   await expect(filterRow).toBeVisible();
   const filterLayout = await filterRow.evaluate(el => {
@@ -169,7 +180,6 @@ test('grid filter group sort panels portal and stay in viewport', async ({ page 
   const topSpread = Math.max(...filterLayout.childTops) - Math.min(...filterLayout.childTops);
   expect(topSpread).toBeLessThanOrEqual(8);
   expect(filterLayout.inputBorder).not.toBe('0px');
-  await page.keyboard.press('Escape');
   await page.mouse.click(8, 8);
 
   await block.getByRole('button', { name: '分组' }).click();

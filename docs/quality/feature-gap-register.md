@@ -61,13 +61,14 @@
 | FG-040 | 媒体失败恢复 | 上传失败、刷新页面，再点重试 | 内存中仍有原文件时直接重试；刷新导致原文件丢失时明确要求重新选择，并在原块内继续上传 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[mediaUploadRegistry.ts](../../client/src/components/Editor/media/mediaUploadRegistry.ts) | 已覆盖：失败保存、刷新、重新选择并成功上传 | REF-UPLOAD-02 |
 | FG-041 | 图片/视频交互 | 图片加载失败，或缩放视频后保存刷新 | 图片现保留可重试失败面板；视频右下角等比缩放会持久化宽高，并在浏览器支持时提供画中画；待真实浏览器视觉基线和刷新 E2E | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[VideoResizeHandle.tsx](../../client/src/components/Editor/media/VideoResizeHandle.tsx) | 单元测试已覆盖尺寸算法，浏览器契约已补 | MEDIA-001 |
 | FG-042 | 图片拖拽排版 | 按住图片本体拖到其它正文块或分栏 | 已接入统一块拖拽状态机，超过阈值后显示缩略图和插入线，支持跨正文/分栏父容器移动；飞书不支持的浮动和文字环绕明确不实现 | [Editor.tsx](../../client/src/components/Editor/Editor.tsx)、[feishuBlockDrag.ts](../../client/src/components/Editor/blocks/feishuBlockDrag.ts) | 跨分栏浏览器契约已补 | MEDIA-001 |
+| FG-043 | Grid 筛选 | 只打开筛选面板查看后直接关闭 | 打开或关闭空面板不再写入默认空规则；只有点击“添加条件”才创建可编辑筛选条件 | [BitableBlockView.tsx](../../client/src/components/Bitable/BitableBlockView.tsx) | 已覆盖：空面板零写入、显式添加后出现条件行 | REF-GRID-06 |
 
 ## P2 候选
 
-以下能力不应在界面中伪装成完整功能，应在对应阶段决定实现或移除：评论“翻译/举报”、打开筛选面板即持久化空规则。Record Modal 文本字段已改为失焦/Enter 单次提交且 Esc 撤销；块菜单伪“翻译”、评论本地点赞、模板菜单“开发中”入口和公共链接 HTTP 已移除。
+以下能力不应在界面中伪装成完整功能，应在对应阶段决定实现或移除：评论“翻译/举报”。Record Modal 文本字段已改为失焦/Enter 单次提交且 Esc 撤销，筛选面板不再自动持久化空规则；块菜单伪“翻译”、评论本地点赞、模板菜单“开发中”入口和公共链接 HTTP 已移除。
 
 ## 数量与覆盖
 
-- 共 42 条：P0 8 条，P1 34 条。
+- 共 43 条：P0 8 条，P1 35 条。
 - 全部 13 类计划流均有代码归属和测试状态：文档输入、Slash、块菜单、标题折叠、目录、评论、普通表格、Grid、Gallery、Kanban、Record Modal、导入、上传。
 - 主要空白集中在真实持久化、权限、安全、键盘路径和失败恢复；现有强项是局部渲染、指针交互和 portal 几何。
