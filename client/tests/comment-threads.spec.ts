@@ -259,6 +259,7 @@ test('preserves orphaned comments with an anchor-lost state', async ({ page }) =
     }));
   });
   await expect(page.locator('.comment-panel__reply-content')).toContainText('将被同步删除');
+  await expect(page.getByRole('button', { name: '赞' })).toHaveCount(0);
 
   const highlight = page.locator('.feishu-comment-highlight', { hasText: 'www.baidu.com' }).first();
   await highlight.click({ clickCount: 3 });

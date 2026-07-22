@@ -165,7 +165,6 @@ export default function CommentSidebar({
   const [replyingBlockId, setReplyingBlockId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
-  const [likedCommentIds, setLikedCommentIds] = useState<Record<string, true>>({});
   const [showHistory, setShowHistory] = useState(false);
   const [submitStateByThread, setSubmitStateByThread] = useState<Record<string, 'submitting' | 'error'>>({});
   const [editState, setEditState] = useState<'idle' | 'submitting' | 'error'>('idle');
@@ -221,15 +220,6 @@ export default function CommentSidebar({
       setSubmitStateByThread(current => ({ ...current, [resolvedThreadKey]: 'error' }));
     }
   }, [activeBlockId, onSubmit, replyingBlockId, submitStateByThread]);
-
-  const toggleLike = useCallback((commentId: string) => {
-    setLikedCommentIds(prev => {
-      const next = { ...prev };
-      if (next[commentId]) delete next[commentId];
-      else next[commentId] = true;
-      return next;
-    });
-  }, []);
 
   const cancelEdit = useCallback(() => {
     setEditingCommentId(null);
@@ -458,7 +448,6 @@ export default function CommentSidebar({
                       {blockComments.filter(comment => comment.content.trim().length > 0).map(comment => {
                         const isOwn = comment.author.trim() === currentUserName.trim();
                         const isEditing = editingCommentId === comment.id;
-                        const isLiked = Boolean(likedCommentIds[comment.id]);
                         const moreOptions = buildCommentMoreOptions(isOwn);
 
                         const handleMoreMenuClick = (item: DropdownOption) => {
@@ -483,18 +472,6 @@ export default function CommentSidebar({
                             resolved={Boolean(comment.resolved)}
                             actions={(
                               <>
-                                    <button
-                                      type="button"
-                                      className={`comment-panel__icon-btn${isLiked ? ' comment-panel__icon-btn--active' : ''}`}
-                                      title="赞"
-                                      aria-label="赞"
-                                      aria-pressed={isLiked}
-                                      onClick={() => toggleLike(comment.id)}
-                                    >
-                                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                                        <path d="M1.75 12.833h-.583a.29.29 0 01-.292-.291V4.958a.292.292 0 01.292-.291h.583a.292.292 0 01.292.291v7.584a.292.292 0 01-.292.291zm7-8.167h2.501c1.74 0 2.14 1.536 1.74 2.688l-1.74 4.582a1.237 1.237 0 01-1.196.902H3.204a.293.293 0 01-.292-.291v-7.59a.292.292 0 01.292-.291h.6a.583.583 0 00.477-.248L6.702.973c.164-.26.607-.46 1.078-.246.708.322 1.554 1.025 1.554 2.19 0 .44-.195 1.023-.585 1.749z" fill="currentColor" />
-                                      </svg>
-                                    </button>
                                     <button type="button" className="comment-panel__icon-btn" title="回复" aria-label="回复" onClick={openComposer}>
                                       <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                                         <path d="M16.25 19.511 13.5 22.5c-.401.438-.957.68-1.5.68s-.967-.137-1.523-.68L7.75 19.511 3 19.5c-1.1-.011-2-.9-2-2v-13c0-1.1.9-2 2-2h18c1.1 0 2 .9 2 2v13c0 1.1-.9 1.989-2 2l-4.75.011ZM5.5 10.5v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0-1-1h-1a1 1 0 0 0-1 1Zm6-1a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0-1-1h-1Zm5 0a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0-1-1h-1Z" fill="currentColor" />

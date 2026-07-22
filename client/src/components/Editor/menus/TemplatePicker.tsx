@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { MessagePlugin } from 'tdesign-react';
 import type { Template } from '../../../types';
 import { sortTemplatesForPicker } from './templatePickerConfig';
 
@@ -120,17 +119,6 @@ export default function TemplatePicker({ onPick }: Props) {
             </button>
           ))}
         </div>
-        <div className="slash-template-picker__divider" />
-        <button
-          type="button"
-          className="slash-template-picker__more"
-          onMouseDown={event => {
-            event.preventDefault();
-            void MessagePlugin.info('更多模板正在开发中，您可以在块菜单中保存当前块为模板');
-          }}
-        >
-          更多模板
-        </button>
       </div>
       {hovered && (
         <div className="slash-template-preview">
