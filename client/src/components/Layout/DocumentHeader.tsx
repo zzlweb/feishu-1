@@ -6,18 +6,16 @@ import {
   EditIcon,
   EllipsisIcon,
   FileIcon,
-  NotificationIcon,
   SearchIcon,
   SecuredIcon,
 } from 'tdesign-icons-react';
 import { wrapIcon } from '../../icons/wrap';
-import { IconChatPinOutlined, IconHomeOutlined } from '../../icons/feishuDoc';
+import { IconHomeOutlined } from '../../icons/feishuDoc';
 import { createDocument, deleteDocument, duplicateDocument, saveAsTemplate } from '../../api/documents';
 import type { Document, DocumentSaveStatus } from '../../types';
 
 const Notes = wrapIcon(FileIcon);
 const Edit = wrapIcon(EditIcon);
-const BellRing = wrapIcon(NotificationIcon);
 const More = wrapIcon(EllipsisIcon);
 const Search = wrapIcon(SearchIcon);
 const Plus = wrapIcon(AddIcon);
@@ -27,6 +25,7 @@ export interface DocumentHeaderProps {
   doc: Document;
   saveStatus: DocumentSaveStatus;
   readOnly: boolean;
+  permissionReadOnly: boolean;
   onReadOnlyChange: (readOnly: boolean) => void;
   onRetrySave?: () => void;
   onReloadConflict?: () => void;
@@ -76,6 +75,7 @@ export default function DocumentHeader({
   doc,
   saveStatus,
   readOnly,
+  permissionReadOnly,
   onReadOnlyChange,
   onRetrySave,
   onReloadConflict,
@@ -103,8 +103,12 @@ export default function DocumentHeader({
   }, []);
 
   const handleShare = async () => {
-    await navigator.clipboard.writeText(window.location.href);
-    void MessagePlugin.success('分享链接已复制');
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      void MessagePlugin.success('文档链接已复制');
+    } catch {
+      void MessagePlugin.warning('无法访问剪贴板，请从地址栏复制链接');
+    }
   };
 
   const handleDelete = async () => {
@@ -225,9 +229,6 @@ export default function DocumentHeader({
               <span className="bc-sep bc-sep-current">&gt;</span>
               <span className="bc-current">
                 <span className="bc-current-title">{displayTitle(doc)}</span>
-                <button type="button" className="header-pin-btn" title="置顶">
-                  <IconChatPinOutlined size={16} color="currentColor" />
-                </button>
               </span>
             </nav>
             <div className="header-row-meta">
@@ -250,7 +251,7 @@ export default function DocumentHeader({
                       ? '版本冲突，点击刷新'
                   : saveStatus === 'error'
                     ? '保存失败'
-                    : '已保存到云端'}
+                    : '已保存'}
               </button>
             </div>
           </div>
@@ -293,17 +294,21 @@ export default function DocumentHeader({
 
           <button type="button" className="btn-share" onClick={() => void handleShare()}>
             <Notes theme="outline" size={14} strokeWidth={3} fill="#ffffff" />
-            <span className="header-btn-label">分享</span>
+            <span className="header-btn-label">复制链接</span>
           </button>
 
-          <button type="button" className="btn-edit-mode" onClick={() => onReadOnlyChange(!readOnly)}>
+          <button
+            type="button"
+            className="btn-edit-mode"
+            disabled={permissionReadOnly}
+            title={permissionReadOnly ? '此文档由来源权限设为只读' : '切换编辑/阅读模式'}
+            onClick={() => {
+              if (!permissionReadOnly) onReadOnlyChange(!readOnly);
+            }}
+          >
             <Edit theme="outline" size={14} strokeWidth={3} fill="#646a73" className="mode-icon" />
-            <span className="header-btn-label">{readOnly ? '阅读' : '编辑'}</span>
-            <span className="mode-arrow">▾</span>
-          </button>
-
-          <button type="button" className="header-icon-btn header-notification-btn" title="通知">
-            <BellRing theme="outline" size={18} strokeWidth={3} fill="#646a73" />
+            <span className="header-btn-label">{permissionReadOnly ? '只读' : readOnly ? '阅读' : '编辑'}</span>
+            {!permissionReadOnly && <span className="mode-arrow">▾</span>}
           </button>
 
           <div className="more-menu-wrapper" ref={moreMenuRef}>

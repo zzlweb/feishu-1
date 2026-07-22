@@ -340,6 +340,12 @@
           .doc-row-more { opacity: 1; }
         }
 
+        &:focus-visible {
+          outline: 2px solid @primary;
+          outline-offset: -2px;
+          background: @bg-hover;
+        }
+
         td {
           padding: 12px;
           font-size: 14px;
@@ -484,6 +490,13 @@
         .doc-grid-card__more {
           opacity: 1;
         }
+      }
+
+      &:focus-visible {
+        outline: 2px solid @primary;
+        outline-offset: 2px;
+        border-color: @primary;
+        box-shadow: @shadow-md;
       }
     }
 

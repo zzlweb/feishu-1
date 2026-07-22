@@ -3,17 +3,14 @@ import { bindFloatingLayoutListeners } from '../Editor/shared/floatingPanel';
 import { useNavigate } from 'react-router-dom';
 import { Button, Dialog, Input, Loading, MessagePlugin } from 'tdesign-react';
 import {
-  AppIcon,
   ComponentGridIcon,
   DeleteIcon,
   EllipsisIcon,
   FileAddIcon,
   FilterIcon,
-  NotificationIcon,
   SearchIcon,
   TemplateIcon,
   UploadIcon,
-  UserIcon,
   ViewListIcon,
 } from 'tdesign-icons-react';
 import {
@@ -29,7 +26,8 @@ import {
 import type { Document, ImportDocumentResult, Template } from '../../types';
 import './DocumentList.less';
 
-const TABS = ['最近访问', '归我所有', '与我共享', '收藏'];
+// Shared documents are not exposed until a real sharing/permission model exists.
+const TABS = ['最近访问', '归我所有', '收藏'];
 const CURRENT_USER = '张正人';
 const SUPPORTED_IMPORT_EXTENSIONS = new Set(['zip', 'html', 'htm', 'md', 'markdown', 'txt', 'csv', 'log']);
 
@@ -272,8 +270,7 @@ export default function DocumentList() {
   const visibleDocs = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = documents.filter(doc => {
-      if (activeTab === 2) return false;
-      if (activeTab === 3 && !favorites.has(doc.id)) return false;
+      if (activeTab === 2 && !favorites.has(doc.id)) return false;
       if (q && !`${doc.title} ${doc.author}`.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -562,15 +559,6 @@ export default function DocumentList() {
               onChange={value => setQuery(String(value))}
             />
           </div>
-          <button type="button" className="header-icon-btn" title="联系人">
-            <UserIcon size="16px" />
-          </button>
-          <button type="button" className="header-icon-btn" title="通知">
-            <NotificationIcon size="16px" />
-          </button>
-          <button type="button" className="header-icon-btn" title="应用">
-            <AppIcon size="16px" />
-          </button>
           <div className="user-avatar">{CURRENT_USER.charAt(0)}</div>
         </div>
       </header>
@@ -686,7 +674,7 @@ export default function DocumentList() {
             <div className="doc-empty-icon">
               <FileAddIcon size="48px" />
             </div>
-            <p>{query || activeTab === 3 ? '没有匹配的文档' : '暂无文档'}</p>
+            <p>{query || activeTab === 2 ? '没有匹配的文档' : '暂无文档'}</p>
             <Button theme="primary" onClick={() => void handleCreate()}>
               创建第一个文档
             </Button>
@@ -707,7 +695,16 @@ export default function DocumentList() {
               {visibleDocs.map(doc => (
                 <tr
                   key={doc.id}
+                  role="link"
+                  tabIndex={0}
+                  aria-label={`打开文档：${getDocTitle(doc)}`}
                   onClick={() => navigate(`/doc/${doc.id}`)}
+                  onKeyDown={event => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    navigate(`/doc/${doc.id}`);
+                  }}
                   onContextMenu={event => openRowMenu(event, doc.id)}
                 >
                   <td className="col-title">
@@ -742,7 +739,16 @@ export default function DocumentList() {
               <article
                 key={doc.id}
                 className="doc-grid-card"
+                role="link"
+                tabIndex={0}
+                aria-label={`打开文档：${getDocTitle(doc)}`}
                 onClick={() => navigate(`/doc/${doc.id}`)}
+                onKeyDown={event => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  navigate(`/doc/${doc.id}`);
+                }}
                 onContextMenu={event => openRowMenu(event, doc.id)}
               >
                 <div className="doc-grid-card__preview">

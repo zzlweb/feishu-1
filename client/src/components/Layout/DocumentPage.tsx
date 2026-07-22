@@ -77,7 +77,7 @@ export default function DocumentPage() {
   const [loading, setLoading] = useState(true);
   const [headings, setHeadings] = useState<HeadingItem[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [readOnly, setReadOnly] = useState(false);
+  const [readingMode, setReadingMode] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentSidebarVisible, setCommentSidebarVisible] = useState(false);
   const [bitableCommentActive, setBitableCommentActive] = useState(false);
@@ -185,7 +185,9 @@ export default function DocumentPage() {
           setRecoverableDraft(null);
           setDoc(res.data);
         }
-        setReadOnly(Boolean(res.data.read_only));
+        // Server-enforced read-only is a permission boundary, not a UI mode.
+        // Reset only the user's temporary reading mode when navigating.
+        setReadingMode(false);
       } else {
         navigate('/');
       }
@@ -559,13 +561,17 @@ export default function DocumentPage() {
 
   if (!doc) return null;
 
+  const permissionReadOnly = Boolean(doc.read_only);
+  const readOnly = permissionReadOnly || readingMode;
+
   return (
     <div className={`doc-page${commentSidebarOpen ? ' doc-page--comment-open' : ''}`}>
       <DocumentHeader
         doc={doc}
         saveStatus={saveStatus}
         readOnly={readOnly}
-        onReadOnlyChange={setReadOnly}
+        permissionReadOnly={permissionReadOnly}
+        onReadOnlyChange={setReadingMode}
         onRetrySave={retrySave}
         onReloadConflict={() => window.location.reload()}
       />
