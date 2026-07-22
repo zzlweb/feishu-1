@@ -31,10 +31,10 @@
 
 - 不恢复飞书私有 block、权限和评论。
 - 独立 Markdown/HTML 引用的本地图片必须与正文一起打包为 ZIP 才能恢复。
-- 公开链接导入的逐跳 SSRF 防护和服务端取消清理仍是后续安全任务。
+- 公开链接导入已具备逐跳 SSRF 防护；服务端断连后的临时资源清理仍是后续任务。
 
 ## 自动化
 
 - `server/tests/api.test.ts`：ZIP 图片恢复、Markdown 结构与主动内容清洗、异常压缩比拒绝。
 - Client/Server production build 与 Client unit suite。
-- 后续补充浏览器导入进度、取消和结果对话框 E2E。
+- `document-import-cancel.spec.ts` 覆盖浏览器导入取消、重复提交阻断和取消后再次成功导入。

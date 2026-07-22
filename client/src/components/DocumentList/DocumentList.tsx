@@ -344,7 +344,11 @@ export default function DocumentList() {
   }, []);
 
   const cancelFileImport = () => {
-    fileImportControllerRef.current?.abort();
+    const controller = fileImportControllerRef.current;
+    fileImportControllerRef.current = null;
+    controller?.abort();
+    setIsImportingFile(false);
+    setFileImportProgress(0);
   };
 
   const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -355,6 +359,8 @@ export default function DocumentList() {
   };
 
   const handleImportFeishuUrl = async () => {
+    if (isImportingUrl) return;
+
     if (feishuImportResult?.document) {
       setFeishuImportVisible(false);
       navigate(`/doc/${feishuImportResult.document.id}`);
@@ -823,7 +829,7 @@ export default function DocumentList() {
             value={feishuImportUrl}
             placeholder="https://xxx.feishu.cn/wiki/..."
             clearable
-            disabled={Boolean(feishuImportResult)}
+            disabled={isImportingUrl || Boolean(feishuImportResult)}
             onChange={value => setFeishuImportUrl(String(value))}
             onEnter={() => void handleImportFeishuUrl()}
           />
@@ -834,7 +840,7 @@ export default function DocumentList() {
             <input
               type="checkbox"
               checked={saveImportedAsTemplate}
-              disabled={Boolean(feishuImportResult)}
+              disabled={isImportingUrl || Boolean(feishuImportResult)}
               onChange={event => setSaveImportedAsTemplate(event.target.checked)}
             />
             同时保存为模板
