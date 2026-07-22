@@ -200,9 +200,10 @@ export default function ContextMenu({
   onMouseEnterCancel,
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const alignTriggerRef = useRef<HTMLDivElement>(null);
-  const colorTriggerRef = useRef<HTMLDivElement>(null);
-  const addBelowTriggerRef = useRef<HTMLDivElement>(null);
+  const alignTriggerRef = useRef<HTMLButtonElement>(null);
+  const colorTriggerRef = useRef<HTMLButtonElement>(null);
+  const addBelowTriggerRef = useRef<HTMLButtonElement>(null);
+  const alignFlyoutRef = useRef<HTMLDivElement>(null);
   const addBelowFlyoutRef = useRef<HTMLDivElement>(null);
   const colorFlyoutRef = useRef<HTMLDivElement>(null);
   const [gridTooltip, setGridTooltip] = useState<{ item: GridRowDef; rect: DOMRect } | null>(null);
@@ -283,11 +284,67 @@ export default function ContextMenu({
         : addBelowTriggerRef.current;
 
   const resolveFlyoutPanelRef = (kind: 'align' | 'color' | 'below') =>
-    kind === 'color' ? colorFlyoutRef : kind === 'below' ? addBelowFlyoutRef : null;
+    kind === 'align' ? alignFlyoutRef : kind === 'color' ? colorFlyoutRef : addBelowFlyoutRef;
 
   const openFlyout = (kind: 'align' | 'color' | 'below', triggerEl: HTMLElement) => {
     setActiveFlyout({ kind, rect: triggerEl.getBoundingClientRect() });
   };
+
+  const openFlyoutFromKeyboard = (kind: 'align' | 'color' | 'below', triggerEl: HTMLElement) => {
+    openFlyout(kind, triggerEl);
+    window.requestAnimationFrame(() => {
+      resolveFlyoutPanelRef(kind).current?.querySelector<HTMLElement>('button:not(:disabled), [tabindex]:not([tabindex="-1"])')?.focus();
+    });
+  };
+
+  const focusSibling = (root: HTMLElement, current: HTMLElement, direction: 1 | -1) => {
+    const items = Array.from(root.querySelectorAll<HTMLElement>('button:not(:disabled), [role="menuitem"]:not([aria-disabled="true"])'))
+      .filter(item => item.getClientRects().length > 0);
+    const currentIndex = items.indexOf(current);
+    if (!items.length) return;
+    items[(currentIndex + direction + items.length) % items.length]?.focus();
+  };
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      focusSibling(event.currentTarget, target, event.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (event.key !== 'ArrowRight') return;
+    const kind = target.dataset.submenuKind as 'align' | 'color' | 'below' | undefined;
+    if (!kind) return;
+    event.preventDefault();
+    openFlyoutFromKeyboard(kind, target);
+  };
+
+  const handleFlyoutKeyDown = (kind: 'align' | 'color' | 'below', event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape' || event.key === 'ArrowLeft') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeActiveFlyout();
+      window.requestAnimationFrame(() => resolveFlyoutTriggerEl(kind)?.focus());
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      focusSibling(event.currentTarget, event.target as HTMLElement, event.key === 'ArrowDown' ? 1 : -1);
+    }
+  };
+
+  useEffect(() => {
+    if (!posVisible) return;
+    const frame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector<HTMLElement>('button:not(:disabled), [role="menuitem"]')?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [posVisible]);
 
   useLayoutEffect(() => {
     if (!activeFlyout || !posVisible) {
@@ -551,11 +608,15 @@ export default function ContextMenu({
 
   const alignFlyoutPanel = (
     <div
+      ref={alignFlyoutRef}
       className="context-submenu-flyout context-align-flyout"
+      role="menu"
+      aria-label="缩进和对齐"
       style={flyoutFixedStyle}
       onPointerEnter={keepHoverAlive}
       onMouseLeave={handleFlyoutMouseLeave}
       onMouseDown={e => e.preventDefault()}
+      onKeyDown={event => handleFlyoutKeyDown('align', event)}
     >
       {ALIGN_OPTIONS.map(a => {
         const active = currentAlign === a.value;
@@ -616,10 +677,13 @@ export default function ContextMenu({
     <div
       ref={colorFlyoutRef}
       className="context-submenu-flyout context-color-flyout"
+      role="menu"
+      aria-label="颜色"
       style={flyoutFixedStyle}
       onPointerEnter={keepHoverAlive}
       onMouseLeave={handleFlyoutMouseLeave}
       onMouseDown={e => e.preventDefault()}
+      onKeyDown={event => handleFlyoutKeyDown('color', event)}
     >
       <FeishuColorPickerPanel
         editor={editor}
@@ -633,6 +697,8 @@ export default function ContextMenu({
     <div
       ref={addBelowFlyoutRef}
       className="slash-menu slash-menu-feishu context-add-below-flyout"
+      role="menu"
+      aria-label="在下方添加"
       style={{
         ...flyoutFixedStyle,
         maxHeight: clampFlyoutHeight(ADD_BELOW_FLYOUT_MAX_HEIGHT),
@@ -641,6 +707,7 @@ export default function ContextMenu({
       onPointerEnter={keepHoverAlive}
       onMouseLeave={handleFlyoutMouseLeave}
       onMouseDown={e => e.preventDefault()}
+      onKeyDown={event => handleFlyoutKeyDown('below', event)}
     >
       <AddBelowSlashSections
         onPickItem={(sectionTitle, item) => {
@@ -676,6 +743,8 @@ export default function ContextMenu({
     <div
       ref={menuRef}
       className="context-menu context-menu-feishu"
+      role="menu"
+      aria-label="块操作"
       style={{
         position: 'fixed',
         left: finalPos.x,
@@ -686,6 +755,7 @@ export default function ContextMenu({
       onPointerEnter={keepHoverAlive}
       onMouseLeave={e => { hideGridTooltip(); handleShellMouseLeave(e); }}
       onScroll={hideGridTooltip}
+      onKeyDown={handleMenuKeyDown}
     >
         <div className="context-menu-scroll">
           <div
@@ -700,6 +770,8 @@ export default function ContextMenu({
                   <button
                     key={`grid-${item.type}-${item.value}`}
                     type="button"
+                    role="menuitem"
+                    aria-label={item.label}
                     className={`context-block-btn ${active ? 'active' : ''}`}
                     title={hasGridTooltip(item) ? undefined : item.label}
                     onMouseEnter={e => { if (hasGridTooltip(item)) showGridTooltip(item, e.currentTarget); }}
@@ -715,9 +787,14 @@ export default function ContextMenu({
 
           <div className="context-menu-divider" />
 
-          <div
+          <button
+            type="button"
             ref={alignTriggerRef}
             className={`context-menu-item has-submenu${activeFlyout?.kind === 'align' ? ' is-submenu-open' : ''}`}
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={activeFlyout?.kind === 'align'}
+            data-submenu-kind="align"
             onPointerEnter={e => {
               keepHoverAlive();
               openFlyout('align', e.currentTarget);
@@ -731,11 +808,16 @@ export default function ContextMenu({
             <span className="context-menu-icon"><ContextGlyphTypography size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>缩进和对齐</span>
             <span className="context-menu-arrow-feishu"><IconChevronMenuEnd size={14} /></span>
-          </div>
+          </button>
 
-          <div
+          <button
+            type="button"
             ref={colorTriggerRef}
             className={`context-menu-item has-submenu${activeFlyout?.kind === 'color' ? ' is-submenu-open' : ''}`}
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={activeFlyout?.kind === 'color'}
+            data-submenu-kind="color"
             onPointerEnter={e => {
               keepHoverAlive();
               openFlyout('color', e.currentTarget);
@@ -749,21 +831,21 @@ export default function ContextMenu({
             <span className="context-menu-icon"><ContextGlyphStyleColor size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>颜色</span>
             <span className="context-menu-arrow-feishu"><IconChevronMenuEnd size={14} /></span>
-          </div>
+          </button>
 
           <div className="context-menu-divider" />
 
-          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleCut}>
+          <button type="button" role="menuitem" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleCut}>
             <span className="context-menu-icon"><ContextGlyphCut size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>剪切</span>
             <span className="context-menu-shortcut">Ctrl+X</span>
           </button>
-          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleCopy}>
+          <button type="button" role="menuitem" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleCopy}>
             <span className="context-menu-icon"><ContextGlyphCopy size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>复制</span>
             <span className="context-menu-shortcut">Ctrl+C</span>
           </button>
-          <button type="button" className="context-menu-item context-menu-item--danger" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleDelete}>
+          <button type="button" role="menuitem" className="context-menu-item context-menu-item--danger" onPointerEnter={handlePlainMenuZoneEnter} onClick={handleDelete}>
             <span className="context-menu-icon"><ContextGlyphDelete size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>删除</span>
             <span className="context-menu-shortcut">Del</span>
@@ -771,28 +853,33 @@ export default function ContextMenu({
 
           <div className="context-menu-divider" />
 
-          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleShare()}>
+          <button type="button" role="menuitem" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleShare()}>
             <span className="context-menu-icon"><ContextGlyphShare size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>复制文档链接</span>
           </button>
-          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleConvertToChild()}>
+          <button type="button" role="menuitem" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleConvertToChild()}>
             <span className="context-menu-icon context-menu-icon--subdoc"><SlashGlyphSubDoc size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>转换为子文档</span>
           </button>
-          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleSaveTemplate()}>
+          <button type="button" role="menuitem" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleSaveTemplate()}>
             <span className="context-menu-icon"><ContextGlyphTemplate size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>保存为模板</span>
           </button>
-          <button type="button" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleCopyBlockLink()}>
+          <button type="button" role="menuitem" className="context-menu-item" onPointerEnter={handlePlainMenuZoneEnter} onClick={() => void handleCopyBlockLink()}>
             <span className="context-menu-icon"><ContextGlyphBlockLink size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>复制链接</span>
           </button>
 
           <div className="context-menu-divider" />
 
-          <div
+          <button
+            type="button"
             ref={addBelowTriggerRef}
             className={`context-menu-item has-submenu${activeFlyout?.kind === 'below' ? ' is-submenu-open' : ''}`}
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={activeFlyout?.kind === 'below'}
+            data-submenu-kind="below"
             onPointerEnter={e => {
               keepHoverAlive();
               openFlyout('below', e.currentTarget);
@@ -806,7 +893,7 @@ export default function ContextMenu({
             <span className="context-menu-icon"><ContextGlyphAddBelow size={18} fill={ICON_MUTED} /></span>
             <span style={{ flex: 1 }}>在下方添加</span>
             <span className="context-menu-arrow-feishu"><IconChevronMenuEnd size={14} /></span>
-          </div>
+          </button>
         </div>
       </div>
   );

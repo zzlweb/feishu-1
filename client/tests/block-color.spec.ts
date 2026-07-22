@@ -44,3 +44,35 @@ test('applies font color from block context menu', async ({ page }) => {
 
   await expect(paragraph.locator('span[style*="color"]')).toHaveCSS('color', 'rgb(216, 57, 49)');
 });
+
+test('opens and exits block submenus with the keyboard', async ({ page }) => {
+  await page.goto('/doc/block-color-e2e');
+
+  const paragraph = page.locator('.ProseMirror p').first();
+  await paragraph.hover();
+  await page.locator('.block-drag-row').first().hover();
+
+  const contextMenu = page.getByRole('menu', { name: '块操作' });
+  await expect(contextMenu).toBeVisible();
+  const colorTrigger = contextMenu.getByRole('menuitem', { name: '颜色' });
+  await colorTrigger.focus();
+  await page.keyboard.press('ArrowRight');
+
+  const colorFlyout = page.getByRole('menu', { name: '颜色' });
+  await expect(colorFlyout).toBeVisible();
+  await expect(colorTrigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(colorFlyout.locator('button').first()).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(colorFlyout).toHaveCount(0);
+  await expect(colorTrigger).toBeFocused();
+
+  const addBelowTrigger = contextMenu.getByRole('menuitem', { name: '在下方添加' });
+  await addBelowTrigger.focus();
+  await page.keyboard.press('ArrowRight');
+  const addBelowFlyout = page.getByRole('menu', { name: '在下方添加' });
+  await expect(addBelowFlyout).toBeVisible();
+  await page.keyboard.press('ArrowLeft');
+  await expect(addBelowFlyout).toHaveCount(0);
+  await expect(addBelowTrigger).toBeFocused();
+});
