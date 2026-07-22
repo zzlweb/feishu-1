@@ -488,6 +488,34 @@ test('opens record modal on card click and supports multi selection', async ({ p
   await expect(page.locator('.base-gallery-card.is-selected')).toHaveCount(0);
 });
 
+test('supports keyboard focus, open and range selection on gallery cards', async ({ page }) => {
+  await openGallery(page);
+
+  const cards = page.locator('.base-gallery-card');
+  const firstCard = cards.first();
+  await firstCard.focus();
+  await expect(firstCard).toBeFocused();
+  await expect(firstCard).toHaveAttribute('role', 'button');
+  await expect(firstCard).toHaveAttribute('aria-label', '记录：产品 A');
+
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.bitable-record-card-mask')).toBeVisible();
+  await expect(page.locator('.bitable-card-modal-header-v2-title')).toContainText('产品 A');
+  await page.keyboard.press('Escape');
+
+  await firstCard.focus();
+  await page.keyboard.press('Space');
+  await expect(firstCard).toHaveAttribute('aria-pressed', 'false');
+  await cards.nth(1).focus();
+  await page.keyboard.press('Space');
+  await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await cards.nth(2).focus();
+  await page.keyboard.press('Shift+Space');
+  await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(cards.nth(2)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.bitable-record-card-mask')).toHaveCount(0);
+});
+
 test('locks gallery view configuration controls', async ({ page }) => {
   await openGallery(page);
   await page.getByRole('button', { name: '画册设置' }).click();

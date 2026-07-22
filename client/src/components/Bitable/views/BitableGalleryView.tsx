@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   getAttachments,
@@ -142,9 +142,38 @@ function GalleryCard({
   const visibleFieldIds = resolveGalleryVisibleFieldIds(table.fields, table.primaryFieldId, config);
   const isCompact = config.cardLayoutMode === 'compact';
 
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      onOpenRecord(record.id, {
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+      });
+      return;
+    }
+    if (event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      onOpenRecord(record.id, {
+        // Space follows selectable-card semantics: toggle one card, or extend
+        // the current range with Shift, without opening the record dialog.
+        ctrlKey: !event.shiftKey,
+        metaKey: false,
+        shiftKey: event.shiftKey,
+      });
+    }
+  };
+
   return (
     <article
       className={`base-gallery-card${selected ? ' is-selected' : ''}${isCompact ? ' is-compact' : ''}`}
+      role="button"
+      tabIndex={0}
+      aria-label={`记录：${title}`}
+      aria-pressed={selected}
       onMouseDown={stopPointer}
       onClick={event => {
         event.stopPropagation();
@@ -154,6 +183,7 @@ function GalleryCard({
           shiftKey: event.shiftKey,
         });
       }}
+      onKeyDown={handleKeyDown}
       onContextMenu={onContextMenu}
       onDragOver={onDragOver}
       onDrop={onDrop}
