@@ -851,6 +851,10 @@
   user-select: none;
   transition: background-color 0.12s ease;
 
+  &[data-reorder-disabled='true'] {
+    cursor: not-allowed;
+  }
+
   &--col {
     top: 0;
     bottom: 0;
@@ -949,6 +953,12 @@
   &--col {
     width: 3px;
     margin-left: -1.5px;
+    border-radius: 2px;
+  }
+
+  &--row {
+    height: 3px;
+    margin-top: -1.5px;
     border-radius: 2px;
   }
 

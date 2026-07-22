@@ -454,6 +454,17 @@ function getSimpleTableDimensions(table: ProseNode): { rows: number; cols: numbe
   return { rows: table.childCount, cols };
 }
 
+export const TABLE_REORDER_BLOCKED_REASON = '含合并单元格的表格暂不支持调整整行或整列位置，请先拆分单元格';
+
+/**
+ * Row/column reordering copies whole ProseMirror row/cell nodes. That operation
+ * is only structure-safe for a rectangular table without rowspan/colspan.
+ */
+export function getTableReorderBlockedReason(table: ProseNode | null): string | null {
+  if (!table || table.type.name !== 'table') return '当前表格结构不可调整';
+  return getSimpleTableDimensions(table) ? null : TABLE_REORDER_BLOCKED_REASON;
+}
+
 function moveArrayItem<T>(items: T[], fromIndex: number, targetIndex: number): { items: T[]; movedIndex: number } | null {
   if (fromIndex < 0 || fromIndex >= items.length) return null;
   const safeTarget = Math.max(0, Math.min(targetIndex, items.length));

@@ -188,7 +188,7 @@ test('inserts and deletes rows and columns from a cell selection toolbar', async
   await expect(page.locator('td[data-table-cell="true"]', { hasText: 'Theta' })).toHaveCount(0);
 });
 
-test('does not reorder rows when dragging the row rail', async ({ page }) => {
+test('reorders rows by dragging the row rail', async ({ page }) => {
   await openRichTable(page);
 
   const host = page.locator('.feishu-table-host, .tableWrapper').first();
@@ -202,11 +202,36 @@ test('does not reorder rows when dragging the row rail', async ({ page }) => {
 
   await page.mouse.move(firstBox!.x + firstBox!.width / 2, firstBox!.y + firstBox!.height / 2);
   await page.mouse.down();
-  await page.mouse.move(thirdBox!.x + thirdBox!.width / 2, thirdBox!.y + thirdBox!.height / 2, { steps: 8 });
+  await page.mouse.move(thirdBox!.x + thirdBox!.width / 2, thirdBox!.y + thirdBox!.height - 2, { steps: 8 });
   await page.mouse.up();
 
-  await expect(page.locator('td[data-table-cell="true"]').first()).toContainText('Alpha');
+  await expect(page.locator('td[data-table-cell="true"]').first()).toContainText('Delta');
+  await expect(page.locator('tr[data-row-index]').last()).toContainText('Alpha');
   await expect(page.locator('.feishu-table-chrome__drag-line--row')).toHaveCount(0);
+});
+
+test('explains why merged tables cannot be reordered', async ({ page }) => {
+  await openRichTable(page);
+  await dragCellRange(page, 0, 4);
+  await page.locator('.feishu-table-selection-toolbar button[title="合并单元格"]').first().click();
+
+  const host = page.locator('.feishu-table-host, .tableWrapper').first();
+  await host.hover();
+  const firstColumnRail = page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--col').first();
+  await expect(firstColumnRail).toHaveAttribute('data-reorder-disabled', 'true');
+  await expect(firstColumnRail).toHaveAttribute('title', /合并单元格/);
+
+  const railBox = await firstColumnRail.boundingBox();
+  expect(railBox).not.toBeNull();
+  await page.mouse.move(railBox!.x + railBox!.width / 2, railBox!.y + railBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(railBox!.x + railBox!.width + 80, railBox!.y + railBox!.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.getByText(/含合并单元格的表格暂不支持调整/).last()).toBeVisible();
+  await expect(page.locator('td[data-table-cell="true"]').first()).toHaveAttribute('rowspan', '2');
+  await expect(page.locator('td[data-table-cell="true"]').first()).toContainText('Alpha');
+  await expect(page.locator('.feishu-table-chrome__drag-line--col')).toHaveCount(0);
 });
 
 test('clips a selected column outline to the horizontal table viewport', async ({ page }) => {

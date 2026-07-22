@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/react';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type Ref } from 'react';
 import { createPortal } from 'react-dom';
+import { MessagePlugin } from 'tdesign-react';
 import { SlashGlyphTable } from '../../../icons/slashMenuGlyphs';
 import { IconAddOutlined, IconDragOutlined } from '../../../icons/feishuDoc';
 import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
@@ -23,7 +24,9 @@ import {
 import {
   insertTableColumnAtBoundary,
   insertTableRowAtBoundary,
+  getTableReorderBlockedReason,
   moveTableColumn,
+  moveTableRow,
   selectTableNodeFromHost,
   setTableColumnWidth,
   setTableRowHeight,
@@ -188,7 +191,7 @@ function isSameTableLayout(a: TableLayout | null, b: TableLayout | null): boolea
 }
 
 type SelectedRail = 'col' | 'row' | null;
-type RailDragPreview = { kind: 'col'; from: number; target: number; active: boolean } | null;
+type RailDragPreview = { kind: 'col' | 'row'; from: number; target: number; active: boolean } | null;
 type ColumnResizePreview = { colIndex: number; x: number; active: boolean } | null;
 type RowResizePreview = { rowIndex: number; y: number; active: boolean } | null;
 type CellHandleState = TableCellHandleState | null;
@@ -566,14 +569,20 @@ function FeishuTableOverlay({
   );
 
   const beginRailDrag = useCallback(
-    (index: number, e: ReactPointerEvent<HTMLDivElement>) => {
+    (kind: 'col' | 'row', index: number, e: ReactPointerEvent<HTMLDivElement>) => {
       if (!layout) return;
       e.preventDefault();
       e.stopPropagation();
       e.currentTarget.setPointerCapture?.(e.pointerId);
       activateTableChrome();
       clearHover();
-      selectColumn(index);
+      if (kind === 'col') selectColumn(index);
+      else selectRow(index);
+
+      const tablePosAtStart = getTablePosFromHost(editor, tableHost);
+      const reorderBlockedReason = tablePosAtStart == null
+        ? '当前表格结构不可调整'
+        : getTableReorderBlockedReason(editor.state.doc.nodeAt(tablePosAtStart));
 
       const pointerId = e.pointerId;
       const targetEl = e.currentTarget;
@@ -582,11 +591,14 @@ function FeishuTableOverlay({
       let dragging = false;
       let latestTarget = index + 1;
       let previewActive = false;
+      let blockedMessageShown = false;
 
       const resolveTarget = (event: PointerEvent) => {
         const mountRect = getTableChromeMountFromHost(tableHost).getBoundingClientRect();
-        const coordinate = event.clientX - mountRect.left;
-        return findNearestBoundary(layout.colBounds, coordinate);
+        const coordinate = kind === 'col'
+          ? event.clientX - mountRect.left
+          : event.clientY - mountRect.top;
+        return findNearestBoundary(kind === 'col' ? layout.colBounds : layout.rowBounds, coordinate);
       };
 
       const onPointerMove = (event: PointerEvent) => {
@@ -594,11 +606,18 @@ function FeishuTableOverlay({
         const distance = Math.hypot(event.clientX - startX, event.clientY - startY);
         if (!dragging && distance < DRAG_THRESHOLD) return;
         dragging = true;
+        if (reorderBlockedReason) {
+          if (!blockedMessageShown) {
+            blockedMessageShown = true;
+            void MessagePlugin.warning(reorderBlockedReason);
+          }
+          return;
+        }
         const nextTarget = resolveTarget(event);
         if (nextTarget !== latestTarget || !previewActive) {
           latestTarget = nextTarget;
           previewActive = true;
-          setRailDragPreview({ kind: 'col', from: index, target: nextTarget, active: true });
+          setRailDragPreview({ kind, from: index, target: nextTarget, active: true });
         }
       };
 
@@ -621,15 +640,19 @@ function FeishuTableOverlay({
           return;
         }
 
+        if (reorderBlockedReason) return;
         const tablePos = getTablePosFromHost(editor, tableHost);
         if (tablePos == null) return;
-        const movedIndex = moveTableColumn(editor, tablePos, index, latestTarget);
+        const movedIndex = kind === 'col'
+          ? moveTableColumn(editor, tablePos, index, latestTarget)
+          : moveTableRow(editor, tablePos, index, latestTarget);
 
         if (movedIndex == null) return;
         suppressSelectionClearRef.current = true;
         remeasureSoon();
         window.requestAnimationFrame(() => {
-          selectColumn(movedIndex);
+          if (kind === 'col') selectColumn(movedIndex);
+          else selectRow(movedIndex);
           window.setTimeout(() => {
             suppressSelectionClearRef.current = false;
           }, 120);
@@ -647,6 +670,7 @@ function FeishuTableOverlay({
       layout,
       remeasureSoon,
       selectColumn,
+      selectRow,
       tableHost,
     ],
   );
@@ -1060,6 +1084,10 @@ function FeishuTableOverlay({
   } = layout;
 
   const suppressInsertChrome = pinnedRail != null;
+  const renderTablePos = getTablePosFromHost(editor, tableHost);
+  const reorderBlockedReason = renderTablePos == null
+    ? null
+    : getTableReorderBlockedReason(editor.state.doc.nodeAt(renderTablePos));
 
   const visibleLeft = surfaceOffsetLeft;
   const visibleWidth = viewportWidth;
@@ -1182,11 +1210,13 @@ function FeishuTableOverlay({
               }`}
               data-no-marquee-selection="true"
               data-table-axis-handle="true"
+              data-reorder-disabled={reorderBlockedReason ? 'true' : undefined}
+              title={reorderBlockedReason ?? '拖动调整整列位置'}
               style={{
                 left: clampedLeft - visibleLeft,
                 width: clampedRight - clampedLeft,
               }}
-              onPointerDown={e => beginRailDrag(i, e)}
+              onPointerDown={e => beginRailDrag('col', i, e)}
               onMouseEnter={() => {
                 if (suppressInsertChrome) return;
                 setHoverCol(null);
@@ -1264,17 +1294,13 @@ function FeishuTableOverlay({
               }`}
               data-no-marquee-selection="true"
               data-table-axis-handle="true"
+              data-reorder-disabled={reorderBlockedReason ? 'true' : undefined}
+              title={reorderBlockedReason ?? '拖动调整整行位置'}
               style={{
                 top: y - tableOffsetTop,
                 height: rowBounds[i + 1] - y,
               }}
-              onPointerDown={e => {
-                e.preventDefault();
-                e.stopPropagation();
-                activateTableChrome();
-                clearHover();
-                selectRow(i);
-              }}
+              onPointerDown={e => beginRailDrag('row', i, e)}
               onMouseEnter={() => {
                 if (suppressInsertChrome) return;
                 setHoverRow(null);
@@ -1361,6 +1387,19 @@ function FeishuTableOverlay({
             left: colBounds[railDragPreview.target],
             top: tableOffsetTop,
             height: tableHeight,
+          }}
+        />
+      )}
+
+      {railDragPreview?.active
+        && railDragPreview.kind === 'row'
+        && rowBounds[railDragPreview.target] != null && (
+        <div
+          className="feishu-table-chrome__drag-line feishu-table-chrome__drag-line--row"
+          style={{
+            left: tableOffsetLeft,
+            top: rowBounds[railDragPreview.target],
+            width: tableWidth,
           }}
         />
       )}
