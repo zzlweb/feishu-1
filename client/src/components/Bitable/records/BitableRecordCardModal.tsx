@@ -783,6 +783,66 @@ function SelectFieldEditor({
   );
 }
 
+function StagedTextFieldEditor({
+  field,
+  value,
+  disabled,
+  onChange,
+}: {
+  field: BaseField;
+  value: CellValue;
+  disabled?: boolean;
+  onChange: (value: CellValue) => void;
+}) {
+  const text = valueText(value);
+  const [draft, setDraft] = useState(text);
+  const committedRef = useRef(text);
+  const skipBlurCommitRef = useRef(false);
+
+  useEffect(() => {
+    committedRef.current = text;
+    setDraft(text);
+  }, [field.id, text]);
+
+  const commit = () => {
+    if (draft === committedRef.current) return;
+    committedRef.current = draft;
+    onChange(draft);
+  };
+
+  return (
+    <div className="bitable-card-field-value bitable-card-field-value--tdesign">
+      <Input
+        className="bitable-card-tdesign-control"
+        borderless
+        value={draft}
+        disabled={disabled}
+        placeholder={fieldPlaceholder(field)}
+        onChange={nextValue => setDraft(String(nextValue))}
+        onEnter={(_value, context) => {
+          commit();
+          (context.e.target as HTMLInputElement).blur();
+        }}
+        onBlur={() => {
+          if (skipBlurCommitRef.current) {
+            skipBlurCommitRef.current = false;
+            return;
+          }
+          commit();
+        }}
+        onKeydown={(_value, context) => {
+          if (context.e.key !== 'Escape') return;
+          context.e.preventDefault();
+          context.e.stopPropagation();
+          skipBlurCommitRef.current = true;
+          setDraft(committedRef.current);
+          (context.e.target as HTMLInputElement).blur();
+        }}
+      />
+    </div>
+  );
+}
+
 function CardFieldEditor({
   field,
   record,
@@ -853,18 +913,13 @@ function CardFieldEditor({
     );
   }
 
-  const text = valueText(value);
   return (
-    <div className="bitable-card-field-value bitable-card-field-value--tdesign">
-      <Input
-        className="bitable-card-tdesign-control"
-        borderless
-        value={text}
-        disabled={disabled}
-        placeholder={fieldPlaceholder(field)}
-        onChange={nextValue => onChange(String(nextValue))}
-      />
-    </div>
+    <StagedTextFieldEditor
+      field={field}
+      value={value}
+      disabled={disabled}
+      onChange={onChange}
+    />
   );
 }
 

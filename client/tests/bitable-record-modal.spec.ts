@@ -126,7 +126,27 @@ test('record modal aligns field rows for text date and attachment', async ({ pag
   await expect(comments).toContainText('已有评论');
   await comments.getByPlaceholder('输入评论').fill('新增一条');
   await comments.getByRole('button', { name: '发送' }).click();
-  await expect(comments).toContainText('新增一条');
+  await expect(comments.getByText('新增一条', { exact: true })).toHaveCount(1);
+});
+
+test('text fields commit once and Escape restores the saved value without closing', async ({ page }) => {
+  const { modal } = await openRecordModal(page);
+  const noteInput = modal.locator('[data-field-id="note"] input');
+
+  await noteInput.fill('不应保存的草稿');
+  await noteInput.press('Escape');
+  await expect(modal).toBeVisible();
+  await expect(noteInput).toHaveValue('说明');
+
+  await noteInput.fill('一次提交的新说明');
+  await noteInput.press('Enter');
+  await expect(noteInput).toHaveValue('一次提交的新说明');
+  await modal.getByRole('tab', { name: '历史' }).click();
+
+  const rows = modal.locator('.bitable-records-history-table tbody tr');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('说明');
+  await expect(rows.first()).toContainText('一次提交的新说明');
 });
 
 test('attachment panel anchors to plus and stays inside white modal', async ({ page }) => {
