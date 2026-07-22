@@ -165,6 +165,27 @@ test('opens record modal from kanban card context menu', async ({ page }) => {
   await expect(page.locator('.bitable-record-card-mask')).toBeVisible();
 });
 
+test('moves a card to another column without drag and supports keyboard context menu', async ({ page }) => {
+  await openKanban(page);
+
+  const firstCard = page.locator('.base-kanban__card').first();
+  await firstCard.focus();
+  await page.keyboard.press('Shift+F10');
+  const cardMenu = page.locator('.base-kanban__card-menu--portal');
+  await expect(cardMenu).toBeVisible();
+  await cardMenu.getByRole('button', { name: '移动到列' }).click();
+  await expect(cardMenu.getByRole('button', { name: '未开始（当前）' })).toBeDisabled();
+
+  const saveRequest = page.waitForRequest(request =>
+    request.url().endsWith('/api/documents/bitable-kanban-e2e') && request.method() === 'PUT',
+  );
+  await cardMenu.getByRole('button', { name: '移动到 已完成' }).click();
+  const body = (await saveRequest).postDataJSON() as { content?: string };
+
+  await expect(page.getByRole('listitem').filter({ hasText: '已完成' }).locator('.base-kanban__card')).toHaveCount(2);
+  expect(body.content).toContain('\"status\":\"done\"');
+});
+
 test('reports affected records and migrates them before deleting a kanban group', async ({ page }) => {
   await openKanban(page);
 

@@ -142,7 +142,7 @@ export function BitableKanbanView({
   const [draggingRecordId, setDraggingRecordId] = useState<string | null>(null);
   const [dropStatus, setDropStatus] = useState<string | null>(null);
   const [columnMenu, setColumnMenu] = useState<{ choiceId: string; left: number; top: number } | null>(null);
-  const [cardMenu, setCardMenu] = useState<{ recordId: string; left: number; top: number } | null>(null);
+  const [cardMenu, setCardMenu] = useState<{ recordId: string; left: number; top: number; showMoveChoices?: boolean } | null>(null);
   const [renamingChoiceId, setRenamingChoiceId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const cardMenuRef = useRef<HTMLDivElement>(null);
@@ -508,6 +508,16 @@ export function BitableKanbanView({
     setColumnMenu({ choiceId, left, top });
   };
 
+  const openCardMenu = (recordId: string, left: number, top: number) => {
+    const position = clampKanbanPointMenuPosition(
+      left,
+      top,
+      KANBAN_CARD_MENU_WIDTH,
+      KANBAN_CARD_MENU_HEIGHT,
+    );
+    setCardMenu({ recordId, ...position });
+  };
+
   const columnMenuChoice = columnMenu
     ? visibleChoices.find(choice => choice.id === columnMenu.choiceId) ?? null
     : null;
@@ -656,6 +666,13 @@ export function BitableKanbanView({
                         onClick={event => handleKanbanCardClick(event, record.id, dragMovedRef, openRecord)}
                         onKeyDown={event => {
                           if (event.target !== event.currentTarget) return;
+                          if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            openCardMenu(record.id, rect.left + 24, rect.top + 24);
+                            return;
+                          }
                           if (event.key !== 'Enter' && event.key !== ' ') return;
                           event.preventDefault();
                           event.stopPropagation();
@@ -664,13 +681,7 @@ export function BitableKanbanView({
                         onContextMenu={event => {
                           event.preventDefault();
                           event.stopPropagation();
-                          const position = clampKanbanPointMenuPosition(
-                            event.clientX,
-                            event.clientY,
-                            KANBAN_CARD_MENU_WIDTH,
-                            KANBAN_CARD_MENU_HEIGHT,
-                          );
-                          setCardMenu({ recordId: record.id, ...position });
+                          openCardMenu(record.id, event.clientX, event.clientY);
                         }}
                       >
                         {config.coverFieldId ? (
@@ -774,6 +785,39 @@ export function BitableKanbanView({
           onMouseDown={stop}
         >
           <button type="button" onClick={() => { openRecord(cardMenu.recordId); setCardMenu(null); }}>查看详情</button>
+          <button
+            type="button"
+            aria-expanded={Boolean(cardMenu.showMoveChoices)}
+            disabled={locked}
+            onClick={() => setCardMenu(current => current ? { ...current, showMoveChoices: !current.showMoveChoices } : current)}
+          >
+            移动到列
+          </button>
+          {cardMenu.showMoveChoices ? (
+            <div className="base-kanban__card-move-choices" aria-label="选择目标列">
+              {orderedChoices.map(choice => {
+                const record = records.find(item => item.id === cardMenu.recordId);
+                const storedStatus = record ? valueText(record.fields[statusField.id]) : '';
+                const currentChoiceId = findSelectChoice(statusField, storedStatus)?.id ?? storedStatus;
+                const isCurrent = choice.id === currentChoiceId;
+                return (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    disabled={locked || isCurrent}
+                    aria-current={isCurrent ? 'true' : undefined}
+                    onClick={() => {
+                      changeRecordStatus(cardMenu.recordId, choice.id);
+                      setCardMenu(null);
+                    }}
+                  >
+                    <span className="base-kanban__card-move-dot" style={{ background: choice.color }} aria-hidden />
+                    {isCurrent ? `${choice.name}（当前）` : `移动到 ${choice.name}`}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <button
             type="button"
             className="is-danger"
