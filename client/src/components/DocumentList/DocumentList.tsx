@@ -24,6 +24,7 @@ import {
   importDocumentUrl,
 } from '../../api/documents';
 import type { Document, ImportDocumentResult, Template } from '../../types';
+import { copyTextToClipboard } from '../../shared/clipboard';
 import './DocumentList.less';
 
 // Shared documents are not exposed until a real sharing/permission model exists.
@@ -493,8 +494,11 @@ export default function DocumentList() {
 
   const handleCopyLink = async (id: string) => {
     setRowMenu(null);
-    await navigator.clipboard.writeText(`${window.location.origin}/doc/${id}`);
-    void MessagePlugin.success('链接已复制');
+    if (await copyTextToClipboard(`${window.location.origin}/doc/${id}`)) {
+      void MessagePlugin.success('链接已复制');
+    } else {
+      void MessagePlugin.error('复制失败，请打开文档后从地址栏复制链接');
+    }
   };
 
   const handleFavorite = (id: string) => {

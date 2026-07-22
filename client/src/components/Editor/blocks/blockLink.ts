@@ -3,6 +3,7 @@ import type { Node as ProseNode } from '@tiptap/pm/model';
 import { NodeSelection } from '@tiptap/pm/state';
 import { FEISHU_BLOCK_ID_TYPES, makeFeishuBlockId, sanitizeFeishuBlockId } from './feishuBlockId';
 import { resolveBlockElement } from './blockDom';
+import { copyTextToClipboard } from '../../../shared/clipboard';
 
 function readStoredBlockId(node: ProseNode): string | null {
   return sanitizeFeishuBlockId(node.attrs?.blockId);
@@ -105,19 +106,7 @@ export async function copyCurrentBlockLink(editor: Editor): Promise<string | nul
   const blockId = ensureCurrentBlockId(editor);
   if (!blockId) return null;
   const url = buildBlockLink(blockId);
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(url);
-  } else {
-    const textarea = document.createElement('textarea');
-    textarea.value = url;
-    textarea.style.position = 'fixed';
-    textarea.style.left = '-9999px';
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    textarea.remove();
-  }
-  return url;
+  return await copyTextToClipboard(url) ? url : null;
 }
 
 export function scrollToBlockFromHash(): boolean {

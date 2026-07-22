@@ -76,3 +76,37 @@ test('opens and exits block submenus with the keyboard', async ({ page }) => {
   await expect(addBelowFlyout).toHaveCount(0);
   await expect(addBelowTrigger).toBeFocused();
 });
+
+test('offers an actionable recovery when clipboard access is rejected', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: () => Promise.reject(new DOMException('permission denied', 'NotAllowedError')),
+      },
+    });
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: () => false,
+    });
+  });
+  await page.goto('/doc/block-color-e2e');
+
+  const openBlockMenu = async () => {
+    await page.locator('.ProseMirror p').first().hover();
+    await page.locator('.block-drag-row').first().hover();
+    await expect(page.getByRole('menu', { name: '块操作' })).toBeVisible();
+  };
+
+  await openBlockMenu();
+  await page.getByRole('menuitem', { name: /复制.*Ctrl\+C/ }).click();
+  await expect(page.getByText('复制失败，请使用 Ctrl+C 重试')).toBeVisible();
+
+  await openBlockMenu();
+  await page.getByRole('menuitem', { name: /剪切.*Ctrl\+X/ }).click();
+  await expect(page.getByText('剪切失败，请使用 Ctrl+X 重试')).toBeVisible();
+
+  await openBlockMenu();
+  await page.getByRole('menuitem', { name: '复制链接', exact: true }).click();
+  await expect(page.getByText('复制失败，请从地址栏复制链接')).toBeVisible();
+});

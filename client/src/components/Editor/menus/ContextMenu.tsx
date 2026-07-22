@@ -13,6 +13,7 @@ import {
 } from 'tdesign-icons-react';
 import { wrapIcon } from '../../../icons/wrap';
 import { readApiPayload } from '../../../api/http';
+import { copyTextToClipboard, executeClipboardCommand } from '../../../shared/clipboard';
 import {
   ContextGlyphAddBelow,
   ContextGlyphBlockLink,
@@ -467,14 +468,14 @@ export default function ContextMenu({
 
   const handleCut = () => {
     alignSelectionToBlockAnchor();
-    const succeeded = document.execCommand('cut');
+    const succeeded = executeClipboardCommand('cut');
     if (!succeeded) void MessagePlugin.error('剪切失败，请使用 Ctrl+X 重试');
     onClose();
   };
 
   const handleCopy = () => {
     alignSelectionToBlockAnchor();
-    const succeeded = document.execCommand('copy');
+    const succeeded = executeClipboardCommand('copy');
     if (succeeded) void MessagePlugin.success('已复制');
     else void MessagePlugin.error('复制失败，请使用 Ctrl+C 重试');
     onClose();
@@ -488,10 +489,9 @@ export default function ContextMenu({
   };
 
   const handleShare = async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href);
+    if (await copyTextToClipboard(window.location.href)) {
       void MessagePlugin.success('文档链接已复制');
-    } catch {
+    } else {
       void MessagePlugin.error('无法访问剪贴板，请从地址栏复制链接');
     }
     onClose();
@@ -550,8 +550,9 @@ export default function ContextMenu({
 
   const handleCopyBlockLink = async () => {
     alignSelectionToBlockAnchor();
-    await copyCurrentBlockLink(editor);
-    void MessagePlugin.success('块链接已复制');
+    const url = await copyCurrentBlockLink(editor);
+    if (url) void MessagePlugin.success('块链接已复制');
+    else void MessagePlugin.error('复制失败，请从地址栏复制链接');
     onClose();
   };
 
