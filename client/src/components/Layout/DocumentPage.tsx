@@ -108,6 +108,7 @@ export default function DocumentPage() {
   const loadRequestSequenceRef = useRef(0);
   const commentRequestSequenceRef = useRef(0);
   const catalogueScrollFrameRef = useRef<number | null>(null);
+  const headingSnapshotDocumentRef = useRef<string | null>(null);
   const [titleInputSnapshot, setTitleInputSnapshot] = useState('');
   const [catalogueActiveId, setCatalogueActiveId] = useState<string | null>(null);
   const [collapsedHeadingIds, setCollapsedHeadingIds] = useState<Set<string>>(() => new Set());
@@ -136,10 +137,27 @@ export default function DocumentPage() {
 
   useEffect(() => {
     outlineWasVisibleRef.current = false;
+    headingSnapshotDocumentRef.current = null;
+    setHeadings([]);
     setCatalogueActiveId(null);
     collapsedPersistReadyRef.current = false;
     setCollapsedHeadingIds(new Set(doc?.collapsed_heading_ids ?? []));
-  }, [doc?.id, doc?.collapsed_heading_ids]);
+  }, [doc?.id]);
+
+  const handleHeadingsChange = useCallback((nextHeadings: HeadingItem[]) => {
+    headingSnapshotDocumentRef.current = doc?.id || null;
+    setHeadings(nextHeadings);
+  }, [doc?.id]);
+
+  useEffect(() => {
+    if (!doc?.id || headingSnapshotDocumentRef.current !== doc.id) return;
+    const validIds = new Set(headings.map(heading => heading.id));
+    setCollapsedHeadingIds(current => {
+      const next = new Set(Array.from(current).filter(headingId => validIds.has(headingId)));
+      if (next.size === current.size && Array.from(next).every(headingId => current.has(headingId))) return current;
+      return next;
+    });
+  }, [doc?.id, headings]);
 
   const handleToggleHeadingCollapse = useCallback((headingId: string) => {
     setCollapsedHeadingIds(prev => {
@@ -667,7 +685,7 @@ export default function DocumentPage() {
                 icon={doc.icon}
                 coverUrl={doc.cover_url}
                 onSave={handleSave}
-                onHeadingsChange={setHeadings}
+                onHeadingsChange={handleHeadingsChange}
                 onTitleInputChange={handleTitleInputChange}
                 onCatalogueActiveIdChange={setCatalogueActiveId}
                 readOnly={readOnly}

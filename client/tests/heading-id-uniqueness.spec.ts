@@ -36,3 +36,29 @@ test('normalizes duplicated heading ids before rendering the catalogue', async (
   expect(new Set(headingIds).size).toBe(2);
   expect(duplicateKeyWarnings).toEqual([]);
 });
+
+test('prunes collapsed heading ids that no longer exist', async ({ page }) => {
+  const document = {
+    ...duplicateHeadingDocument,
+    id: 'heading-collapse-prune-e2e',
+    title: 'Heading collapse pruning',
+    content: '<h1 data-heading-id="heading-valid" data-block-id="heading-valid">Valid heading</h1><h2 data-heading-id="heading-child" data-block-id="heading-child">Child heading</h2>',
+    collapsed_heading_ids: ['heading-valid', 'heading-missing'],
+    version: 1,
+    schema_version: 1,
+  };
+  let persistedIds: string[] | undefined;
+  await page.route('**/api/documents/heading-collapse-prune-e2e/comments', route =>
+    route.fulfill({ json: { code: 0, data: [] } }),
+  );
+  await page.route('**/api/documents/heading-collapse-prune-e2e', route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { code: 0, data: document } });
+    const body = route.request().postDataJSON() as { collapsed_heading_ids?: string[] };
+    if (body.collapsed_heading_ids) persistedIds = body.collapsed_heading_ids;
+    return route.fulfill({ json: { code: 0, data: { ...document, ...body, version: 2 } } });
+  });
+
+  await page.goto('/doc/heading-collapse-prune-e2e');
+  await expect(page.locator('.catalogue__list-item[data-id="heading-valid"]')).toHaveClass(/catalogue__list-item--collapsed/);
+  await expect.poll(() => persistedIds).toEqual(['heading-valid']);
+});
