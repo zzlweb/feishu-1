@@ -7,6 +7,7 @@ import { SelGlyphChevronDown } from '../../icons/selectionToolbarGlyphs';
 import { SlashGlyphBitableGrid, SlashGlyphGallery, SlashGlyphGantt, SlashGlyphKanban } from '../../icons/slashMenuGlyphs';
 import { BitableAddFieldPopover, BitableEditFieldPopover, buildNewFieldPayload, emptyDefaultValue, type CreateFieldInput, type UpdateFieldInput } from './fields/BitableAddFieldPopover';
 import { FieldLockGlyph, fieldTypeGlyph } from './fields/bitableFieldTypeIcons';
+import { isFieldTypeCreatable } from './fields/bitableFieldTypes';
 import {
   BitableTooltip,
   useBitablePanelHoverHandlers,
@@ -1349,6 +1350,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
 
   const createField = (input: CreateFieldInput) => {
     if (activeView.locked) return;
+    if (!isFieldTypeCreatable(input.type)) return;
     const name = input.name.trim();
     if (!name) return;
     const { id, field, defaultValue } = buildNewFieldPayload({ ...input, name });

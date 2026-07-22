@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Input } from 'tdesign-react';
 import type { InputRef } from 'tdesign-react';
 import { fieldTypeGlyph } from './bitableFieldTypeIcons';
-import { filterFieldTypeGroups, type FieldTypeGroupDef } from './bitableFieldTypes';
+import { fieldTypeUnavailableReason, filterFieldTypeGroups, type FieldTypeGroupDef } from './bitableFieldTypes';
 import type { BaseFieldType } from '../model/bitableModel';
 import { useAnchoredFloatingPosition } from '../../Editor/shared/floatingPanel';
 
@@ -49,12 +49,16 @@ function FieldTypeGroupList({
           </div>
           {group.options.map(option => {
             const selected = option.type === selectedType;
+            const unavailableReason = option.unsupported ? fieldTypeUnavailableReason(option.type) : null;
             return (
               <button
                 key={option.type}
                 type="button"
                 role="option"
                 aria-selected={selected}
+                aria-disabled={option.unsupported || undefined}
+                disabled={option.unsupported}
+                title={unavailableReason ?? undefined}
                 className={`base-b-field-option-list__item${selected ? ' selected' : ''}`}
                 onClick={() => onSelect(option.type)}
               >
@@ -62,6 +66,9 @@ function FieldTypeGroupList({
                 <span className="base-b-field-option-text">{option.label}</span>
                 {option.isNew && (
                   <span className="base-b-field-option-badge" aria-label="新功能">New</span>
+                )}
+                {option.unsupported && (
+                  <span className="base-b-field-option-badge base-b-field-option-badge--pending" aria-label="暂未支持">待支持</span>
                 )}
                 {selected && (
                   <span className="base-b-field-option-selected-icon" aria-hidden><GlyphDone size={16} /></span>

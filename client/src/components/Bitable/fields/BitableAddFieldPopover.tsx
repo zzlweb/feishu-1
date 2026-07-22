@@ -4,7 +4,7 @@ import type { InputRef } from 'tdesign-react';
 import { BitableFieldTypePicker } from './BitableFieldTypePicker';
 import { BitableSelectDefaultPicker, BitableSelectOptionsEditor } from './BitableSelectFieldEditor';
 import { fieldTypeGlyph } from './bitableFieldTypeIcons';
-import { fieldTypeLabel } from './bitableFieldTypes';
+import { fieldTypeLabel, isFieldTypeCreatable } from './bitableFieldTypes';
 import type { BaseField, BaseFieldType, CellValue, SelectChoice } from '../model/bitableModel';
 
 export interface CreateFieldInput {
@@ -24,7 +24,6 @@ export interface UpdateFieldInput {
 const FIELD_RECOMMENDS: Array<{ label: string; name: string; type: BaseFieldType }> = [
   { label: '任务周期', name: '任务周期', type: 'date' },
   { label: '任务优先级', name: '任务优先级', type: 'single_select' },
-  { label: '负责人员', name: '负责人员', type: 'user' },
   { label: '相关文档', name: '相关文档', type: 'attachment' },
   { label: '任务进度', name: '任务进度', type: 'single_select' },
 ];
@@ -124,6 +123,7 @@ function FieldForm({
   };
 
   const handleFieldTypeChange = (type: BaseFieldType) => {
+    if (!isFieldTypeCreatable(type)) return;
     const wasSelect = isSelectFieldType(fieldType);
     const nextSelect = isSelectFieldType(type);
     setFieldType(type);
@@ -154,6 +154,7 @@ function FieldForm({
       titleRef.current?.focus();
       return;
     }
+    if (!isFieldTypeCreatable(fieldType)) return;
     const payload: CreateFieldInput = { name, type: fieldType };
     if (isSelectFieldType(fieldType)) {
       const validChoices = normalizeChoices(choices);

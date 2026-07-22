@@ -8018,6 +8018,19 @@
   &.selected {
     background: #f5f6f7;
   }
+
+  &:disabled {
+    color: #8f959e;
+    cursor: not-allowed;
+
+    &:hover {
+      background: transparent;
+    }
+
+    .base-b-field-option-icon {
+      color: #bbbfc4;
+    }
+  }
 }
 
 .base-b-field-option-icon {
@@ -8044,6 +8057,11 @@
   font-size: 10px;
   font-weight: 500;
   line-height: 16px;
+
+  &--pending {
+    background: #f2f3f5;
+    color: #8f959e;
+  }
 }
 
 .base-b-field-option-selected-icon {

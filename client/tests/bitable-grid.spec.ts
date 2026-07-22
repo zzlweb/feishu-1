@@ -60,6 +60,24 @@ test('grid add-field button opens popover and creates a field', async ({ page })
   await expect(block.locator('.base-grid-field-name', { hasText: '字段 1' })).toBeVisible();
 });
 
+test('grid marks field types without strict semantics as unavailable', async ({ page }) => {
+  const block = await openGrid(page);
+
+  await block.locator('.base-grid-add-field-column__header').click();
+  const popover = page.locator('[data-e2e="bitable-add-field-popover"]');
+  await popover.locator('.base-b-field-type--picker-trigger').click();
+  const picker = page.locator('.base-b-field-type-picker-portal');
+  await expect(picker).toBeVisible();
+
+  const formula = picker.getByRole('option', { name: /公式/ });
+  const relation = picker.getByRole('option', { name: /双向关联/ });
+  await expect(formula).toBeDisabled();
+  await expect(formula).toHaveAttribute('title', /暂不能创建/);
+  await expect(relation).toBeDisabled();
+  await expect(picker.getByText('待支持').first()).toBeVisible();
+  await expect(popover.getByRole('button', { name: '负责人员' })).toHaveCount(0);
+});
+
 test('grid field menu portals to body without clipping', async ({ page }) => {
   const block = await openGrid(page);
 

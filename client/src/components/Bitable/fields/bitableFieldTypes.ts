@@ -22,14 +22,14 @@ export const FIELD_TYPE_GROUPS: FieldTypeGroupDef[] = [
       { type: 'text', label: '文本' },
       { type: 'single_select', label: '单选' },
       { type: 'multi_select', label: '多选' },
-      { type: 'user', label: '人员' },
+      { type: 'user', label: '人员', unsupported: true },
       { type: 'date', label: '日期' },
       { type: 'attachment', label: '附件' },
       { type: 'number', label: '数字' },
       { type: 'checkbox', label: '复选框' },
       { type: 'url', label: '超链接' },
-      { type: 'formula', label: '公式' },
-      { type: 'lookup', label: '查找引用' },
+      { type: 'formula', label: '公式', unsupported: true },
+      { type: 'lookup', label: '查找引用', unsupported: true },
     ],
   },
   {
@@ -44,11 +44,11 @@ export const FIELD_TYPE_GROUPS: FieldTypeGroupDef[] = [
     id: 'advanced',
     label: '高级',
     options: [
-      { type: 'relation', label: '双向关联' },
-      { type: 'created_by', label: '创建人' },
-      { type: 'updated_by', label: '修改人' },
-      { type: 'created_time', label: '创建时间' },
-      { type: 'updated_time', label: '最后更新时间' },
+      { type: 'relation', label: '双向关联', unsupported: true },
+      { type: 'created_by', label: '创建人', unsupported: true },
+      { type: 'updated_by', label: '修改人', unsupported: true },
+      { type: 'created_time', label: '创建时间', unsupported: true },
+      { type: 'updated_time', label: '最后更新时间', unsupported: true },
     ],
   },
 ];
@@ -59,6 +59,20 @@ const FIELD_TYPE_LABEL_MAP = new Map<BaseFieldType, string>(
 
 export function fieldTypeLabel(type: BaseFieldType) {
   return FIELD_TYPE_LABEL_MAP.get(type) || '文本';
+}
+
+const UNSUPPORTED_FIELD_TYPES = new Set<BaseFieldType>(
+  FIELD_TYPE_GROUPS.flatMap(group => group.options.filter(option => option.unsupported).map(option => option.type)),
+);
+
+export function isFieldTypeCreatable(type: BaseFieldType): boolean {
+  return !UNSUPPORTED_FIELD_TYPES.has(type);
+}
+
+export function fieldTypeUnavailableReason(type: BaseFieldType): string | null {
+  return isFieldTypeCreatable(type)
+    ? null
+    : `${fieldTypeLabel(type)}字段尚未实现完整的数据语义，暂不能创建`;
 }
 
 export function filterFieldTypeGroups(query: string): FieldTypeGroupDef[] {
