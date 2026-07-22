@@ -24,6 +24,7 @@ import {
 import {
   insertTableColumnAtBoundary,
   insertTableRowAtBoundary,
+  focusTableCell,
   getTableReorderBlockedReason,
   moveTableColumn,
   moveTableRow,
@@ -568,6 +569,32 @@ function FeishuTableOverlay({
     [applyPinnedRail, clearHover, editor, tableHost],
   );
 
+  const releaseTableSelectionPinned = useCallback(() => {
+    applyPinnedRail(null);
+    setTableSelectionPinned(false);
+    tableSelectionPinnedRef.current = false;
+    setSelectedRail(null);
+    setSelectionRange(null);
+    setRailSelectionKind(null);
+    tableHost.classList.remove('feishu-table-host--selection-pinned');
+    tableHost.classList.remove('feishu-table-host--rail-col-selected');
+    tableHost.classList.remove('feishu-table-host--rail-row-selected');
+    if (!tableHoverRef.current && !handleHoverRef.current && !pinChromeRef.current) {
+      syncHostChromeHot(tableHost, false);
+      chromeVisibleRef.current = false;
+      setChromeVisible(false);
+      syncTableScrollEdgeFade(tableHost, false);
+    }
+  }, [applyPinnedRail, tableHost]);
+
+  const collapseRailSelectionForDrag = useCallback(() => {
+    const { selection } = editor.state;
+    if (selection instanceof CellSelection && isCellSelectionInTableHost(editor, tableHost)) {
+      editor.chain().setTextSelection(selection.$anchorCell.pos + 1).run();
+    }
+    releaseTableSelectionPinned();
+  }, [editor, releaseTableSelectionPinned, tableHost]);
+
   const beginRailDrag = useCallback(
     (kind: 'col' | 'row', index: number, e: ReactPointerEvent<HTMLDivElement>) => {
       if (!layout) return;
@@ -576,8 +603,6 @@ function FeishuTableOverlay({
       e.currentTarget.setPointerCapture?.(e.pointerId);
       activateTableChrome();
       clearHover();
-      if (kind === 'col') selectColumn(index);
-      else selectRow(index);
 
       const tablePosAtStart = getTablePosFromHost(editor, tableHost);
       const reorderBlockedReason = tablePosAtStart == null
@@ -605,7 +630,10 @@ function FeishuTableOverlay({
         if (event.pointerId !== pointerId) return;
         const distance = Math.hypot(event.clientX - startX, event.clientY - startY);
         if (!dragging && distance < DRAG_THRESHOLD) return;
-        dragging = true;
+        if (!dragging) {
+          dragging = true;
+          collapseRailSelectionForDrag();
+        }
         if (reorderBlockedReason) {
           if (!blockedMessageShown) {
             blockedMessageShown = true;
@@ -637,9 +665,12 @@ function FeishuTableOverlay({
         event.stopPropagation();
 
         if (!dragging) {
+          if (kind === 'col') selectColumn(index);
+          else selectRow(index);
           return;
         }
 
+        if (event.type === 'pointercancel') return;
         if (reorderBlockedReason) return;
         const tablePos = getTablePosFromHost(editor, tableHost);
         if (tablePos == null) return;
@@ -648,14 +679,11 @@ function FeishuTableOverlay({
           : moveTableRow(editor, tablePos, index, latestTarget);
 
         if (movedIndex == null) return;
-        suppressSelectionClearRef.current = true;
         remeasureSoon();
         window.requestAnimationFrame(() => {
-          if (kind === 'col') selectColumn(movedIndex);
-          else selectRow(movedIndex);
-          window.setTimeout(() => {
-            suppressSelectionClearRef.current = false;
-          }, 120);
+          const nextTablePos = getTablePosFromHost(editor, tableHost);
+          if (nextTablePos == null) return;
+          focusTableCell(editor, nextTablePos, kind === 'row' ? movedIndex : 0, kind === 'col' ? movedIndex : 0);
         });
       };
 
@@ -665,6 +693,7 @@ function FeishuTableOverlay({
     },
     [
       activateTableChrome,
+      collapseRailSelectionForDrag,
       clearHover,
       editor,
       layout,
@@ -868,24 +897,6 @@ function FeishuTableOverlay({
     },
     [activateTableChrome, applyRowResizePreview, clearHover, editor, layout, remeasureSoon, tableHost],
   );
-
-  const releaseTableSelectionPinned = useCallback(() => {
-    applyPinnedRail(null);
-    setTableSelectionPinned(false);
-    tableSelectionPinnedRef.current = false;
-    setSelectedRail(null);
-    setSelectionRange(null);
-    setRailSelectionKind(null);
-    tableHost.classList.remove('feishu-table-host--selection-pinned');
-    tableHost.classList.remove('feishu-table-host--rail-col-selected');
-    tableHost.classList.remove('feishu-table-host--rail-row-selected');
-    if (!tableHoverRef.current && !handleHoverRef.current && !pinChromeRef.current) {
-      syncHostChromeHot(tableHost, false);
-      chromeVisibleRef.current = false;
-      setChromeVisible(false);
-      syncTableScrollEdgeFade(tableHost, false);
-    }
-  }, [applyPinnedRail, tableHost]);
 
   useLayoutEffect(() => {
     const onHostPointerEnter = () => activateTableChrome();

@@ -280,6 +280,28 @@ test('reorders rows by dragging the row rail', async ({ page }) => {
   await expect(page.locator('td[data-table-cell="true"]').first()).toContainText('Delta');
   await expect(page.locator('tr[data-row-index]').last()).toContainText('Alpha');
   await expect(page.locator('.feishu-table-chrome__drag-line--row')).toHaveCount(0);
+  await expect(page.locator('td.selectedCell')).toHaveCount(0);
+  await expect(page.locator('.feishu-table-selection-toolbar')).toHaveCount(0);
+  await expect(host).not.toHaveClass(/feishu-table-host--selection-pinned/);
+});
+
+test('clears temporary row selection after a drag with no valid move', async ({ page }) => {
+  await openRichTable(page);
+
+  const host = page.locator('.feishu-table-host, .tableWrapper').first();
+  await host.hover();
+  const firstRowRail = page.locator('[data-table-axis-handle="true"].feishu-table-chrome__rail-block--row').first();
+  const box = await firstRowRail.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2 + 12, box!.y + box!.height / 2, { steps: 4 });
+  await page.mouse.up();
+
+  await expect(page.locator('td[data-table-cell="true"]').first()).toContainText('Alpha');
+  await expect(page.locator('td.selectedCell')).toHaveCount(0);
+  await expect(page.locator('.feishu-table-selection-toolbar')).toHaveCount(0);
+  await expect(host).not.toHaveClass(/feishu-table-host--selection-pinned/);
 });
 
 test('explains why merged tables cannot be reordered', async ({ page }) => {
@@ -304,6 +326,8 @@ test('explains why merged tables cannot be reordered', async ({ page }) => {
   await expect(page.locator('td[data-table-cell="true"]').first()).toHaveAttribute('rowspan', '2');
   await expect(page.locator('td[data-table-cell="true"]').first()).toContainText('Alpha');
   await expect(page.locator('.feishu-table-chrome__drag-line--col')).toHaveCount(0);
+  await expect(page.locator('td.selectedCell')).toHaveCount(0);
+  await expect(page.locator('.feishu-table-selection-toolbar')).toHaveCount(0);
 });
 
 test('clips a selected column outline to the horizontal table viewport', async ({ page }) => {
