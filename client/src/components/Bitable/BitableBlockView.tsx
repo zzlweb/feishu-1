@@ -741,6 +741,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const parsedTable = useMemo(() => parseBaseTable(node.attrs), [node.attrs.model, node.attrs.columns, node.attrs.rows, node.attrs.covers, node.attrs.view]);
   const tableRef = useRef(parsedTable);
   const blockRef = useRef<HTMLDivElement>(null);
+  const attachmentUploadRequestsRef = useRef(new Map<string, XMLHttpRequest>());
   const [documentEditable, setDocumentEditable] = useState(editor.isEditable);
   const [readOnlyViewId, setReadOnlyViewId] = useState<string | null>(null);
   tableRef.current = parsedTable;
@@ -1811,6 +1812,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       const finish = (success: boolean) => {
         if (settled) return;
         settled = true;
+        attachmentUploadRequestsRef.current.delete(pending.id);
         if (localUrl) URL.revokeObjectURL(localUrl);
         resolve(success);
       };
@@ -1855,12 +1857,24 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       xhr.ontimeout = () => markFailed('上传超时');
       const form = new FormData();
       form.append('file', file);
+      attachmentUploadRequestsRef.current.set(pending.id, xhr);
       try {
         xhr.send(form);
       } catch (error) {
         markFailed(error instanceof Error ? error.message : '上传失败');
       }
     });
+  };
+
+  const removeAttachment = (recordId: string, fieldId: string, attachmentId: string) => {
+    if (activeView.locked) return;
+    attachmentUploadRequestsRef.current.get(attachmentId)?.abort();
+    attachmentUploadRequestsRef.current.delete(attachmentId);
+    mutate(current => updateRecord(current, recordId, record => withUpdatedValue(
+      record,
+      fieldId,
+      getAttachments(record, fieldId).filter(item => item.id !== attachmentId),
+    )));
   };
 
   const onDropFiles = (event: DragEvent, recordId?: string) => {
@@ -3151,6 +3165,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
           onUploadAttachment={(recordId, fieldId, files) => {
             files.forEach(file => uploadAttachment(recordId, file, fieldId));
           }}
+          onRemoveAttachment={removeAttachment}
           onAddComment={addRecordComment}
         />,
         document.body,

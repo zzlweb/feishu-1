@@ -161,6 +161,44 @@ test('attachment panel anchors to plus and stays inside white modal', async ({ p
   expect(panelBox!.y).toBeGreaterThanOrEqual(addBox!.y - 4);
 });
 
+test('retries and removes failed record attachments in place', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/uploads', route => {
+    calls += 1;
+    if (calls === 1) return route.fulfill({ status: 500, json: { code: -1, message: '附件上传失败' } });
+    return route.fulfill({
+      status: 201,
+      json: { code: 0, data: { name: 'replacement.pdf', size: 18, type: 'application/pdf', url: '/static/uploads/replacement.pdf' } },
+    });
+  });
+  const { modal } = await openRecordModal(page);
+
+  await modal.locator('.bitable-card-attachment-add').click();
+  let panel = page.locator('[data-e2e="bitable-card-attachment-panel"]');
+  await panel.locator('input[type="file"]').setInputFiles({
+    name: 'failed.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-failed'),
+  });
+
+  await modal.locator('.bitable-card-attachment-add').click();
+  panel = page.locator('[data-e2e="bitable-card-attachment-panel"]');
+  await expect(panel).toContainText('附件上传失败');
+  const chooserPromise = page.waitForEvent('filechooser');
+  await panel.getByRole('button', { name: '重新选择' }).click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles({
+    name: 'replacement.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-replacement'),
+  });
+  await expect(panel).toContainText('replacement.pdf');
+
+  await panel.getByRole('button', { name: '删除' }).click();
+  await expect(panel).not.toContainText('replacement.pdf');
+  await expect(modal.locator('.bitable-card-attachment-empty')).toContainText('暂无附件');
+});
+
 test('modal child popovers sit above the mask by z-index', async ({ page }) => {
   const { modal } = await openRecordModal(page);
 

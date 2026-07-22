@@ -10338,6 +10338,31 @@
   color: #d83931;
 }
 
+.bitable-card-attachment-item__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+
+  button {
+    min-height: 26px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #3370ff;
+    cursor: pointer;
+    font-size: 12px;
+
+    &:hover {
+      background: rgba(51, 112, 255, .08);
+    }
+
+    &.is-danger {
+      color: #d83931;
+    }
+  }
+}
+
 .bitable-card-attachment-dropzone {
   display: flex;
   align-items: center;

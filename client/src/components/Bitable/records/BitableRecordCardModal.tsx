@@ -39,6 +39,7 @@ export interface BitableRecordCardModalProps {
   onDelete?: (recordId: string) => void;
   onAddField?: () => void;
   onUploadAttachment?: (recordId: string, fieldId: string, files: File[]) => void;
+  onRemoveAttachment?: (recordId: string, fieldId: string, attachmentId: string) => void;
   onAddComment?: (recordId: string, content: string) => void;
 }
 
@@ -311,7 +312,17 @@ function AttachmentPreviewChip({ attachment }: { attachment: AttachmentValue }) 
   );
 }
 
-function AttachmentFileItem({ attachment }: { attachment: AttachmentValue }) {
+function AttachmentFileItem({
+  attachment,
+  disabled,
+  onRemove,
+  onReplace,
+}: {
+  attachment: AttachmentValue;
+  disabled?: boolean;
+  onRemove?: () => void;
+  onReplace?: (file: File) => void;
+}) {
   const statusText = attachment.uploadStatus === 'failed'
     ? attachment.error || '上传失败'
     : attachment.uploadStatus === 'uploading'
@@ -327,6 +338,31 @@ function AttachmentFileItem({ attachment }: { attachment: AttachmentValue }) {
         <span className="bitable-card-attachment-item__name">{attachment.name}</span>
         {statusText ? <span className="bitable-card-attachment-item__meta">{statusText}</span> : null}
       </span>
+      {!disabled && (onRemove || onReplace) ? (
+        <span className="bitable-card-attachment-item__actions">
+          {attachment.uploadStatus === 'failed' && onReplace ? (
+            <button
+              type="button"
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.onchange = () => {
+                  const file = input.files?.[0];
+                  if (file) onReplace(file);
+                };
+                input.click();
+              }}
+            >
+              重新选择
+            </button>
+          ) : null}
+          {onRemove ? (
+            <button type="button" className="is-danger" onClick={onRemove}>
+              {attachment.uploadStatus === 'uploading' ? '取消' : '删除'}
+            </button>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -336,12 +372,14 @@ function AttachmentUploadPopover({
   record,
   disabled,
   onUpload,
+  onRemove,
   modalBoundaryRef,
 }: {
   field: BaseField;
   record: BaseRecord;
   disabled?: boolean;
   onUpload?: (recordId: string, fieldId: string, files: File[]) => void;
+  onRemove?: (recordId: string, fieldId: string, attachmentId: string) => void;
   modalBoundaryRef?: RefObject<HTMLElement | null>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -481,7 +519,18 @@ function AttachmentUploadPopover({
         >
           {attachments.length > 0 && (
             <div className="bitable-card-attachment-list">
-              {attachments.map(attachment => <AttachmentFileItem key={attachment.id} attachment={attachment} />)}
+              {attachments.map(attachment => (
+                <AttachmentFileItem
+                  key={attachment.id}
+                  attachment={attachment}
+                  disabled={disabled}
+                  onRemove={onRemove ? () => onRemove(record.id, field.id, attachment.id) : undefined}
+                  onReplace={onRemove && onUpload ? file => {
+                    onRemove(record.id, field.id, attachment.id);
+                    onUpload(record.id, field.id, [file]);
+                  } : undefined}
+                />
+              ))}
             </div>
           )}
           <div className="bitable-card-attachment-dropzone">
@@ -741,6 +790,7 @@ function CardFieldEditor({
   disabled,
   onChange,
   onUploadAttachment,
+  onRemoveAttachment,
   modalBoundaryRef,
 }: {
   field: BaseField;
@@ -749,6 +799,7 @@ function CardFieldEditor({
   disabled?: boolean;
   onChange: (value: CellValue) => void;
   onUploadAttachment?: (recordId: string, fieldId: string, files: File[]) => void;
+  onRemoveAttachment?: (recordId: string, fieldId: string, attachmentId: string) => void;
   modalBoundaryRef?: RefObject<HTMLElement | null>;
 }) {
   if (field.type === 'checkbox') {
@@ -784,6 +835,7 @@ function CardFieldEditor({
         record={record}
         disabled={disabled}
         onUpload={onUploadAttachment}
+        onRemove={onRemoveAttachment}
         modalBoundaryRef={modalBoundaryRef}
       />
     );
@@ -822,6 +874,7 @@ function CardFieldRow({
   locked,
   onChange,
   onUploadAttachment,
+  onRemoveAttachment,
   modalBoundaryRef,
 }: {
   field: BaseField;
@@ -829,6 +882,7 @@ function CardFieldRow({
   locked?: boolean;
   onChange: (value: CellValue) => void;
   onUploadAttachment?: (recordId: string, fieldId: string, files: File[]) => void;
+  onRemoveAttachment?: (recordId: string, fieldId: string, attachmentId: string) => void;
   modalBoundaryRef?: RefObject<HTMLElement | null>;
 }) {
   return (
@@ -848,6 +902,7 @@ function CardFieldRow({
             disabled={locked}
             onChange={onChange}
             onUploadAttachment={onUploadAttachment}
+            onRemoveAttachment={onRemoveAttachment}
             modalBoundaryRef={modalBoundaryRef}
           />
         </span>
@@ -1103,6 +1158,7 @@ export function BitableRecordCardModal({
   onDelete,
   onAddField,
   onUploadAttachment,
+  onRemoveAttachment,
   onAddComment,
 }: BitableRecordCardModalProps) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1349,6 +1405,7 @@ export function BitableRecordCardModal({
                             modalBoundaryRef={contentRef}
                             onChange={value => onChange(record.id, field.id, value)}
                             onUploadAttachment={onUploadAttachment}
+                            onRemoveAttachment={onRemoveAttachment}
                           />
                         ))}
                       </div>
@@ -1374,6 +1431,7 @@ export function BitableRecordCardModal({
                                   modalBoundaryRef={contentRef}
                                   onChange={value => onChange(record.id, field.id, value)}
                                   onUploadAttachment={onUploadAttachment}
+                                  onRemoveAttachment={onRemoveAttachment}
                                 />
                               ))}
                             </div>
