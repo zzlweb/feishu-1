@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Checkbox, Input, Select, Switch, Upload } from 'tdesign-react';
+import { Button, Checkbox, Input, Select, Upload } from 'tdesign-react';
 import { CalendarIcon } from 'tdesign-icons-react';
 import type { PopupProps } from 'tdesign-react';
 import { FLOATING_Z_INDEX, bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
@@ -539,7 +539,6 @@ function DateFieldEditor({
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [panelPosition, setPanelPosition] = useState({ left: 0, top: 0 });
-  const [reminderEnabled, setReminderEnabled] = useState(false);
   const displayValue = formatCardDateDisplay(value);
   const pickerValue = toNativeDateValue(value) || undefined;
   const selectedParts = parseDateParts(pickerValue || todayDateValue())!;
@@ -684,19 +683,6 @@ function DateFieldEditor({
                   </button>
                 ))}
               </div>
-            </div>
-            <div
-              className="bitable-card-date-reminder"
-              onMouseDown={event => event.stopPropagation()}
-            >
-              <span className="bitable-card-date-reminder__label">到期提醒</span>
-              <span className="bitable-card-date-reminder__help" aria-hidden>?</span>
-              <Switch
-                size="small"
-                disabled={disabled}
-                value={reminderEnabled}
-                onChange={setReminderEnabled}
-              />
             </div>
           </div>
         </div>,

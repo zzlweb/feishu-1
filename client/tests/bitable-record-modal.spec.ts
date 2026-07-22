@@ -180,6 +180,7 @@ test('modal child popovers sit above the mask by z-index', async ({ page }) => {
   await modal.locator('.bitable-card-date-input-wrap').click();
   const datePanel = page.locator('[data-e2e="bitable-card-date-panel"]');
   await expect(datePanel).toBeVisible();
+  await expect(datePanel).not.toContainText('到期提醒');
   const dateZ = await datePanel.evaluate(el => Number(getComputedStyle(el).zIndex));
   expect(dateZ).toBeGreaterThan(maskZ);
 
