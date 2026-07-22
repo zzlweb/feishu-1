@@ -634,6 +634,10 @@ export function BitableKanbanView({
                       <article
                         className={`base-kanban__card${draggingRecordId === record.id ? ' is-dragging' : ''}${selectedRecordId === record.id ? ' is-selected' : ''}`}
                         key={record.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`记录：${title}`}
+                        aria-pressed={selectedRecordId === record.id}
                         draggable={!locked}
                         onDragStart={event => {
                           dragMovedRef.current = true;
@@ -650,6 +654,13 @@ export function BitableKanbanView({
                           dragMovedRef.current = false;
                         }}
                         onClick={event => handleKanbanCardClick(event, record.id, dragMovedRef, openRecord)}
+                        onKeyDown={event => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key !== 'Enter' && event.key !== ' ') return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openRecord(record.id);
+                        }}
                         onContextMenu={event => {
                           event.preventDefault();
                           event.stopPropagation();

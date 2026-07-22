@@ -132,6 +132,28 @@ test('opens record modal when clicking a kanban card', async ({ page }) => {
   await expect(page.locator('.base-kanban__card.is-selected')).toHaveCount(0);
 });
 
+test('opens kanban cards with Enter and Space from a stable keyboard focus', async ({ page }) => {
+  await openKanban(page);
+
+  const firstCard = page.locator('.base-kanban__card').first();
+  await firstCard.focus();
+  await expect(firstCard).toBeFocused();
+  await expect(firstCard).toHaveAttribute('role', 'button');
+  await expect(firstCard).toHaveAttribute('aria-label', '记录：任务 1');
+  await expect(firstCard).toHaveAttribute('aria-pressed', 'false');
+
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.bitable-record-card-mask')).toBeVisible();
+  await expect(firstCard).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(firstCard).toHaveAttribute('aria-pressed', 'false');
+
+  await firstCard.focus();
+  await page.keyboard.press('Space');
+  await expect(page.locator('.bitable-record-card-mask')).toBeVisible();
+  await expect(page.locator('.bitable-card-modal-header-v2-title')).toContainText('任务 1');
+});
+
 test('opens record modal from kanban card context menu', async ({ page }) => {
   await openKanban(page);
 
