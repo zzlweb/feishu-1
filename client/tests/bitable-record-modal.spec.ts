@@ -80,12 +80,34 @@ async function openRecordModal(page: Page) {
   await expect(block).toBeVisible();
   await expect(block.locator('.base-grid-canvas')).toBeVisible();
   await block.locator('.base-grid-canvas').hover({ position: { x: 140, y: 52 } });
-  await block.locator('.base-grid-row-hover-actions__view').click();
+  const opener = block.locator('.base-grid-row-hover-actions__view');
+  await opener.click();
   const modal = page.locator('.bitable-record-card-content');
   await expect(modal).toBeVisible();
   await expect(page.locator('.bitable-card-modal-header-v2-title')).toContainText('主任务');
-  return { block, modal };
+  return { block, modal, opener };
 }
+
+test('traps keyboard focus and restores it to the record trigger on close', async ({ page }) => {
+  const { modal, opener } = await openRecordModal(page);
+
+  await expect(modal).toBeFocused();
+  for (let index = 0; index < 16; index += 1) {
+    await page.keyboard.press('Tab');
+    const focusIsOwnedByModal = await page.evaluate(() => {
+      const active = document.activeElement;
+      return Boolean(active && (
+        document.querySelector('.bitable-record-card-content')?.contains(active)
+        || active.closest('[data-e2e="bitable-card-attachment-panel"], [data-e2e="bitable-card-date-panel"], .t-select__dropdown')
+      ));
+    });
+    expect(focusIsOwnedByModal).toBe(true);
+  }
+
+  await modal.getByRole('button', { name: '关闭' }).click();
+  await expect(modal).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
 
 test('record modal aligns field rows for text date and attachment', async ({ page }) => {
   const { modal } = await openRecordModal(page);

@@ -60,6 +60,29 @@ const ATTACHMENT_PANEL_HEIGHT = 240;
 const DATE_PANEL_WIDTH = 280;
 const DATE_PANEL_HEIGHT = 360;
 const CARD_MODAL_POPUP_MARGIN = 12;
+const CARD_MODAL_FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function getVisibleFocusableElements(root: ParentNode): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(CARD_MODAL_FOCUSABLE_SELECTOR))
+    .filter(element => element.getClientRects().length > 0 && element.getAttribute('aria-hidden') !== 'true');
+}
+
+function getCardModalFocusableElements(content: HTMLElement): HTMLElement[] {
+  const elements = getVisibleFocusableElements(content);
+  document.querySelectorAll<HTMLElement>([
+    '[data-e2e="bitable-card-attachment-panel"]',
+    '[data-e2e="bitable-card-date-panel"]',
+    '.t-select__dropdown',
+  ].join(',')).forEach(root => elements.push(...getVisibleFocusableElements(root)));
+  return Array.from(new Set(elements));
+}
 
 function clampCardModalPanelPosition(
   trigger: DOMRect,
@@ -1098,6 +1121,8 @@ export function BitableRecordCardModal({
 }: BitableRecordCardModalProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
   const [tab, setTab] = useState<'detail' | 'history' | 'comment'>('detail');
   const [hiddenExpanded, setHiddenExpanded] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -1130,14 +1155,40 @@ export function BitableRecordCardModal({
   const title = valueText(record.fields[table.primaryFieldId]) || '未命名记录';
   const history = record.history ?? [];
 
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    contentRef.current?.focus();
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    contentRef.current?.focus({ preventScroll: true });
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !contentRef.current) return;
+      const focusable = getCardModalFocusableElements(contentRef.current);
+      if (!focusable.length) {
+        event.preventDefault();
+        contentRef.current.focus({ preventScroll: true });
+        return;
+      }
+      const active = document.activeElement as HTMLElement | null;
+      const activeIndex = active ? focusable.indexOf(active) : -1;
+      if (event.shiftKey && activeIndex <= 0) {
+        event.preventDefault();
+        focusable[focusable.length - 1].focus({ preventScroll: true });
+      } else if (!event.shiftKey && (activeIndex < 0 || activeIndex === focusable.length - 1)) {
+        event.preventDefault();
+        focusable[0].focus({ preventScroll: true });
+      }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose, record.id]);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      const opener = openerRef.current;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, []);
 
   useEffect(() => {
     setTab('detail');
