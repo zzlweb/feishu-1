@@ -339,6 +339,45 @@ export interface BaseTable {
   activeViewId: string;
 }
 
+function resolveViewFieldIds(fields: BaseField[], primaryFieldId: FieldId, fieldOrder?: FieldId[]): FieldId[] {
+  const validIds = new Set(fields.map(field => field.id));
+  const candidates = [
+    primaryFieldId,
+    ...(fieldOrder || []).filter(fieldId => fieldId !== primaryFieldId),
+    ...fields.map(field => field.id),
+  ];
+  const seen = new Set<FieldId>();
+  return candidates.filter(fieldId => {
+    if (!validIds.has(fieldId) || seen.has(fieldId)) return false;
+    seen.add(fieldId);
+    return true;
+  });
+}
+
+export function resolveViewFields(table: BaseTable, view: BaseView): BaseField[] {
+  const byId = new Map(table.fields.map(field => [field.id, field]));
+  return resolveViewFieldIds(table.fields, table.primaryFieldId, view.fieldOrder)
+    .map(fieldId => byId.get(fieldId))
+    .filter((field): field is BaseField => Boolean(field));
+}
+
+export function reorderViewFields(table: BaseTable, viewId: string, fromIndex: number, toIndex: number): BaseTable {
+  const view = table.views.find(item => item.id === viewId);
+  if (!view || view.locked || fromIndex === toIndex) return table;
+  const fields = resolveViewFields(table, view);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex >= fields.length || toIndex >= fields.length) return table;
+  if (fields[fromIndex]?.id === table.primaryFieldId || fields[toIndex]?.id === table.primaryFieldId) return table;
+  const [moved] = fields.splice(fromIndex, 1);
+  if (!moved) return table;
+  fields.splice(toIndex, 0, moved);
+  return {
+    ...table,
+    views: table.views.map(item => item.id === viewId
+      ? { ...item, fieldOrder: fields.map(field => field.id) }
+      : item),
+  };
+}
+
 type LegacyAttrs = Record<string, unknown>;
 
 function uid(prefix: string) {
@@ -776,11 +815,15 @@ function normalizeTable(raw: BaseTable): BaseTable {
     sorts: [],
   }];
   const normalizedViews = views.map(view => {
+    const fieldOrder = Array.isArray(view.fieldOrder)
+      ? resolveViewFieldIds(fields, primaryFieldId, view.fieldOrder)
+      : undefined;
     if (view.type === 'gantt') {
       const config = view.config as Partial<GanttViewConfig>;
       const defaults = createGanttConfig(fields, primaryFieldId);
       return {
         ...view,
+        fieldOrder,
         tableId,
         filters: view.filters || [],
         sorts: view.sorts || [],
@@ -809,7 +852,7 @@ function normalizeTable(raw: BaseTable): BaseTable {
         { ...(config || {}), fieldWidths },
         fields,
       );
-      return { ...view, tableId, config: normalizedConfig, filters: view.filters || [], sorts: view.sorts || [] };
+      return { ...view, fieldOrder, tableId, config: normalizedConfig, filters: view.filters || [], sorts: view.sorts || [] };
     }
     if (view.type === 'kanban') {
       const config = view.config as Partial<GalleryViewConfig>;
@@ -819,6 +862,7 @@ function normalizeTable(raw: BaseTable): BaseTable {
       const validCover = fields.some(field => field.id === config.coverFieldId && field.type === 'attachment');
       return {
         ...view,
+        fieldOrder,
         tableId,
         filters: view.filters || [],
         sorts: view.sorts || [],
@@ -836,11 +880,12 @@ function normalizeTable(raw: BaseTable): BaseTable {
         },
       };
     }
-    if (view.type !== 'gallery') return { ...view, tableId, config: view.config || {}, filters: view.filters || [], sorts: view.sorts || [] };
+    if (view.type !== 'gallery') return { ...view, fieldOrder, tableId, config: view.config || {}, filters: view.filters || [], sorts: view.sorts || [] };
     const config = view.config as Partial<GalleryViewConfig>;
     const validCover = fields.some(field => field.id === config.coverFieldId && field.type === 'attachment');
     return {
       ...view,
+      fieldOrder,
       tableId,
       filters: view.filters || [],
       sorts: view.sorts || [],

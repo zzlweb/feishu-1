@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { Checkbox } from 'tdesign-react';
-import { valueText, buildRecordTreeMeta, buildGridDisplayRows, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, normalizeColorValue, textColorForBackground as readableTextColorForBackground, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridDisplayRow, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from '../model/bitableModel';
+import { valueText, buildRecordTreeMeta, buildGridDisplayRows, filterRecordsByCollapsedAncestors, getRecordSubtreeIds, getRootDisplayNumber, resolveGridRowHeight, resolveViewFields, normalizeMultiSelectIds, getMultiSelectChoices, findSelectChoice, normalizeColorValue, textColorForBackground as readableTextColorForBackground, RECORD_TREE_INDENT, type BaseField, type BaseRecord, type BaseTable, type BaseView, type CellValue, type GridDisplayRow, type GridViewConfig, type RecordTreeRowMeta, type SelectChoice } from '../model/bitableModel';
 import { createPortal } from 'react-dom';
 import type { Ref } from 'react';
 import { BITABLE_BLOCK_EXPAND_ALL } from '../BitableContextMenu';
@@ -1018,7 +1018,8 @@ export function BitableGridView({
   const [rowDrag, setRowDrag] = useState<{ fromIndex: number; overIndex: number } | null>(null);
   const [collapsedRecordIds, setCollapsedRecordIds] = useState<Set<string>>(() => new Set());
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
-  const visibleFields = table.fields.filter(field => !(activeView.hiddenFieldIds || []).includes(field.id));
+  const visibleFields = resolveViewFields(table, activeView)
+    .filter(field => !(activeView.hiddenFieldIds || []).includes(field.id));
   const gridConfig = activeView.config as GridViewConfig;
   const treeRecords = useMemo(
     () => filterRecordsByCollapsedAncestors(records, collapsedRecordIds),

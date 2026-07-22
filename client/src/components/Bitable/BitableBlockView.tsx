@@ -35,6 +35,7 @@ import {
   parseDateCellValue,
   pinRecordsToVisibleBottom,
   reorderRecordsInTreeById,
+  reorderViewFields,
   getActiveView,
   getAttachments,
   getGanttConfig,
@@ -43,6 +44,7 @@ import {
   isViewTypeVisible,
   getGridGroupFieldIds,
   resolveGridGroupRules,
+  resolveViewFields,
   groupRecords,
   nextAutoFieldName,
   parseBaseTable,
@@ -1383,6 +1385,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       }),
       views: current.views.map(view => ({
         ...view,
+        fieldOrder: view.fieldOrder?.filter(id => id !== fieldId),
         hiddenFieldIds: view.hiddenFieldIds?.filter(id => id !== fieldId),
         filters: view.filters?.filter(filter => filter.fieldId !== fieldId),
         sorts: view.sorts?.filter(sort => sort.fieldId !== fieldId),
@@ -1425,12 +1428,7 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
 
   const reorderFields = (fromIndex: number, toIndex: number) => {
     if (activeView.locked || fromIndex === toIndex) return;
-    mutate(current => {
-      const fields = [...current.fields];
-      const [moved] = fields.splice(fromIndex, 1);
-      fields.splice(toIndex, 0, moved);
-      return { ...current, fields };
-    });
+    mutate(current => reorderViewFields(current, activeView.id, fromIndex, toIndex));
   };
 
   const insertFieldAfter = (fieldId: string, source?: BaseField) => {
@@ -1444,9 +1442,16 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
         : { id, name: nextAutoFieldName(current.fields), type: 'text' };
       const fields = [...current.fields];
       fields.splice(insertIndex, 0, field);
+      const currentView = current.views.find(view => view.id === activeView.id);
+      const activeOrder = currentView
+        ? resolveViewFields({ ...current, fields }, currentView).map(item => item.id).filter(itemId => itemId !== id)
+        : fields.map(item => item.id).filter(itemId => itemId !== id);
+      const referenceIndex = activeOrder.indexOf(fieldId);
+      activeOrder.splice(referenceIndex >= 0 ? referenceIndex + 1 : activeOrder.length, 0, id);
       return {
         ...current,
         fields,
+        views: current.views.map(view => view.id === activeView.id ? { ...view, fieldOrder: activeOrder } : view),
         records: current.records.map(record => ({
           ...record,
           fields: {
@@ -1467,9 +1472,16 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
       const field: BaseField = { id, name: nextAutoFieldName(current.fields), type: 'text' };
       const fields = [...current.fields];
       fields.splice(insertIndex, 0, field);
+      const currentView = current.views.find(view => view.id === activeView.id);
+      const activeOrder = currentView
+        ? resolveViewFields({ ...current, fields }, currentView).map(item => item.id).filter(itemId => itemId !== id)
+        : fields.map(item => item.id).filter(itemId => itemId !== id);
+      const referenceIndex = activeOrder.indexOf(fieldId);
+      activeOrder.splice(referenceIndex >= 0 ? referenceIndex : activeOrder.length, 0, id);
       return {
         ...current,
         fields,
+        views: current.views.map(view => view.id === activeView.id ? { ...view, fieldOrder: activeOrder } : view),
         records: current.records.map(record => ({
           ...record,
           fields: {
@@ -3031,6 +3043,7 @@ function FieldConfigPanel({
   const fieldDragGhostRef = useRef<HTMLDivElement | null>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const hiddenFieldIds = new Set(view.hiddenFieldIds || []);
+  const orderedFields = resolveViewFields(table, view);
   const canDeleteField = table.fields.length > 1;
 
   const updateCurrentView = (update: (current: BaseView) => BaseView) => {
@@ -3088,7 +3101,7 @@ function FieldConfigPanel({
   };
 
   const handleFieldDragStart = (event: DragEvent, index: number) => {
-    if (view.locked || table.fields[index]?.id === table.primaryFieldId) return;
+    if (view.locked || orderedFields[index]?.id === table.primaryFieldId) return;
     fieldDragFromRef.current = index;
     setDraggingFieldIndex(index);
     setDragOverFieldIndex(null);
@@ -3109,7 +3122,7 @@ function FieldConfigPanel({
     if (view.locked || fieldDragFromRef.current == null) return;
     event.dataTransfer.dropEffect = 'move';
     const index = resolveFieldDropIndex(event.clientY);
-    if (index == null || table.fields[index]?.id === table.primaryFieldId) {
+    if (index == null || orderedFields[index]?.id === table.primaryFieldId) {
       setDragOverFieldIndex(null);
       return;
     }
@@ -3129,7 +3142,7 @@ function FieldConfigPanel({
     setDraggingFieldIndex(null);
     setDragOverFieldIndex(null);
     if (toIndex == null || Number.isNaN(fromIndex) || fromIndex === toIndex) return;
-    if (table.fields[toIndex]?.id === table.primaryFieldId) return;
+    if (orderedFields[toIndex]?.id === table.primaryFieldId) return;
     onReorderFields(fromIndex, toIndex);
   };
 
@@ -3139,7 +3152,7 @@ function FieldConfigPanel({
     setDragOverFieldIndex(null);
   };
 
-  const listMaxHeight = Math.min(280, Math.max(36, table.fields.length * 36 + 8));
+  const listMaxHeight = Math.min(280, Math.max(36, orderedFields.length * 36 + 8));
   const defaultNewFieldName = useMemo(() => nextAutoFieldName(table.fields), [table.fields]);
 
   const openAddField = () => {
@@ -3179,7 +3192,7 @@ function FieldConfigPanel({
           onDragOver={handleFieldListDragOver}
           onDrop={handleFieldListDrop}
         >
-          {table.fields.map((field, index) => {
+          {orderedFields.map((field, index) => {
             const isPrimary = field.id === table.primaryFieldId;
             const isVisible = !hiddenFieldIds.has(field.id);
             const fieldCanDelete = canDeleteField && !isPrimary;
@@ -3237,7 +3250,7 @@ function FieldConfigPanel({
                     <GlyphMore />
                   </button>
                 )}
-                {isPrimary && index === 0 && table.fields.length > 1 && <div className="base-field-panel__frozen-divider" />}
+                {isPrimary && index === 0 && orderedFields.length > 1 && <div className="base-field-panel__frozen-divider" />}
               </li>
             );
           })}

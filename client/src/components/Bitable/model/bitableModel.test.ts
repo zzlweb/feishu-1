@@ -5,6 +5,8 @@ import {
   insertRecordsIntoTable,
   parseDateCellValue,
   pinRecordsToVisibleBottom,
+  reorderViewFields,
+  resolveViewFields,
   reorderRecordsInTreeById,
   resolveGridRowHeight,
   type BaseField,
@@ -101,5 +103,50 @@ describe('Bitable model contracts', () => {
     const current = table([record('a', 'A')]);
     expect(current.primaryFieldId).toBe('title');
     expect(current.fields[0]?.id).toBe(current.primaryFieldId);
+  });
+
+  test('field order is isolated per view and keeps the primary field first', () => {
+    const current = table([record('a', 'A')]);
+    current.fields = [
+      ...fields,
+      { id: 'owner', name: '负责人', type: 'text' },
+    ];
+    current.views = [
+      { id: 'grid-a', tableId: current.id, name: '表格 A', type: 'grid', config: {} },
+      {
+        id: 'grid-b',
+        tableId: current.id,
+        name: '表格 B',
+        type: 'grid',
+        config: {},
+        fieldOrder: ['title', 'tags', 'owner'],
+      },
+    ];
+
+    const reordered = reorderViewFields(current, 'grid-a', 1, 2);
+    expect(reordered.fields.map(field => field.id)).toEqual(['title', 'tags', 'owner']);
+    expect(resolveViewFields(reordered, reordered.views[0]).map(field => field.id))
+      .toEqual(['title', 'owner', 'tags']);
+    expect(resolveViewFields(reordered, reordered.views[1]).map(field => field.id))
+      .toEqual(['title', 'tags', 'owner']);
+    expect(current.views[0].fieldOrder).toBeUndefined();
+  });
+
+  test('view field order drops unknown ids and appends newly added fields', () => {
+    const current = table([record('a', 'A')]);
+    current.fields = [
+      ...fields,
+      { id: 'new-field', name: '新增字段', type: 'text' },
+    ];
+    const view: BaseView = {
+      id: 'grid',
+      tableId: current.id,
+      name: '表格',
+      type: 'grid',
+      config: {},
+      fieldOrder: ['title', 'missing', 'tags'],
+    };
+    expect(resolveViewFields(current, view).map(field => field.id))
+      .toEqual(['title', 'tags', 'new-field']);
   });
 });
