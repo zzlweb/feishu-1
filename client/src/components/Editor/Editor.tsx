@@ -959,6 +959,7 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
   const viewMode = (['text', 'card', 'preview'].includes(String(attrs.viewMode)) ? String(attrs.viewMode) : (kind === 'image' ? 'preview' : 'card')) as FileViewMode;
   const isUploading = status === 'local' || status === 'uploading' || status === 'processing';
   const isFailed = status === 'failed' || status === 'canceled';
+  const canRetryUpload = mediaUploadFiles.has(String(attrs.uploadId || ''));
   const canPreview = Boolean(src && (canPreviewMedia(kind, attrs.mime) || extension === 'pdf'));
   const isImagePreview = kind === 'image' && viewMode === 'preview' && canPreview;
   const isFilePreview = kind !== 'image' && viewMode === 'preview' && canPreview;
@@ -1016,6 +1017,47 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
   });
   const retryUpload = () => {
     window.dispatchEvent(new CustomEvent(MEDIA_UPLOAD_EVENT, { detail: { action: 'retry', uploadId: attrs.uploadId } }));
+  };
+  const reselectUpload = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = kind === 'image' ? 'image/*' : kind === 'video' ? 'video/*' : kind === 'audio' ? 'audio/*' : '*/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const validationError = validateDroppedFile(file);
+      if (validationError) {
+        updateAttributes({ uploadStatus: 'failed', errorMessage: validationError });
+        return;
+      }
+      const uploadId = String(attrs.uploadId || createMediaId('upload'));
+      const previousTask = mediaUploadFiles.get(uploadId);
+      if (previousTask?.objectUrl) URL.revokeObjectURL(previousTask.objectUrl);
+      const nextKind = classifyMediaFile(file);
+      const nextExtension = getFileExtension(file.name);
+      const canUseLocalPreview = nextKind === 'image' || nextKind === 'video' || nextKind === 'audio' || nextExtension === 'pdf';
+      const objectUrl = canUseLocalPreview ? URL.createObjectURL(file) : '';
+      mediaUploadFiles.set(uploadId, objectUrl ? { file, objectUrl } : { file });
+      registerMediaUploadFile(uploadId, file);
+      updateAttributes({
+        uploadId,
+        fileId: '',
+        name: file.name,
+        size: file.size,
+        mime: file.type,
+        extension: nextExtension,
+        mediaKind: nextKind,
+        viewMode: canUseLocalPreview ? 'preview' : 'card',
+        url: '',
+        previewUrl: '',
+        localObjectUrl: objectUrl,
+        uploadStatus: 'local',
+        uploadProgress: 0,
+        errorMessage: '',
+      });
+      window.dispatchEvent(new CustomEvent(MEDIA_UPLOAD_EVENT, { detail: { action: 'retry', uploadId } }));
+    };
+    input.click();
   };
   const cancelUpload = () => {
     window.dispatchEvent(new CustomEvent(MEDIA_UPLOAD_EVENT, { detail: { action: 'cancel', uploadId: attrs.uploadId } }));
@@ -1151,6 +1193,25 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
                   onBoundsChange={handleBoundsChange}
                 />
               )}
+              {(isUploading || isFailed) && (
+                <div className={`feishu-media-upload-feedback${isFailed ? ' is-failed' : ''}`}>
+                  <span>{isUploading ? `上传中 ${progress}%` : (attrs.errorMessage || '上传失败')}</span>
+                  {isUploading && (
+                    <div className="feishu-media-progress" aria-label={`上传进度 ${progress}%`}>
+                      <span style={{ width: `${progress}%` }} />
+                    </div>
+                  )}
+                  <div className="feishu-media-upload-feedback__actions">
+                    {isFailed && (
+                      <button type="button" onMouseDown={event => event.preventDefault()} onClick={canRetryUpload ? retryUpload : reselectUpload}>
+                        {canRetryUpload ? '重试' : '重新选择'}
+                      </button>
+                    )}
+                    {isUploading && <button type="button" onMouseDown={event => event.preventDefault()} onClick={cancelUpload}>取消</button>}
+                    <button type="button" className="is-danger" onMouseDown={event => event.preventDefault()} onClick={deleteNode}>移除</button>
+                  </div>
+                </div>
+              )}
             </>
           )}
           {kind === 'video' && (
@@ -1228,7 +1289,7 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
                 </div>
               )}
               <div className="feishu-file-actions" data-no-marquee-selection="true">
-                {isFailed && <button type="button" onMouseDown={e => e.preventDefault()} onClick={retryUpload}>重试</button>}
+                {isFailed && <button type="button" onMouseDown={e => e.preventDefault()} onClick={canRetryUpload ? retryUpload : reselectUpload}>{canRetryUpload ? '重试' : '重新选择'}</button>}
                 {isUploading && <button type="button" onMouseDown={e => e.preventDefault()} onClick={cancelUpload}>取消</button>}
                 {attrs.url && <button type="button" onMouseDown={e => e.preventDefault()} onClick={copyLink}>复制链接</button>}
                 {attrs.url && <a href={attrs.url} download={attrs.name || 'file'} onMouseDown={e => e.stopPropagation()}>下载</a>}
@@ -1260,7 +1321,7 @@ function MediaFileBlockView({ node, updateAttributes, editor, getPos, selected }
             )}
           </div>
           <div className="feishu-file-actions" data-no-marquee-selection="true">
-            {isFailed && <button type="button" onMouseDown={e => e.preventDefault()} onClick={retryUpload}>重试</button>}
+            {isFailed && <button type="button" onMouseDown={e => e.preventDefault()} onClick={canRetryUpload ? retryUpload : reselectUpload}>{canRetryUpload ? '重试' : '重新选择'}</button>}
             {isUploading && <button type="button" onMouseDown={e => e.preventDefault()} onClick={cancelUpload}>取消</button>}
             {attrs.url && <button type="button" onMouseDown={e => e.preventDefault()} onClick={copyLink}>复制链接</button>}
             {attrs.url && <a href={attrs.url} download={attrs.name || 'file'} onMouseDown={e => e.stopPropagation()}>下载</a>}

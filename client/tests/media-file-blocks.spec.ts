@@ -172,3 +172,63 @@ test('keeps failed file blocks with a retry action', async ({ page }) => {
   await block.getByRole('button', { name: '重试' }).click();
   await expect(block).toHaveAttribute('data-upload-status', 'success');
 });
+
+test('keeps failed image uploads actionable with retry and remove controls', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/uploads', route => {
+    calls += 1;
+    if (calls === 1) return route.fulfill({ status: 500, json: { code: -1, message: '图片上传失败' } });
+    return route.fulfill({
+      status: 201,
+      json: { code: 0, data: { name: 'retry.png', size: 12, type: 'image/png', url: '/static/uploads/retry.png' } },
+    });
+  });
+  await openMediaDoc(page);
+
+  await dropFiles(page, [{ name: 'retry.png', type: 'image/png', body: 'fake-image' }]);
+
+  const block = page.locator('[data-local-block="file"][data-upload-id]').first();
+  await expect(block).toHaveAttribute('data-upload-status', 'failed');
+  await expect(block.getByText('图片上传失败')).toBeVisible();
+  await expect(block.getByRole('button', { name: '移除' })).toBeVisible();
+  await block.getByRole('button', { name: '重试' }).click();
+  await expect(block).toHaveAttribute('data-upload-status', 'success');
+});
+
+test('asks for a replacement file when retrying after reload', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/uploads', route => {
+    calls += 1;
+    if (calls === 1) return route.fulfill({ status: 500, json: { code: -1, message: 'mock failed' } });
+    return route.fulfill({
+      status: 201,
+      json: { code: 0, data: { name: 'archive.zip', size: 42, type: 'application/zip', url: '/static/uploads/archive.zip' } },
+    });
+  });
+  await openMediaDoc(page);
+
+  const failedSave = page.waitForRequest(request => {
+    if (!request.url().endsWith('/api/documents/media-file-blocks-e2e') || request.method() !== 'PUT') return false;
+    const body = request.postDataJSON() as { content?: string };
+    return Boolean(body.content?.includes('data-upload-status="failed"'));
+  });
+  await dropFiles(page, [{ name: 'archive.zip', type: 'application/zip', body: 'zip' }]);
+  const savedContent = ((await failedSave).postDataJSON() as { content: string }).content;
+
+  await page.unroute('**/api/documents/media-file-blocks-e2e');
+  await page.route('**/api/documents/media-file-blocks-e2e', route => {
+    if (route.request().method() === 'GET') {
+      return route.fulfill({ json: { code: 0, data: { ...mediaDocument, content: savedContent } } });
+    }
+    return route.fulfill({ json: { code: 0, data: mediaDocument } });
+  });
+  await page.reload();
+
+  const block = page.locator('[data-local-block="file"][data-upload-id]').first();
+  await expect(block).toHaveAttribute('data-upload-status', 'failed');
+  const chooserPromise = page.waitForEvent('filechooser');
+  await block.getByRole('button', { name: '重新选择' }).click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles({ name: 'archive.zip', mimeType: 'application/zip', buffer: Buffer.from('replacement') });
+  await expect(block).toHaveAttribute('data-upload-status', 'success');
+});
