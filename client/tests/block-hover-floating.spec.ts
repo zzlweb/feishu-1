@@ -116,3 +116,34 @@ test('shows the plus button beside a focused empty paragraph', async ({ page }) 
   expect(buttonBox.y).toBeGreaterThan(0);
   expect(Math.abs((buttonBox.y + buttonBox.height / 2) - (paragraphBox.y + paragraphBox.height / 2))).toBeLessThanOrEqual(4);
 });
+
+test('closes block context menu when pointer leaves for editor content', async ({ page }) => {
+  await page.goto('/doc/hover-floating-e2e');
+
+  const firstParagraph = page.locator('.ProseMirror p').first();
+  await expect(firstParagraph).toBeVisible();
+  await firstParagraph.hover();
+  await firstParagraph.click();
+  await page.keyboard.type('menu source');
+  await firstParagraph.hover();
+
+  const blockDrag = page.locator('.block-drag-row').first();
+  await expect(blockDrag).toBeVisible();
+  await blockDrag.hover();
+  await expect(page.locator('.context-menu')).toBeVisible();
+
+  const menuBox = await page.locator('.context-menu').first().boundingBox();
+  expect(menuBox).not.toBeNull();
+  if (menuBox) {
+    await page.mouse.move(menuBox.x + menuBox.width / 2, menuBox.y + 40);
+  }
+
+  const editorArea = page.locator('.editor-content-area');
+  const areaBox = await editorArea.boundingBox();
+  expect(areaBox).not.toBeNull();
+  if (areaBox) {
+    await page.mouse.move(areaBox.x + areaBox.width * 0.75, areaBox.y + areaBox.height * 0.7, { steps: 10 });
+  }
+
+  await expect(page.locator('.context-menu')).toBeHidden({ timeout: 2_000 });
+});

@@ -83,7 +83,9 @@ function buildPlainTextDocument(text: string) {
 
 function compactImportMessages(messages: string[] = []) {
   const counts = new Map<string, number>();
-  messages.forEach(message => counts.set(message, (counts.get(message) || 0) + 1));
+  messages
+    .filter(message => !/飞书群名片暂无法完整还原|Wiki 子页面列表暂无法完整还原/.test(message))
+    .forEach(message => counts.set(message, (counts.get(message) || 0) + 1));
   return Array.from(counts.entries()).map(([message, count]) =>
     count > 1 ? `${message}（共 ${count} 处）` : message,
   );
@@ -91,7 +93,10 @@ function compactImportMessages(messages: string[] = []) {
 
 function compactUnsupportedBlocks(blocks: ImportDocumentResult['unsupported_blocks'] = []) {
   const grouped = new Map<string, { reason: string; count: number }>();
-  blocks.forEach(block => {
+  blocks
+    // 旧导入结果会随文档保留；这些类型现已支持，避免刷新页面时继续展示历史告警。
+    .filter(block => !['chat_card', '20', '42', '51'].includes(block.type))
+    .forEach(block => {
     const current = grouped.get(block.type);
     if (current) current.count += 1;
     else grouped.set(block.type, { reason: block.reason, count: 1 });
@@ -133,6 +138,16 @@ function ImportResultPanel({
         来源：{result.source_name || '导入文档'}
         {result.asset_count ? ` · 资源 ${result.asset_count} 个` : ''}
       </div>
+      {result.source_url ? (
+        <a
+          className="feishu-import-result__source-link"
+          href={result.source_url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          查看原始来源
+        </a>
+      ) : null}
       {result.import_metadata ? (
         <div className="feishu-import-result__metadata">
           <div className="feishu-import-result__metadata-row">

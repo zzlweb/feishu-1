@@ -197,7 +197,8 @@ export function renderImportedBlock(block: ImportedBlock): string {
     const href = block.url ? ` data-href="${escapeAttr(block.url)}"` : '';
     const kind = block.kind ? ` data-kind="${escapeAttr(block.kind)}"` : '';
     const desc = block.desc ? ` data-desc="${escapeAttr(block.desc)}"` : '';
-    return `<div data-local-block="embed"${kind}${href}${desc} data-title="${escapeAttr(block.title)}">${escapeHtml(block.title)}</div>`;
+    const metadata = block.metadata ? ` data-embed-meta="${stringifyJsonAttr(block.metadata)}"` : '';
+    return `<div data-local-block="embed"${kind}${href}${desc}${metadata} data-title="${escapeAttr(block.title)}">${escapeHtml(block.title)}</div>`;
   }
   if (block.type === 'formula') {
     const formula = block.formula || '';

@@ -61,6 +61,15 @@ function textNodeClientRectsContainPoint(root: Element, clientX: number, clientY
   return false;
 }
 
+/** 靠近单元格边缘时优先进入矩形选区，避免整行段落的文本 rect 吞掉拖选起点。 */
+function isNearCellEdge(cell: HTMLElement, clientX: number, clientY: number, edge = 10): boolean {
+  const rect = cell.getBoundingClientRect();
+  return clientX >= rect.right - edge
+    || clientX <= rect.left + edge
+    || clientY >= rect.bottom - edge
+    || clientY <= rect.top + edge;
+}
+
 function resolveCellElement(target: EventTarget | null): HTMLElement | null {
   const element = closestElement(target);
   const cell = element?.closest('td, th');
@@ -181,6 +190,18 @@ function isSelectionInsideTable(selection: Selection): boolean {
   return false;
 }
 
+function isDomSelectionInsideTable(view: any): boolean {
+  const selection = view.dom.ownerDocument.getSelection();
+  if (!selection || selection.rangeCount === 0) return false;
+  const anchorNode = selection.anchorNode;
+  const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement;
+  const anchorCell = anchorElement?.closest('td, th');
+  if (!anchorCell) return false;
+  const range = selection.getRangeAt(0);
+  const startElement = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+  return Boolean(startElement?.closest('td, th'));
+}
+
 function findTableDepth($pos: TextSelection['$from']): number | null {
   for (let depth = $pos.depth; depth > 0; depth -= 1) {
     if ($pos.node(depth).type.name === 'table') return depth;
@@ -202,13 +223,16 @@ interface ClipboardMatrixCell {
   text: string;
   json?: unknown;
   backgroundColor?: string;
+  rowspan?: number;
+  colspan?: number;
   covered?: boolean;
 }
 
 type ClipboardMatrix = ClipboardMatrixCell[][];
 
 function safeClipboardBackground(cell: HTMLElement): string {
-  if (cell.style.backgroundColor) return cell.style.backgroundColor;
+  const inlineColor = cell.style.getPropertyValue('background-color') || cell.style.backgroundColor;
+  if (inlineColor) return inlineColor;
   const legacyColor = cell.getAttribute('bgcolor');
   if (!legacyColor) return '';
   const probe = document.createElement('span');
@@ -238,7 +262,7 @@ function markCoveredClipboardCells(
   }
 }
 
-function matrixFromClipboard(html: string, text: string): ClipboardMatrix | null {
+export function matrixFromClipboard(html: string, text: string): ClipboardMatrix | null {
   if (html && /<table[\s>]/i.test(html)) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const table = doc.querySelector('table');
@@ -256,6 +280,8 @@ function matrixFromClipboard(html: string, text: string): ClipboardMatrix | null
           row[colIndex] = {
             text: value,
             backgroundColor: safeClipboardBackground(cell),
+            rowspan,
+            colspan,
           };
           markCoveredClipboardCells(rows, rowIndex, colIndex, rowspan, colspan);
           colIndex += colspan;
@@ -301,6 +327,8 @@ function matrixFromCustomClipboard(raw: string): ClipboardMatrix | null {
           text: cell?.text ?? '',
           json: cell?.json,
           backgroundColor: typeof attrs?.backgroundColor === 'string' ? attrs.backgroundColor : undefined,
+          rowspan,
+          colspan,
         };
         markCoveredClipboardCells(rows, rowIndex, colIndex, rowspan, colspan);
         colIndex += colspan;
@@ -321,7 +349,7 @@ function paragraphFragmentFromText(editor: any, value: string) {
   ));
 }
 
-function writeCellMatrix(editor: any, matrix: ClipboardMatrix): boolean {
+export function writeCellMatrix(editor: any, matrix: ClipboardMatrix, options: { applySpans?: boolean } = {}): boolean {
   const { selection, doc } = editor.state;
   const tableDepth = selection instanceof CellSelection
     ? selection.$anchorCell.depth - 1
@@ -379,14 +407,28 @@ function writeCellMatrix(editor: any, matrix: ClipboardMatrix): boolean {
       const nextAttrs = source.backgroundColor
         ? { ...cell.attrs, backgroundColor: source.backgroundColor }
         : cell.attrs;
-      const nextCell = cell.type.createChecked(nextAttrs, content, cell.marks);
+      const safeRowspan = options.applySpans
+        ? Math.max(1, Math.min(Number(source.rowspan || 1), map.height - row))
+        : cell.attrs.rowspan || 1;
+      const safeColspan = options.applySpans
+        ? Math.max(1, Math.min(Number(source.colspan || 1), map.width - col))
+        : cell.attrs.colspan || 1;
+      const spanAttrs = options.applySpans
+        ? {
+          ...nextAttrs,
+          rowspan: safeRowspan,
+          colspan: safeColspan,
+          colwidth: safeColspan > 1 ? null : nextAttrs.colwidth,
+        }
+        : nextAttrs;
+      const nextCell = cell.type.createChecked(spanAttrs, content, cell.marks);
       tr = tr.replaceWith(cellPos, cellPos + cell.nodeSize, nextCell);
     }
   }
 
   if (!tr.docChanged) return false;
   editor.view.dispatch(tr.scrollIntoView());
-  editor.commands.fixTables();
+  if (!options.applySpans) editor.commands.fixTables();
   return true;
 }
 
@@ -600,7 +642,10 @@ const FeishuTableInteractions = Extension.create({
               document.querySelectorAll('.feishu-table-host.is-table-block-active, .tableWrapper.is-table-block-active')
                 .forEach(host => host.classList.remove('is-table-block-active'));
               const cell = resolveCellElement(event.target);
-              if (cell && !textNodeClientRectsContainPoint(cell, event.clientX, event.clientY)) {
+              if (cell && (
+                isNearCellEdge(cell, event.clientX, event.clientY)
+                || !textNodeClientRectsContainPoint(cell, event.clientX, event.clientY)
+              )) {
                 return beginCellRangeDrag(view, event, cell);
               }
               if (view.state.selection instanceof NodeSelection) {
@@ -612,14 +657,11 @@ const FeishuTableInteractions = Extension.create({
             copy: (_view, event) => copyCellSelection(editor, event),
             paste: (_view, event) => {
               if (!isSelectionInsideTable(editor.state.selection)) return false;
-              const matrix = matrixFromCustomClipboard(event.clipboardData?.getData(TABLE_MIME) ?? '')
-                ?? matrixFromClipboard(
-                event.clipboardData?.getData('text/html') ?? '',
-                event.clipboardData?.getData('text/plain') ?? '',
-              );
+              if (!isDomSelectionInsideTable(_view)) return false;
+              const matrix = matrixFromCustomClipboard(event.clipboardData?.getData(TABLE_MIME) ?? '');
               if (!matrix) return false;
               event.preventDefault();
-              return writeCellMatrix(editor, matrix);
+              return writeCellMatrix(editor, matrix, { applySpans: true });
             },
           },
         },
@@ -724,6 +766,16 @@ export const FeishuTableHeader = TableHeader.extend({
           return { style: `background-color: ${attributes.backgroundColor}` };
         },
       },
+      colspan: {
+        default: 1,
+        parseHTML: element => Number.parseInt(element.getAttribute('colspan') || '1', 10) || 1,
+        renderHTML: attributes => ({ colspan: attributes.colspan || 1 }),
+      },
+      rowspan: {
+        default: 1,
+        parseHTML: element => Number.parseInt(element.getAttribute('rowspan') || '1', 10) || 1,
+        renderHTML: attributes => ({ rowspan: attributes.rowspan || 1 }),
+      },
       hiddenByMerge: {
         default: false,
         parseHTML: element => element.getAttribute('data-hidden-by-merge') === 'true',
@@ -769,6 +821,16 @@ export const FeishuTableCell = TableCell.extend({
           if (!attributes.backgroundColor) return {};
           return { style: `background-color: ${attributes.backgroundColor}` };
         },
+      },
+      colspan: {
+        default: 1,
+        parseHTML: element => Number.parseInt(element.getAttribute('colspan') || '1', 10) || 1,
+        renderHTML: attributes => ({ colspan: attributes.colspan || 1 }),
+      },
+      rowspan: {
+        default: 1,
+        parseHTML: element => Number.parseInt(element.getAttribute('rowspan') || '1', 10) || 1,
+        renderHTML: attributes => ({ rowspan: attributes.rowspan || 1 }),
       },
       hiddenByMerge: {
         default: false,

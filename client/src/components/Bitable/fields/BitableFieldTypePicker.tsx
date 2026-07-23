@@ -122,7 +122,26 @@ export function BitableFieldTypePicker({
       if (event.key === 'Escape') {
         event.stopPropagation();
         onClose();
+        return;
       }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const options = Array.from(
+        panelRef.current?.querySelectorAll<HTMLButtonElement>(
+          '.base-b-field-option-list__item:not(:disabled)',
+        ) || [],
+      );
+      if (!options.length) return;
+      event.preventDefault();
+      const currentIndex = options.findIndex(option => option === document.activeElement);
+      const nextIndex = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? options.length - 1
+          : event.key === 'ArrowUp'
+            ? (currentIndex <= 0 ? options.length - 1 : currentIndex - 1)
+            : (currentIndex + 1) % options.length;
+      options[nextIndex].focus();
+      options[nextIndex].scrollIntoView({ block: 'nearest' });
     };
     const onMouseDown = (event: globalThis.MouseEvent) => {
       if (!(event.target instanceof Node)) return;

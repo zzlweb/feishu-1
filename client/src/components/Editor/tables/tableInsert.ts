@@ -361,50 +361,93 @@ export function distributeActiveTableColumns(editor: Editor): boolean {
   return true;
 }
 
-export function setTableColumnWidth(
+/** 一次性写入整表列宽，避免只改一列时其余列回落到 minWidth 再被拉伸回弹。 */
+export function setTableColumnWidths(
   editor: Editor,
   tablePos: number,
-  colIndex: number,
-  width: number,
+  widths: number[],
 ): boolean {
   const table = editor.state.doc.nodeAt(tablePos);
   if (!table || table.type.name !== 'table') return false;
   const map = TableMap.get(table);
-  if (colIndex < 0 || colIndex >= map.width) return false;
+  if (widths.length < map.width) return false;
 
-  const nextWidth = Math.max(1, Math.round(width));
+  const nextWidths = widths.slice(0, map.width).map(width => Math.max(1, Math.round(width)));
   let tr = editor.state.tr;
   const tableStart = tablePos + 1;
+  const seen = new Set<number>();
 
   for (let rowIndex = 0; rowIndex < map.height; rowIndex += 1) {
-    const mapIndex = rowIndex * map.width + colIndex;
-    if (rowIndex > 0 && map.map[mapIndex] === map.map[mapIndex - map.width]) continue;
+    for (let colIndex = 0; colIndex < map.width; colIndex += 1) {
+      const cellOffset = map.map[rowIndex * map.width + colIndex];
+      if (seen.has(cellOffset)) continue;
+      seen.add(cellOffset);
 
-    const cellOffset = map.map[mapIndex];
-    const cell = table.nodeAt(cellOffset);
-    if (!cell) continue;
+      const cell = table.nodeAt(cellOffset);
+      if (!cell) continue;
 
-    const cellRect = map.findCell(cellOffset);
-    if (colIndex < cellRect.left || colIndex >= cellRect.right) continue;
+      const cellRect = map.findCell(cellOffset);
+      const colspan = Number(cell.attrs.colspan || 1);
+      const colwidth = Array.from({ length: colspan }, (_, offset) => {
+        const absoluteCol = cellRect.left + offset;
+        return nextWidths[absoluteCol] ?? Math.max(1, Math.round(Number(cell.attrs.colwidth?.[offset]) || 1));
+      });
 
-    const widthIndex = colIndex - cellRect.left;
-    const colspan = Number(cell.attrs.colspan || 1);
-    const colwidth = Array.isArray(cell.attrs.colwidth)
-      ? cell.attrs.colwidth.slice()
-      : Array.from({ length: colspan }, () => 0);
-    while (colwidth.length < colspan) colwidth.push(0);
-    colwidth[widthIndex] = nextWidth;
-
-    tr = tr.setNodeMarkup(tableStart + cellOffset, undefined, {
-      ...cell.attrs,
-      colwidth,
-    });
+      tr = tr.setNodeMarkup(tableStart + cellOffset, undefined, {
+        ...cell.attrs,
+        colwidth,
+      });
+    }
   }
 
   if (!tr.docChanged) return false;
   editor.view.dispatch(tr);
   editor.commands.fixTables();
   return true;
+}
+
+export function setTableColumnWidth(
+  editor: Editor,
+  tablePos: number,
+  colIndex: number,
+  width: number,
+  allWidths?: number[],
+): boolean {
+  if (allWidths && allWidths.length > 0) {
+    const widths = allWidths.slice();
+    if (colIndex >= 0 && colIndex < widths.length) {
+      widths[colIndex] = Math.max(1, Math.round(width));
+    }
+    return setTableColumnWidths(editor, tablePos, widths);
+  }
+
+  const table = editor.state.doc.nodeAt(tablePos);
+  if (!table || table.type.name !== 'table') return false;
+  const map = TableMap.get(table);
+  if (colIndex < 0 || colIndex >= map.width) return false;
+
+  const widths: number[] = [];
+  for (let col = 0; col < map.width; col += 1) {
+    if (col === colIndex) {
+      widths.push(Math.max(1, Math.round(width)));
+      continue;
+    }
+    let found = 0;
+    for (let rowIndex = 0; rowIndex < map.height; rowIndex += 1) {
+      const cellOffset = map.map[rowIndex * map.width + col];
+      const cell = table.nodeAt(cellOffset);
+      if (!cell) continue;
+      const cellRect = map.findCell(cellOffset);
+      const widthIndex = col - cellRect.left;
+      const value = Array.isArray(cell.attrs.colwidth) ? Number(cell.attrs.colwidth[widthIndex]) : 0;
+      if (value > 0) {
+        found = value;
+        break;
+      }
+    }
+    widths.push(found > 0 ? found : 120);
+  }
+  return setTableColumnWidths(editor, tablePos, widths);
 }
 
 export function setTableRowHeight(
@@ -547,7 +590,8 @@ function emptyParsedCell(): ParsedTableCell {
 
 function readCellBackground(cell: Element): string {
   if (!(cell instanceof HTMLElement)) return '';
-  if (cell.style.backgroundColor) return cell.style.backgroundColor;
+  const inlineColor = cell.style.getPropertyValue('background-color') || cell.style.backgroundColor;
+  if (inlineColor) return inlineColor;
   const legacyColor = cell.getAttribute('bgcolor');
   if (!legacyColor) return '';
   const probe = document.createElement('span');
@@ -579,7 +623,7 @@ function parseHtmlTable(html: string): ParsedTableMatrix | null {
       row[colIndex] = {
         text,
         html: cell,
-        isHeader: cell.tagName.toLowerCase() === 'th' || rowIndex === 0 && tr.querySelectorAll('th').length > 0,
+        isHeader: cell.tagName.toLowerCase() === 'th',
         backgroundColor: readCellBackground(cell),
         rowspan,
         colspan,
@@ -607,12 +651,12 @@ function parseHtmlTable(html: string): ParsedTableMatrix | null {
 
 function parseDelimitedTable(text: string): ParsedTableMatrix | null {
   const normalized = text.replace(/\r\n?/g, '\n').trimEnd();
-  if (!normalized.includes('\t') && !normalized.includes('\n')) return null;
+  if (!normalized.includes('\t')) return null;
   const rows = normalized
     .split('\n')
     .map(row => row.split('\t').map(cell => ({ text: normalizeCellText(cell) })));
   const nonEmpty = rows.filter(row => row.some(cell => cell.text.length > 0));
-  if (nonEmpty.length < 2 && Math.max(...nonEmpty.map(row => row.length), 0) < 2) return null;
+  if (Math.max(...nonEmpty.map(row => row.length), 0) < 2) return null;
   return nonEmpty.length > 0 ? nonEmpty : null;
 }
 
@@ -695,9 +739,9 @@ function createTableNodeFromMatrix(editor: Editor, matrix: ParsedTableMatrix): P
 
   return tableType.create(null, rows);
 }
-export function insertTableFromClipboardData(editor: Editor, clipboardData: DataTransfer | null): boolean {
+export function insertTableFromClipboardData(editor: Editor, clipboardData: DataTransfer | null, force = false): boolean {
   if (!clipboardData) return false;
-  if (editor.isActive('table')) return false;
+  if (!force && editor.isActive('table')) return false;
 
   const matrix =
     parseHtmlTable(clipboardData.getData('text/html'))
@@ -707,7 +751,8 @@ export function insertTableFromClipboardData(editor: Editor, clipboardData: Data
   const tableNode = createTableNodeFromMatrix(editor, matrix);
   if (!tableNode) return false;
 
-  editor.chain().focus().insertContent(tableNode.toJSON()).run();
-  editor.commands.fixTables();
+  const { from, to } = editor.state.selection;
+  editor.view.dispatch(editor.state.tr.replaceWith(from, to, tableNode).scrollIntoView());
+  editor.view.focus();
   return true;
 }

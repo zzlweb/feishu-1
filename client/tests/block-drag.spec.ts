@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 
 const dragDocument = {
   id: 'block-drag-e2e',
@@ -21,7 +22,7 @@ test.beforeEach(async ({ page }) => {
     route.fulfill({ json: { code: 0, data: dragDocument } }),
   );
   await page.route('**/static/uploads/sample-crop.png', route =>
-    route.fulfill({ path: new URL('./fixtures/sample-crop.png', import.meta.url).pathname }),
+    route.fulfill({ path: fileURLToPath(new URL('./fixtures/sample-crop.png', import.meta.url)) }),
   );
   await page.goto('/doc/block-drag-e2e');
 });

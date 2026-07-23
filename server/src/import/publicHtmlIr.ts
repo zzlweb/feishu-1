@@ -3,6 +3,7 @@ import path from 'path';
 import { HTMLElement, parse } from 'node-html-parser';
 import { getSampleCapabilityRow } from '../fixtures/feishuSampleCapabilityMatrix';
 import { findFeishuPublicSample } from '../fixtures/feishuPublicSamples';
+import { allowFeishuImportFixtures } from './fixturePolicy';
 import type { ImportedBlock, ImportedDocument, ImportedInline, ImportWarning } from './types';
 
 const CALLOUT_ICONS = new Set(['📍', '💡', '📌', '❗', '🍞', '🐵', '🏖️', '🥇', '🔗', '🚀', '📚', '📄', '😁', '⏳', '🧭']);
@@ -428,7 +429,7 @@ function titleFromHtml(root: HTMLElement, fallback: string) {
 }
 
 function buildWarnings(sourceUrl: string): ImportWarning[] {
-  const sample = findFeishuPublicSample(sourceUrl);
+  const sample = allowFeishuImportFixtures() ? findFeishuPublicSample(sourceUrl) : undefined;
   const matrix = sample ? getSampleCapabilityRow(sample.id) : undefined;
   const warnings: ImportWarning[] = [
     {
@@ -668,7 +669,7 @@ function buildDocumentFromRenderedSnapshot(sourceUrl: string, snapshot: RenderAu
 
 export function parsePublicFeishuHtmlToDocument(rawHtml: string, sourceUrl: string): ImportedDocument {
   const root = parse(rawHtml);
-  const sample = findFeishuPublicSample(sourceUrl);
+  const sample = allowFeishuImportFixtures() ? findFeishuPublicSample(sourceUrl) : undefined;
   if (sample?.id === 'bitable-quickstart') {
     return buildBitableQuickstartDocument(sourceUrl);
   }
@@ -676,7 +677,9 @@ export function parsePublicFeishuHtmlToDocument(rawHtml: string, sourceUrl: stri
   const title = titleFromHtml(root, '飞书文档');
   const items = collectTextElements(root);
   const staticTextLength = items.map(item => item.text).join('').length;
-  const snapshot = staticTextLength < 220 ? findRenderedSnapshot(sourceUrl) : null;
+  const snapshot = allowFeishuImportFixtures() && staticTextLength < 220
+    ? findRenderedSnapshot(sourceUrl)
+    : null;
   if (snapshot?.renderedLines?.length && (snapshot.renderedTextLength || 0) > staticTextLength * 2) {
     return buildDocumentFromRenderedSnapshot(sourceUrl, snapshot);
   }

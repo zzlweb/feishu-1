@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   type CSSProperties,
   type ReactNode,
@@ -105,6 +106,20 @@ export function useFloatingMenuShell({
     closeDelay,
     onClose: dismissByHover,
   });
+
+  const { cancelClose, scheduleClose, containsTarget } = hoverGroup;
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      if (containsTarget(event.target)) {
+        cancelClose();
+        return;
+      }
+      scheduleClose(event.target, { respectFocus: false });
+    };
+    document.addEventListener('pointermove', handlePointerMove, true);
+    return () => document.removeEventListener('pointermove', handlePointerMove, true);
+  }, [cancelClose, containsTarget, scheduleClose]);
 
   const isInsideShell = useCallback((target: Node) => {
     if (panelRef.current?.contains(target) || anchorRef?.current?.contains(target)) return true;

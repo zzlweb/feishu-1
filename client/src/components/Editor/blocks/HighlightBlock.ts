@@ -27,9 +27,12 @@ const CALLOUT_ICON_MAP: Record<string, string> = {
   link: '🔗',
   pushpin: '📌',
   pin: '📌',
+  round_pushpin: '📌',
   page_with_curl: '📄',
+  page_facing_up: '📄',
   speech_balloon: '💬',
   memo: '📝',
+  memo_alt: '📝',
   warning: '⚠️',
   star: '⭐',
   star2: '🌟',
@@ -40,9 +43,14 @@ const CALLOUT_ICON_MAP: Record<string, string> = {
   book: '📚',
 };
 
+const FEISHU_EMOJI_SHORTCODE = /^[a-z][a-z0-9_]*$/;
+
 function normalizeCalloutIcon(icon: string | null | undefined) {
   if (!icon) return '📍';
-  return CALLOUT_ICON_MAP[icon] || icon;
+  const trimmed = icon.trim();
+  if (CALLOUT_ICON_MAP[trimmed]) return CALLOUT_ICON_MAP[trimmed];
+  if (FEISHU_EMOJI_SHORTCODE.test(trimmed)) return '📍';
+  return trimmed;
 }
 
 const TEXT_COLORS = ['#1f2329', '#8f959e', '#d83931', '#de7802', '#dc9b04', '#2ea121', '#245bdb', '#6425d0'];

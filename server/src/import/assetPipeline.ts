@@ -42,7 +42,10 @@ export async function mirrorRemoteAsset(
   try {
     const response = await fetch(sourceUrl, { headers });
     if (!response.ok) {
-      const message = `资源下载失败 (${response.status})：${sourceUrl}`;
+      let message = `资源下载失败 (${response.status})：${sourceUrl}`;
+      if (response.status === 403) {
+        message += '。应用已开通 docs:document.media:download 仍 403 时，请把应用加为该文档/知识库协作者，并确认文档权限里允许该协作者「创建副本/打印/下载」；跨租户公开文档通常无法用本租户应用身份下载素材。';
+      }
       warnings.push({ type: 'asset', message });
       return { id: uuidv4(), sourceUrl, status: 'failed', warning: message };
     }

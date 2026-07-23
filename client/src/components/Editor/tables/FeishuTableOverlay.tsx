@@ -721,7 +721,7 @@ function FeishuTableOverlay({
         if (col) col.style.width = `${nextWidth}px`;
       });
       table.style.width = `${totalWidth}px`;
-      table.style.minWidth = '100%';
+      table.style.minWidth = `${totalWidth}px`;
     },
     [tableHost],
   );
@@ -808,7 +808,13 @@ function FeishuTableOverlay({
 
         const tablePos = getTablePosFromHost(editor, tableHost);
         if (tablePos == null) return;
-        if (setTableColumnWidth(editor, tablePos, colIndex, activeSession.nextWidth)) {
+        if (setTableColumnWidth(
+          editor,
+          tablePos,
+          colIndex,
+          activeSession.nextWidth,
+          activeSession.widths,
+        )) {
           remeasureSoon();
         }
       };

@@ -35,3 +35,13 @@ export function getActiveTableFlags(editor: Editor): TableMenuFlags {
 export function computeTableBlockMenuPosition(anchor: DOMRect, menuW = 236, menuH = 480, pad = 8, gap = 4) {
   return computeBlockPanelPosition(anchor, menuW, menuH, pad, gap);
 }
+
+export function computeTableCellBlockMenuPosition(anchor: DOMRect, menuW = 236, menuH = 480) {
+  const pad = 2;
+  const gap = 12;
+  const maxX = anchor.left - gap;
+  const x = Math.max(pad, Math.min(anchor.left - menuW - gap, window.innerWidth - menuW - pad, maxX));
+  const anchorCenterY = anchor.top + anchor.height / 2;
+  const y = Math.max(pad, Math.min(anchorCenterY - menuH / 2, window.innerHeight - menuH - pad));
+  return { x, y, maxX, minX: pad };
+}

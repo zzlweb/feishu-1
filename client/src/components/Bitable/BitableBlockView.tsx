@@ -322,6 +322,7 @@ function ViewSidebarMenu({
   onDragEnd: () => void;
 }) {
   const visibleViews = views.filter(view => isViewTypeVisible(view.type));
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
 
   return (
     <div className="base-view-sidebar">
@@ -387,7 +388,9 @@ function ViewSidebarMenu({
                 aria-label="更多操作"
                 onMouseDown={event => {
                   event.stopPropagation();
-                  event.preventDefault();
+                }}
+                onClick={event => {
+                  event.stopPropagation();
                   onOpenContextMenu(event.currentTarget, view.id);
                 }}
               >
@@ -405,16 +408,29 @@ function ViewSidebarMenu({
           </li>
         ))}
       </ul>
-      {!readOnly && <div className="base-view-sidebar__create">
-        <button type="button" className="base-view-sidebar__new">
+      {!readOnly && <div className={`base-view-sidebar__create${createMenuOpen ? ' is-open' : ''}`}>
+        <button
+          type="button"
+          className="base-view-sidebar__new"
+          aria-expanded={createMenuOpen}
+          aria-haspopup="menu"
+          onClick={() => setCreateMenuOpen(open => !open)}
+        >
           <span className="base-view-sidebar__new-icon" aria-hidden><GlyphAdd /></span>
           <span className="base-view-sidebar__new-text">新建</span>
           <span className="base-view-sidebar__new-arrow" aria-hidden><GlyphExpandDown /></span>
         </button>
-        <ul className="base-view-sidebar__create-list">
+        <ul className="base-view-sidebar__create-list" role="menu">
           {CREATE_VIEW_OPTIONS.map(option => (
             <li key={option.type}>
-              <button type="button" onClick={() => onCreateView(option.type)}>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  onCreateView(option.type);
+                  setCreateMenuOpen(false);
+                }}
+              >
                 <span className="base-view-sidebar__create-icon" aria-hidden data-view-icon={option.type}>
                   <ViewIcon type={option.type} size={15} />
                 </span>

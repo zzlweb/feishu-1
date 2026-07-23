@@ -3,6 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Pointer
 export interface FloatingPanelPosition {
   x: number;
   y: number;
+  maxX?: number;
+  minX?: number;
 }
 
 export type FloatingPanelPlacement = 'bottom-start' | 'top-start' | 'right-start' | 'left-start';
@@ -333,8 +335,13 @@ function clampFloatingPanelPosition(
 ): FloatingPanelPosition {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  const viewportMaxX = vw - menuW - pad;
+  const constrainedMaxX = typeof next.maxX === 'number'
+    ? Math.min(viewportMaxX, next.maxX)
+    : viewportMaxX;
+  const constrainedMinX = typeof next.minX === 'number' ? next.minX : pad;
   return {
-    x: Math.max(pad, Math.min(next.x, vw - menuW - pad)),
+    x: Math.max(constrainedMinX, Math.min(next.x, constrainedMaxX)),
     y: Math.max(pad, Math.min(next.y, vh - menuH - pad)),
   };
 }
@@ -393,6 +400,25 @@ export function isPointerWithinFloatingShell(
   return false;
 }
 
+/** 用 :hover 判断指针是否仍在菜单壳内（比 relatedTarget 可靠，避免快速划出时误判）。 */
+export function isFloatingShellHovered(
+  refs: Array<RefObject<HTMLElement | null> | undefined>,
+  selectors: string[],
+): boolean {
+  for (const ref of refs) {
+    const el = ref?.current;
+    if (el?.isConnected && el.matches(':hover')) return true;
+  }
+  for (const selector of selectors) {
+    try {
+      if (document.querySelector(`${selector}:hover`)) return true;
+    } catch {
+      // ignore invalid selector combinations
+    }
+  }
+  return false;
+}
+
 export interface HoverFloatingGroupOptions {
   refs?: Array<RefObject<HTMLElement | null> | undefined>;
   selectors?: string[];
@@ -410,6 +436,7 @@ export function useHoverFloatingGroup({
   const onCloseRef = useRef(onClose);
   const refsRef = useRef(refs);
   const selectorsRef = useRef(selectors);
+  const respectFocusRef = useRef(false);
 
   onCloseRef.current = onClose;
   refsRef.current = refs;
@@ -425,18 +452,30 @@ export function useHoverFloatingGroup({
     return isPointerWithinFloatingShell(target, refsRef.current, selectorsRef.current);
   }, []);
 
-  const scheduleClose = useCallback((target?: EventTarget | null) => {
-    if (target && containsTarget(target)) {
-      cancelClose();
-      return;
-    }
+  const scheduleClose = useCallback((_target?: EventTarget | null, options: { respectFocus?: boolean } = {}) => {
+    // 始终延时关闭：快速划出时 relatedTarget 可能落在块柄/锚点上，
+    // 若此处直接 return，后续又收不到 leave，面板会卡住。
+    // 到点用 :hover 与焦点复核；若仍在壳内则再次武装定时器，直到真正离开。
+    respectFocusRef.current = Boolean(options.respectFocus);
     cancelClose();
-    closeTimerRef.current = window.setTimeout(() => {
+    const tick = () => {
       closeTimerRef.current = null;
+      if (isFloatingShellHovered(refsRef.current, selectorsRef.current)) {
+        closeTimerRef.current = window.setTimeout(tick, closeDelay);
+        return;
+      }
       const active = document.activeElement;
-      if (active && containsTarget(active)) return;
+      if (
+        respectFocusRef.current
+        && active
+        && active !== document.body
+        && containsTarget(active)
+      ) {
+        return;
+      }
       onCloseRef.current?.();
-    }, closeDelay);
+    };
+    closeTimerRef.current = window.setTimeout(tick, closeDelay);
   }, [cancelClose, closeDelay, containsTarget]);
 
   const getHoverProps = useCallback(() => ({

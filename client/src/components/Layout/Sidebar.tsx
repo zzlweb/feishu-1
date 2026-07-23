@@ -1,4 +1,4 @@
-import React, { useCallback, forwardRef } from 'react';
+import React, { useCallback, forwardRef, type RefObject } from 'react';
 import { DOC_TITLE_CATALOGUE_ID, type HeadingItem } from '../../types';
 import { resolveBlockElement } from '../Editor/blocks/blockDom';
 import './Layout.less';
@@ -17,6 +17,8 @@ interface SidebarProps {
   collapsedHeadingIds?: Set<string>;
   /** 点击目录项折叠指示器时切换 */
   onToggleHeadingCollapse?: (headingId: string) => void;
+  /** 正文实际滚动容器；避免依赖 window 的 scrollIntoView 定位。 */
+  scrollContainerRef?: RefObject<HTMLElement | null>;
 }
 
 function CatalogueToggleIcon({ mirrored }: { mirrored?: boolean }) {
@@ -52,23 +54,45 @@ const Sidebar = forwardRef<HTMLDivElement, SidebarProps>(function Sidebar(
     onToggle,
     collapsedHeadingIds,
     onToggleHeadingCollapse,
+    scrollContainerRef,
   }: SidebarProps,
   ref: React.ForwardedRef<HTMLDivElement>,
 ) {
   const scrollToDocumentTitle = useCallback(() => {
-    document.querySelector('.editor-title-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const target = document.querySelector('.editor-title-input');
+    const scrollContainer = scrollContainerRef?.current;
+    if (target instanceof HTMLElement && scrollContainer) {
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      scrollContainer.scrollTo({
+        top: scrollContainer.scrollTop + targetRect.top - containerRect.top - containerRect.height * 0.35,
+        behavior: 'smooth',
+      });
+    } else {
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
     onTocItemActivate(DOC_TITLE_CATALOGUE_ID);
-  }, [onTocItemActivate]);
+  }, [onTocItemActivate, scrollContainerRef]);
 
   const scrollToHeading = useCallback(
     (id: string) => {
       const target = resolveBlockElement(document, id);
       if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const scrollContainer = scrollContainerRef?.current;
+        if (scrollContainer) {
+          const containerRect = scrollContainer.getBoundingClientRect();
+          const targetRect = target.getBoundingClientRect();
+          scrollContainer.scrollTo({
+            top: scrollContainer.scrollTop + targetRect.top - containerRect.top - containerRect.height * 0.35,
+            behavior: 'smooth',
+          });
+        } else {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
       }
       onTocItemActivate(id);
     },
-    [onTocItemActivate],
+    [onTocItemActivate, scrollContainerRef],
   );
 
   return (

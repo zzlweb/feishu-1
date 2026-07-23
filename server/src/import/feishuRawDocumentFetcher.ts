@@ -56,6 +56,8 @@ export interface FeishuRawWikiNode {
   obj_type?: string;
   title?: string;
   node_token?: string;
+  space_id?: string;
+  parent_node_token?: string;
 }
 
 export interface FeishuResolvedTarget {

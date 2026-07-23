@@ -60,6 +60,23 @@ export function getFeishuApiConfigFromEnv(): FeishuApiConfig | null {
   };
 }
 
+/**
+ * 图片和附件可由另一个已获 Drive 媒体下载权限的应用读取。
+ * 未配置时与正文导入共用 FEISHU_APP_ID / FEISHU_APP_SECRET。
+ */
+export function getFeishuMediaApiConfigFromEnv(): FeishuApiConfig | null {
+  const appId = process.env.FEISHU_MEDIA_APP_ID?.trim();
+  const appSecret = process.env.FEISHU_MEDIA_APP_SECRET?.trim();
+  if (appId && appSecret) {
+    return {
+      appId,
+      appSecret,
+      baseUrl: process.env.FEISHU_OPEN_API_BASE_URL?.trim() || DEFAULT_BASE_URL,
+    };
+  }
+  return getFeishuApiConfigFromEnv();
+}
+
 export function extractFeishuToken(sourceUrl: string): string {
   const url = new URL(sourceUrl);
   const parts = url.pathname.split('/').filter(Boolean);

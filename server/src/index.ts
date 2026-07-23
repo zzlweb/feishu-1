@@ -14,7 +14,7 @@ if (process.platform === 'win32') {
   process.stderr.setDefaultEncoding?.('utf8');
 }
 
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'test' || process.env.FEISHU_TEST_SERVER === '1') {
   let server = app.listen(PORT, () => {
     console.log(`🚀 飞书文档服务器已启动: http://localhost:${PORT}`);
   });

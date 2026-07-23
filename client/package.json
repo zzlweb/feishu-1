@@ -9,6 +9,7 @@
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:full-stack": "playwright test --config playwright.full-stack.config.ts",
+    "test:e2e:feishu-live": "playwright test --config playwright.feishu-live.config.ts",
     "audit:public-feishu": "node scripts/auditPublicFeishuRender.mjs",
     "preview": "vite preview"
   },

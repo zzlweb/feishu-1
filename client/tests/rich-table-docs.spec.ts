@@ -497,15 +497,25 @@ test('resizes columns and rows without selecting text', async ({ page }) => {
   await expect(colHandle).toBeVisible();
   const colBox = await colHandle.boundingBox();
   expect(colBox).not.toBeNull();
-  const beforeWidth = await page.locator('col[data-col-index="0"]').evaluate(el => getComputedStyle(el).width);
+  const beforeWidthPx = await page.locator('col[data-col-index="0"]').evaluate(el =>
+    Number.parseFloat(getComputedStyle(el).width),
+  );
 
   await page.mouse.move(colBox!.x + colBox!.width / 2, colBox!.y + colBox!.height / 2);
   await page.mouse.down();
   await page.mouse.move(colBox!.x + 46, colBox!.y + colBox!.height / 2, { steps: 8 });
   await page.mouse.up();
 
-  const afterWidth = await page.locator('col[data-col-index="0"]').evaluate(el => getComputedStyle(el).width);
-  expect(afterWidth).not.toBe(beforeWidth);
+  const afterWidthPx = await page.locator('col[data-col-index="0"]').evaluate(el =>
+    Number.parseFloat(getComputedStyle(el).width),
+  );
+  expect(afterWidthPx).not.toBe(beforeWidthPx);
+  // 松手后应按拖拽增量停留，不能被 min-width:100% 拉回一部分
+  expect(afterWidthPx).toBeGreaterThan(beforeWidthPx + 20);
+  await expect.poll(async () =>
+    page.locator('col[data-col-index="0"]').evaluate(el => Number.parseFloat(getComputedStyle(el).width)),
+  ).toBe(afterWidthPx);
+
   const selectedText = await page.evaluate(() => window.getSelection()?.toString() || '');
   expect(selectedText).toBe('');
 

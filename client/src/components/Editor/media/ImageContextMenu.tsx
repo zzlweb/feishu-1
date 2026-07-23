@@ -29,7 +29,7 @@ import { getInsertBelowPosition, insertButtonBlockAt, insertSlashItemAt } from '
 import { insertFeishuColumnsAt } from '../blocks/columnsInsert';
 import { insertFeishuTableAt } from '../tables/tableInsert';
 import AddBelowSlashSections from '../menus/AddBelowSlashSections';
-import { isPointerWithinFloatingShell, bindFloatingLayoutListeners } from '../shared/floatingPanel';
+import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
 import {
   CONTEXT_MENU_SHELL_SELECTORS,
   FloatingMenuPortal,
@@ -234,7 +234,6 @@ export default function ImageContextMenu({
     posVisible,
     keepHoverAlive,
     scheduleClose,
-    containsTarget,
   } = useFloatingMenuShell({
     fallback: { x, y },
     panelRef: menuRef,
@@ -250,11 +249,8 @@ export default function ImageContextMenu({
   const alignSelectionToBlockAnchor = () =>
     syncEditorSelectionToAnchoredBlock(editor, blockAnchorRef?.current ?? null);
 
-  const pointerStillInShell = (next: EventTarget | null): boolean =>
-    containsTarget(next) || isPointerWithinFloatingShell(next, [menuRef, anchorRef], [...CONTEXT_MENU_SHELL_SELECTORS]);
-
   const handleShellMouseLeave = (e: React.MouseEvent) => {
-    if (pointerStillInShell(e.relatedTarget)) return;
+    // 始终延时关闭，到点用 :hover 复核，避免快速划出时 relatedTarget 落在块柄导致面板卡住。
     scheduleClose(e.relatedTarget);
   };
 
@@ -297,7 +293,7 @@ export default function ImageContextMenu({
   }, [activeFlyout?.kind, finalPos.x, finalPos.y, posVisible]);
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
-    if (pointerStillInShell(e.relatedTarget)) return;
+    // 始终延时关闭，到点用 :hover 复核，避免快速划出时 relatedTarget 误判导致面板卡住。
     scheduleClose(e.relatedTarget);
   };
 

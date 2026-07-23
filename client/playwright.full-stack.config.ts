@@ -20,7 +20,8 @@ export default defineConfig({
     command: `vite --port ${clientPort} --host 127.0.0.1`,
     env: {
       VITE_API_PROXY_TARGET: `http://127.0.0.1:${serverPort}`,
-      VITE_CACHE_DIR: 'test-results/.vite-full-stack',
+      // 单次运行独占预构建目录，避免异常退出后的 esbuild 文件锁污染下一轮。
+      VITE_CACHE_DIR: `test-results/.vite-full-stack-${process.pid}-${Date.now()}`,
     },
     url: `http://127.0.0.1:${clientPort}`,
     reuseExistingServer: false,

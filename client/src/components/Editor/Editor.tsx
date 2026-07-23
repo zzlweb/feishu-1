@@ -23,9 +23,10 @@ import ContextMenu from './menus/ContextMenu';
 import BitableContextMenu from '../Bitable/BitableContextMenu';
 import ImageContextMenu from './media/ImageContextMenu';
 import TableContextMenu from './tables/TableContextMenu';
-import { computeBlockPanelPosition, bindFloatingLayoutListeners, FLOATING_Z_INDEX, useHoverFloatingGroup } from './shared/floatingPanel';
+import { computeBlockPanelPosition, bindFloatingLayoutListeners, FLOATING_Z_INDEX } from './shared/floatingPanel';
+import { useBlockHoverFloatingGroup } from './shared/useBlockHoverFloatingGroup';
 import { CONTEXT_MENU_SHELL_SELECTORS } from './shared/FloatingMenuShell';
-import { computeTableBlockMenuPosition } from './tables/tableMenu';
+import { computeTableBlockMenuPosition, computeTableCellBlockMenuPosition } from './tables/tableMenu';
 import SlashMenu from './menus/SlashMenu';
 import { SLASH_MENU_MAX_HEIGHT, SLASH_MENU_WIDTH, type ButtonActionType } from './menus/slashMenuConfig';
 import { resolveSlashTrigger } from './menus/slashTrigger';
@@ -38,6 +39,8 @@ import VideoResizeHandle from './media/VideoResizeHandle';
 import { useImageBlockInteractions } from './media/useImageBlockInteractions';
 import { getActiveImageCropSession } from './media/imageCropSession';
 import { normalizeImageAlign, type ImageAlign } from './media/imageBlockUtils';
+
+const qrPlaceholderImage = new URL('../../image/1280X1280.JPEG', import.meta.url).href;
 import { removeCommentHighlightsFromEditor } from './blocks/commentDocumentSync';
 import {
   COMMENT_REANCHOR_REQUEST_EVENT,
@@ -85,12 +88,12 @@ import {
   resolveTableHostFromElement,
 } from './tables/tableDom';
 import { selectTableNodeFromHost } from './tables/tableInsert';
+import { handleTableClipboardPaste } from './tables/tableClipboard';
 import {
   getHeadingIdFromBlockEl,
   headingBlockHasChildren,
   syncAllHeadingCollapseStates,
 } from './blocks/headingCollapse';
-import { insertTableFromClipboardData } from './tables/tableInsert';
 import { registerMediaUploadFile } from './media/mediaUploadRegistry';
 import BitableBlockView from '../Bitable/BitableBlockView';
 import './Editor.less';
@@ -2119,6 +2122,22 @@ function embedTextAttribute(element: Element, attribute: string, selector: strin
   return (element.getAttribute(attribute) || element.querySelector(selector)?.textContent || '').trim();
 }
 
+type LocalEmbedMetadata = {
+  avatarUrl?: string;
+  variant?: 'qr' | 'default';
+  caption?: string;
+  items?: Array<{ title: string; owner?: string; updatedAt?: string; url?: string }>;
+};
+
+function embedMetadataFromElement(element: Element): LocalEmbedMetadata {
+  try {
+    const value = JSON.parse(element.getAttribute('data-embed-meta') || '{}');
+    return value && typeof value === 'object' ? value as LocalEmbedMetadata : {};
+  } catch {
+    return {};
+  }
+}
+
 function taskBlockTitleFromElement(element: Element) {
   const rawTitle = element.getAttribute('data-title') || element.querySelector('.feishu-task-block__title')?.textContent || '';
   const rawDesc = element.getAttribute('data-desc') || '';
@@ -2225,12 +2244,22 @@ const LocalFeishuTaskBlock = TiptapNode.create({
 
 function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const [editing, setEditing] = useState(false);
-  const kind = String(node.attrs.kind || 'embed');
+  const [imageFailed, setImageFailed] = useState(false);
+  const rawKind = String(node.attrs.kind || 'embed');
+  // 已保存的旧导入内容会保留 feishu-block-42/51；渲染时兼容升级，无需用户重新导入。
+  const kind = rawKind === 'feishu-block-42' || rawKind === 'feishu-block-51'
+    ? 'subdoc-list'
+    : rawKind;
   const meta = EMBED_KIND_META[kind] || EMBED_KIND_META.embed;
   const title = String(node.attrs.title || '').trim() || meta.title;
   const desc = String(node.attrs.desc || '').trim() || meta.desc;
   const href = node.attrs.href || '';
   const normalizedHref = normalizeBlockUrl(href);
+  const embedMetadata = typeof node.attrs.embedMetadata === 'object' && node.attrs.embedMetadata
+    ? node.attrs.embedMetadata as LocalEmbedMetadata
+    : {};
+  const isImportedImage = kind === 'image'
+    || (title === '飞书图片' && /图片资源|图片.*下载失败/.test(desc));
   const isEditing = editing && selected && editor.isEditable;
   const actionText = kind === 'group' || kind === 'chat_card' ? '加入' : '打开';
   const selectThisBlock = (event: React.MouseEvent) => {
@@ -2270,6 +2299,282 @@ function LocalEmbedBlockView({ node, updateAttributes, selected, editor, getPos 
           </span>
         )}
         {hasReminder && <span className="feishu-task-block__reminder" aria-label="提醒">♧</span>}
+      </NodeViewWrapper>
+    );
+  }
+
+  if (kind === 'group' || kind === 'chat_card') {
+    const groupName = title && title !== '飞书群名片' ? title : (desc && desc !== '飞书群组' && desc !== '群名片' ? desc : '飞书群');
+    const joinButton = normalizedHref ? (
+      <a className="cardButton chat-card--btn" href={normalizedHref} target="_blank" rel="noreferrer">
+        <span className="text">加入</span>
+      </a>
+    ) : (
+      <span className="cardButton chat-card--btn is-disabled" title="导入来源未提供可访问的入群链接">
+        <span className="text">加入</span>
+      </span>
+    );
+
+    return (
+      <NodeViewWrapper
+        className={`feishu-group-card${selected ? ' is-selected' : ''}`}
+        data-local-block="embed"
+        data-kind="group"
+        {...blockDomAttrs(node.attrs)}
+        contentEditable={false}
+        onMouseDown={selectThisBlock}
+      >
+        <div className="chat-card-container align-left">
+          <div className="chat-card-inner">
+            <div className="chat-card-clip-container">
+              <div className="chat-card">
+                <div className="chat-card--top-container">
+                  <div className="chat-card--icon">
+                    {embedMetadata.avatarUrl ? (
+                      <img src={embedMetadata.avatarUrl} alt="" />
+                    ) : (
+                      <span className="chat-card--icon-fallback" aria-hidden>💬</span>
+                    )}
+                  </div>
+                  <div className="chat-card--info">
+                    <div className="chat-card--align-container">
+                      <div className="chat-card--title">
+                        <div className="chat-card--name">{groupName}</div>
+                        <div className="chat-card--label"><span>外部</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="chat-card--bottom-container">
+                  <div className="chat-card--type-name">群名片</div>
+                  <div className="btns-container">{joinButton}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </NodeViewWrapper>
+    );
+  }
+
+  if (isImportedImage) {
+    const showRealImage = Boolean(normalizedHref && !imageFailed);
+    const useWechatQrStyle = embedMetadata.variant === 'qr'
+      || /二维码|微信|群聊|权限限制/.test(`${title} ${desc}`);
+    const imageSize = 256;
+    const captionText = embedMetadata.caption || (useWechatQrStyle ? '扫描二维码加入群聊' : '');
+
+    let imageContent: React.ReactNode;
+    if (showRealImage) {
+      imageContent = (
+        <img
+          alt={title || '飞书文档 - 图片'}
+          className="docx-image"
+          draggable={false}
+          height={imageSize}
+          src={normalizedHref}
+          width={imageSize}
+          onError={() => setImageFailed(true)}
+        />
+      );
+    } else if (useWechatQrStyle) {
+      imageContent = (
+        <img
+          alt="微信群二维码占位图"
+          className="docx-image docx-image--qr-placeholder"
+          draggable={false}
+          height={imageSize}
+          src={qrPlaceholderImage}
+          width={imageSize}
+        />
+      );
+    } else {
+      imageContent = (
+        <div className="docx-image docx-image--placeholder" aria-label={title || '图片占位'}>
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+            <rect x="6" y="10" width="36" height="28" rx="3" stroke="currentColor" strokeWidth="2" />
+            <circle cx="17" cy="20" r="3" fill="currentColor" />
+            <path d="M8 34l10-10 7 7 5-5 10 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+      );
+    }
+
+    return (
+      <NodeViewWrapper
+        className={`docx-image-block${selected ? ' is-selected' : ''}`}
+        data-local-block="embed"
+        data-block-type="image"
+        {...blockDomAttrs(node.attrs)}
+        contentEditable={false}
+        onMouseDown={selectThisBlock}
+      >
+        <div className="image-block align-center">
+          <div
+            className="image-block-width-wrapper flash-block-content"
+            style={{ width: imageSize }}
+          >
+            <div
+              className="image-block-container"
+              style={{ width: imageSize, paddingTop: '100%' }}
+            >
+              <div className="resizable-wrapper">
+                <div className="img">{imageContent}</div>
+              </div>
+            </div>
+          </div>
+          {captionText ? <p className="image-block-caption">{captionText}</p> : null}
+        </div>
+      </NodeViewWrapper>
+    );
+  }
+
+  if (kind === 'subdoc-list') {
+    const textItems: NonNullable<LocalEmbedMetadata['items']> = desc
+      .split(/\n+/)
+      .map(item => item.replace(/^[-•\s]+/, '').trim())
+      .filter(item => item && !/^block_type\s+\d+$/i.test(item))
+      .map(title => ({ title }));
+    const metadataItems = embedMetadata.items?.filter(item => item?.title?.trim()) || [];
+    const items = metadataItems.length ? metadataItems : textItems;
+
+    const docIcon = (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M2.5 2.5a1 1 0 0 1 1-1h12.865a5.24 5.24 0 0 1 3.631 1.447A4.848 4.848 0 0 1 21.5 6.441V21.5a1 1 0 0 1-1 1H7.635a5.24 5.24 0 0 1-3.63-1.447A4.849 4.849 0 0 1 2.5 17.559V2.5Z" fill="#336DF4" />
+        <path d="M7 8.7a.7.7 0 0 1 .7-.7h8.6a.7.7 0 1 1 0 1.4H7.7a.7.7 0 0 1-.7-.7Zm0 3.4a.7.7 0 0 1 .7-.7h8.6a.7.7 0 1 1 0 1.4H7.7a.7.7 0 0 1-.7-.7Zm0 3.4a.7.7 0 0 1 .7-.7h4.6a.7.7 0 1 1 0 1.4H7.7a.7.7 0 0 1-.7-.7Z" fill="#fff" />
+      </svg>
+    );
+
+    return (
+      <NodeViewWrapper
+        className={`block-folder-manager-wrapper${selected ? ' is-selected' : ''}`}
+        data-local-block="embed"
+        {...blockDomAttrs(node.attrs)}
+        contentEditable={false}
+        onMouseDown={selectThisBlock}
+      >
+        <div className="block-folder-manager">
+          <div className="block-folder-manager-header">
+            <div className="block-folder-manager-header-left">
+              <button type="button" className="folder-manager-view-switcher" tabIndex={-1}>
+                <span className="folder-manager-view-switcher__icon" aria-hidden>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M3 3a1 1 0 0 0 0 2h2a1 1 0 0 0 0-2H3Zm7 0a1 1 0 0 0 0 2h11a1 1 0 1 0 0-2H10Zm-1 9a1 1 0 0 1 1-1h11a1 1 0 1 1 0 2H10a1 1 0 0 1-1-1Zm-6-1a1 1 0 1 0 0 2h2a1 1 0 1 0 0-2H3Zm6 9a1 1 0 0 1 1-1h11a1 1 0 1 1 0 2H10a1 1 0 0 1-1-1Zm-6-1a1 1 0 1 0 0 2h2a1 1 0 1 0 0-2H3Z" fill="currentColor" />
+                  </svg>
+                </span>
+                <span className="folder-manager-view-switcher-item">列表</span>
+                <span className="folder-manager-view-switcher__caret" aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                    <path d="m3.414 7.086-.707.707a1 1 0 0 0 0 1.414l7.778 7.778a2 2 0 0 0 2.829 0l7.778-7.778a1 1 0 0 0 0-1.414l-.707-.707a1 1 0 0 0-1.415 0l-7.07 7.07-7.072-7.07a1 1 0 0 0-1.414 0Z" fill="currentColor" />
+                  </svg>
+                </span>
+              </button>
+            </div>
+            <div className="block-folder-manager-header-right">
+              <button type="button" className="folder-manager-header-btn" tabIndex={-1}>
+                <span className="folder-manager-header-btn__icon" aria-hidden>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M2 5a1 1 0 0 1 1-1h18a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1Zm10.5 12.105c.202.75.568 1.447 1.072 2.038l1.17-.128a1.083 1.083 0 0 1 1.11.642l.521 1.19c.707.16 1.44.17 2.15.03l.535-1.22a1.082 1.082 0 0 1 1.11-.642l1.285.141a5.254 5.254 0 0 0 1.047-1.927l-.737-1.013a1.084 1.084 0 0 1 0-1.275l.672-.924a5.26 5.26 0 0 0-1.226-1.989l-1.041.114a1.083 1.083 0 0 1-1.11-.642l-.393-.898a5.193 5.193 0 0 0-2.435.035l-.378.863a1.082 1.082 0 0 1-1.11.642l-.929-.101a5.259 5.259 0 0 0-1.253 2.095l.586.805c.277.38.277.895 0 1.275l-.646.889Zm6.75-1.38c0 .966-.776 1.75-1.733 1.75a1.742 1.742 0 0 1-1.732-1.75c0-.967.776-1.75 1.732-1.75a1.74 1.74 0 0 1 1.733 1.75ZM2 12a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1Zm0 7a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1Z" fill="currentColor" />
+                  </svg>
+                </span>
+                显示设置
+              </button>
+              <button type="button" className="folder-manager-header-btn block-folder-manager-btn__disabled" tabIndex={-1}>
+                <span className="folder-manager-header-btn__icon" aria-hidden>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M11.119 5.795 8.462 8.452a1 1 0 0 1-1.414-1.414l1.084-1.084c1.053-1.054 2.106-2.108 3.16-3.16a1 1 0 0 1 1.412 0c1.055 1.053 2.108 2.108 3.162 3.162l1.087 1.087a.993.993 0 0 1-.013 1.402.992.992 0 0 1-1.401.013l-2.42-2.42v10.293a1 1 0 0 1-2 0V5.795ZM21 19a1 1 0 1 0-2 0v1H5v-1a1 1 0 1 0-2 0v2a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-2Z" fill="currentColor" />
+                  </svg>
+                </span>
+                上传
+              </button>
+              <button type="button" className="folder-manager-header-btn block-folder-manager-btn__disabled" tabIndex={-1}>
+                <span className="folder-manager-header-btn__icon" aria-hidden>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 2a1 1 0 0 0-1 1v8H3a1 1 0 1 0 0 2h8v8a1 1 0 1 0 2 0v-8h8a1 1 0 1 0 0-2h-8V3a1 1 0 0 0-1-1Z" fill="currentColor" />
+                  </svg>
+                </span>
+                新建
+              </button>
+            </div>
+          </div>
+          <div className="folder-manager-filelist-view">
+            <div className="folder-manager-table-view">
+              <div className="table-view-header">
+                <div className="table-view-row table-view-header-row">
+                  <div className="table-view-cell table-view-header-cell table-view-cell--checkbox">
+                    <label className="table-view-selection">
+                      <span className="table-view-checkbox">
+                        <input type="checkbox" tabIndex={-1} readOnly />
+                      </span>
+                    </label>
+                  </div>
+                  <div className="table-view-cell table-view-header-cell table-view-cell--name">
+                    <button type="button" className="folder-manager-header-sort-btn" tabIndex={-1}>
+                      名称
+                      <span className="folder-manager-header-sort-btn__caret" aria-hidden>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                          <path d="m3.414 7.086-.707.707a1 1 0 0 0 0 1.414l7.778 7.778a2 2 0 0 0 2.829 0l7.778-7.778a1 1 0 0 0 0-1.414l-.707-.707a1 1 0 0 0-1.415 0l-7.07 7.07-7.072-7.07a1 1 0 0 0-1.414 0Z" fill="currentColor" />
+                        </svg>
+                      </span>
+                    </button>
+                  </div>
+                  <div className="table-view-cell table-view-header-cell table-view-cell--owner">
+                    <span className="folder-manager-table-view-header-label">所有者</span>
+                  </div>
+                  <div className="table-view-cell table-view-header-cell table-view-cell--time">
+                    <button type="button" className="folder-manager-header-sort-btn" tabIndex={-1}>
+                      修改时间
+                      <span className="folder-manager-header-sort-btn__caret" aria-hidden>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                          <path d="m3.414 7.086-.707.707a1 1 0 0 0 0 1.414l7.778 7.778a2 2 0 0 0 2.829 0l7.778-7.778a1 1 0 0 0 0-1.414l-.707-.707a1 1 0 0 0-1.415 0l-7.07 7.07-7.072-7.07a1 1 0 0 0-1.414 0Z" fill="currentColor" />
+                        </svg>
+                      </span>
+                    </button>
+                  </div>
+                  <div className="table-view-cell table-view-header-cell table-view-cell--menu" />
+                </div>
+              </div>
+              <div className="table-view-body">
+                {items.length ? items.map((item, index) => {
+                  const itemUrl = item.url && normalizeBlockUrl(item.url);
+                  const titleNode = itemUrl
+                    ? <a href={itemUrl} target="_blank" rel="noreferrer">{item.title}</a>
+                    : item.title;
+                  return (
+                    <div className="table-view-row" key={`${item.title}-${index}`}>
+                      <div className="table-view-cell table-view-cell--checkbox">
+                        <label className="table-view-selection">
+                          <span className="table-view-checkbox">
+                            <input type="checkbox" tabIndex={-1} readOnly />
+                          </span>
+                        </label>
+                      </div>
+                      <div className="table-view-cell table-view-cell--name">
+                        <span className="block-item-icon-wrapper">{docIcon}</span>
+                        <div className="folder-manager-doc-title">{titleNode}</div>
+                      </div>
+                      <div className="table-view-cell table-view-cell--owner">
+                        <span className="folder-manager-owner">{item.owner || '—'}</span>
+                      </div>
+                      <div className="table-view-cell table-view-cell--time">
+                        <span className="folder-manager-time">{item.updatedAt || '—'}</span>
+                      </div>
+                      <div className="table-view-cell table-view-cell--menu">
+                        <button type="button" className="menu-cell-btn" tabIndex={-1} aria-label="更多">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <path d="M5.5 11.75a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0Zm8.225 0a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0Zm8.275 0a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0Z" fill="currentColor" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }) : (
+                  <div className="folder-manager-empty">该飞书子页面目录未返回页面条目。</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       </NodeViewWrapper>
     );
   }
@@ -2350,6 +2655,13 @@ const LocalEmbedBlock = TiptapNode.create({
         default: '',
         parseHTML: element => element.getAttribute('href') || element.getAttribute('data-href') || '',
         renderHTML: attributes => ({ 'data-href': attributes.href }),
+      },
+      embedMetadata: {
+        default: {},
+        parseHTML: element => embedMetadataFromElement(element),
+        renderHTML: attributes => Object.keys(attributes.embedMetadata || {}).length
+          ? { 'data-embed-meta': JSON.stringify(attributes.embedMetadata) }
+          : {},
       },
       assignee: {
         default: '',
@@ -2890,6 +3202,7 @@ export default function Editor({
   const latestOnSaveRef = useRef(onSave);
   const latestReadOnlyRef = useRef(readOnly);
   const loadedDocumentIdRef = useRef<string | null>(null);
+  const loadedEditorRef = useRef<TipTapEditor | null>(null);
   const isApplyingExternalContentRef = useRef(false);
   currentDocumentIdRef.current = documentId;
   latestOnSaveRef.current = onSave;
@@ -2946,7 +3259,19 @@ export default function Editor({
     dropTarget: HTMLElement | null;
     placement: BlockDragPlacement;
     directMedia: boolean;
+    openMenuOnRelease: boolean;
   } | null>(null);
+  const openBlockConfigMenuRef = useRef<((options?: { skipCooldown?: boolean }) => void) | null>(null);
+
+  const cancelBlockDragSession = useCallback(() => {
+    const dragState = blockDragStateRef.current;
+    blockDragStateRef.current = null;
+    setBlockDragIndicator(null);
+    blockDragPreviewRef.current?.remove();
+    blockDragPreviewRef.current = null;
+    document.body.classList.remove('feishu-block-dragging');
+    dragState?.source.classList.remove('is-block-drag-source');
+  }, []);
 
   const setBlockGutterHoveredState = useCallback((value: boolean) => {
     setBlockGutterHovered(value);
@@ -3210,7 +3535,7 @@ export default function Editor({
     setActiveTableHost(null);
   }, [closeSlashMenu, hideBlockTools, setPlusHoveredState]);
 
-  const blockHoverFloatingGroup = useHoverFloatingGroup({
+  const blockHoverFloatingGroup = useBlockHoverFloatingGroup({
     refs: [
       editorAreaRef,
       blockAddButtonRef,
@@ -3225,8 +3550,7 @@ export default function Editor({
 
   const schedulePlusMenuClose = useCallback(
     (target: EventTarget | null) => {
-      if (isPlusMenuHoverBridgeTarget(target)) return;
-      blockHoverFloatingGroup.scheduleClose(null);
+      blockHoverFloatingGroup.scheduleCloseUnlessTarget(target, isPlusMenuHoverBridgeTarget);
     },
     [blockHoverFloatingGroup],
   );
@@ -3477,7 +3801,9 @@ export default function Editor({
           event.preventDefault();
           return insertMediaFiles(activeEditor, files, view.state.selection.from);
         }
-        return insertTableFromClipboardData(activeEditor, event.clipboardData);
+        const handledTablePaste = handleTableClipboardPaste(activeEditor, event.clipboardData);
+        if (handledTablePaste) event.preventDefault();
+        return handledTablePaste;
       },
     },
     onCreate: ({ editor: ed }) => {
@@ -3674,7 +4000,7 @@ export default function Editor({
   const beginBlockDrag = useCallback((
     event: React.PointerEvent<HTMLButtonElement> | PointerEvent,
     sourceOverride?: HTMLElement,
-    options?: { directMedia?: boolean },
+    options?: { directMedia?: boolean; openMenuOnRelease?: boolean },
   ) => {
     if (!editor || readOnly) return;
     const source = sourceOverride ?? activeBlockElRef.current;
@@ -3694,6 +4020,7 @@ export default function Editor({
       dropTarget: null,
       placement: 'before',
       directMedia: Boolean(options?.directMedia),
+      openMenuOnRelease: Boolean(options?.openMenuOnRelease),
     };
 
     const clearDragPreview = () => {
@@ -3780,26 +4107,53 @@ export default function Editor({
       resolveDrop(moveEvent.clientX, moveEvent.clientY);
     };
 
+    let cleanupDragListeners = () => {};
+
+    const cancel = () => {
+      cleanupDragListeners();
+      cancelBlockDragSession();
+      clearDragPreview();
+    };
+
     const finish = () => {
       const dragState = blockDragStateRef.current;
-      document.removeEventListener('pointermove', onMove, true);
-      document.removeEventListener('pointerup', finish, true);
-      document.removeEventListener('pointercancel', finish, true);
-      blockDragStateRef.current = null;
-      setBlockDragIndicator(null);
+      cleanupDragListeners();
+      cancelBlockDragSession();
       clearDragPreview();
       if (dragState?.dragging && dragState.dropTarget) {
         const moved = moveDraggableBlock(editor, dragState.source, dragState.dropTarget, dragState.placement);
         if (moved) {
           hideBlockTools();
         }
+        return;
       }
+      // block-drag-row 的 pointerdown 会阻止浏览器默认 click；未触发拖拽时在这里打开菜单。
+      if (dragState?.openMenuOnRelease && !dragState.dragging) {
+        openBlockConfigMenuRef.current?.({ skipCooldown: true });
+      }
+    };
+
+    const cancelWhenHidden = () => {
+      if (document.hidden) cancel();
+    };
+
+    cleanupDragListeners = () => {
+      document.removeEventListener('pointermove', onMove, true);
+      document.removeEventListener('pointerup', finish, true);
+      document.removeEventListener('pointercancel', cancel, true);
+      window.removeEventListener('blur', cancel, true);
+      window.removeEventListener('pagehide', cancel, true);
+      document.removeEventListener('visibilitychange', cancelWhenHidden, true);
     };
 
     document.addEventListener('pointermove', onMove, true);
     document.addEventListener('pointerup', finish, true);
-    document.addEventListener('pointercancel', finish, true);
+    document.addEventListener('pointercancel', cancel, true);
+    window.addEventListener('blur', cancel, true);
+    window.addEventListener('pagehide', cancel, true);
+    document.addEventListener('visibilitychange', cancelWhenHidden, true);
   }, [
+    cancelBlockDragSession,
     editor,
     closeSlashMenu,
     getColumnContentFromBlock,
@@ -3808,6 +4162,8 @@ export default function Editor({
     resolveHoveredBlockInfo,
     setBlockGutterHoveredState,
   ]);
+
+  useEffect(() => () => cancelBlockDragSession(), [cancelBlockDragSession]);
 
   const handleDirectMediaPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!editor || readOnly || event.button !== 0 || !event.isPrimary) return;
@@ -4007,7 +4363,13 @@ export default function Editor({
   }, [editor, collapsedHeadingIds]);
 
   useEffect(() => {
-    if (!editor || loadedDocumentIdRef.current === documentId) return;
+    if (
+      !editor
+      || (
+        loadedDocumentIdRef.current === documentId
+        && loadedEditorRef.current === editor
+      )
+    ) return;
 
     // 路由复用 Editor 时只在文档 ID 改变后回灌服务端内容。普通保存响应不能
     // 覆盖当前本地草稿，否则慢响应会回滚用户在请求期间继续输入的文字。
@@ -4017,6 +4379,7 @@ export default function Editor({
     editor.commands.setContent(sanitizeEditorHtmlForSave(content || '<p></p>'), false);
     isApplyingExternalContentRef.current = false;
     loadedDocumentIdRef.current = documentId;
+    loadedEditorRef.current = editor;
     setDocTitle(normalizeTitle(title));
     extractHeadings(editor);
   }, [content, documentId, editor, extractHeadings, flushContentSave, flushTitleSave, title]);
@@ -4146,7 +4509,7 @@ export default function Editor({
       const anchorEl = detail.anchorEl?.isConnected ? detail.anchorEl : null;
       tableCellBlockAnchorRef.current = anchorEl;
       const anchorRect = anchorEl?.getBoundingClientRect() ?? new DOMRect(anchorX, anchorY, 1, 1);
-      const pos = computeBlockPanelPosition(anchorRect);
+      const pos = computeTableCellBlockMenuPosition(anchorRect);
       setContextMenu({ ...pos, variant: 'block', anchorKind: 'table-cell' });
     };
     window.addEventListener('feishu-open-table-cell-block-menu', openTableCellBlockMenu as EventListener);
@@ -4482,6 +4845,7 @@ export default function Editor({
       });
     }
   };
+  openBlockConfigMenuRef.current = openBlockConfigMenu;
 
   const handleBlockDragRowClick = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     if (!isBitableToolType(blockTools.type)) return;
@@ -4525,12 +4889,15 @@ export default function Editor({
     if (!contextMenu || readOnly) return;
     const updatePos = () => {
       const isTableMenu = contextMenu?.variant === 'table';
-      const button = isTableMenu ? tableHandleRef.current : blockDragRowRef.current;
+      const isTableCellMenu = contextMenu?.anchorKind === 'table-cell';
+      const button = isTableMenu ? tableHandleRef.current : isTableCellMenu ? tableCellBlockAnchorRef.current : blockDragRowRef.current;
       if (!button?.isConnected) return;
       const nextRect = button.getBoundingClientRect();
       const next = isTableMenu
         ? computeTableBlockMenuPosition(nextRect)
-        : computeBlockPanelPosition(nextRect);
+        : isTableCellMenu
+          ? computeTableCellBlockMenuPosition(nextRect)
+          : computeBlockPanelPosition(nextRect);
       setContextMenu(prev => {
         if (!prev) return null;
         if (prev.x === next.x && prev.y === next.y) return prev;
@@ -4538,7 +4905,11 @@ export default function Editor({
       });
     };
     updatePos();
-    const anchor = contextMenu?.variant === 'table' ? tableHandleRef.current : blockDragRowRef.current;
+    const anchor = contextMenu?.variant === 'table'
+      ? tableHandleRef.current
+      : contextMenu?.anchorKind === 'table-cell'
+        ? tableCellBlockAnchorRef.current
+        : blockDragRowRef.current;
     return bindFloatingLayoutListeners(updatePos, anchor);
   }, [contextMenu, readOnly]);
 
@@ -4811,7 +5182,7 @@ export default function Editor({
                     type="button"
                     className="block-drag-row"
                     onMouseDown={e => e.preventDefault()}
-                    onPointerDown={event => beginBlockDrag(event)}
+                    onPointerDown={event => beginBlockDrag(event, undefined, { openMenuOnRelease: true })}
                     onPointerEnter={blockTools.type === 'table' ? undefined : () => {
                       blockHoverFloatingGroup.cancelClose();
                       if (!isBitableToolType(blockTools.type)) {
@@ -4866,6 +5237,7 @@ export default function Editor({
               const pinTableChrome =
                 tableHandleHovered
                 || contextMenu?.variant === 'table'
+                || contextMenu?.anchorKind === 'table-cell'
                 || (host?.isConnected ? isCellSelectionInTableHost(editor, host) : false);
               return host?.isConnected ? (
               <FeishuTableOverlay
@@ -4995,6 +5367,7 @@ export default function Editor({
           y={contextMenu.y}
           anchorRef={contextMenu.anchorKind === 'table-cell' ? tableCellBlockAnchorRef : blockDragRowRef}
           blockAnchorRef={activeBlockElRef}
+          computePosition={contextMenu.anchorKind === 'table-cell' ? computeTableCellBlockMenuPosition : undefined}
           onClose={closeContextMenu}
           onHoverDismiss={dismissContextMenuFromHover}
           onMouseEnterCancel={cancelContextMenuClose}

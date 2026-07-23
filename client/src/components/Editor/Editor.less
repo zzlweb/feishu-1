@@ -1286,6 +1286,472 @@
           background: #f7f8fa;
         }
 
+        .feishu-group-card {
+          width: min(340px, 100%);
+          margin: 8px 0;
+          box-sizing: border-box;
+
+          &.is-selected .chat-card {
+            outline: 2px solid rgba(51, 112, 255, 0.22);
+            outline-offset: 1px;
+          }
+        }
+
+        .chat-card-container {
+          width: 100%;
+        }
+
+        .chat-card-inner,
+        .chat-card-clip-container {
+          width: 100%;
+        }
+
+        .chat-card {
+          overflow: hidden;
+          border: 1px solid #dee0e3;
+          border-radius: 8px;
+          background: #fff;
+        }
+
+        .chat-card--top-container {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-height: 64px;
+          padding: 12px 16px;
+          background: #f5f6f7;
+        }
+
+        .chat-card--icon {
+          display: flex;
+          flex: 0 0 auto;
+          align-items: center;
+          justify-content: center;
+          width: 40px;
+          height: 40px;
+          overflow: hidden;
+          border-radius: 50%;
+
+          img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+          }
+        }
+
+        .chat-card--icon-fallback {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(145deg, #1f2329, #4c4f56);
+          color: #fff;
+          font-size: 18px;
+        }
+
+        .chat-card--info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .chat-card--align-container {
+          display: flex;
+          align-items: center;
+        }
+
+        .chat-card--title {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+        }
+
+        .chat-card--name {
+          overflow: hidden;
+          color: #1f2329;
+          font-size: 14px;
+          font-weight: 500;
+          line-height: 22px;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .chat-card--label {
+          flex: 0 0 auto;
+
+          span {
+            display: inline-block;
+            padding: 0 6px;
+            border-radius: 4px;
+            background: #e8f0ff;
+            color: #3370ff;
+            font-size: 12px;
+            line-height: 18px;
+          }
+        }
+
+        .chat-card--bottom-container {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          min-height: 44px;
+          padding: 10px 16px;
+          border-top: 1px solid #e5e6eb;
+          background: #fff;
+        }
+
+        .chat-card--type-name {
+          overflow: hidden;
+          color: #8f959e;
+          font-size: 12px;
+          line-height: 20px;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .btns-container {
+          flex: 0 0 auto;
+        }
+
+        .cardButton.chat-card--btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 52px;
+          padding: 3px 15px;
+          border: 1px solid #d0d3d6;
+          border-radius: 6px;
+          background: #fff;
+          color: #1f2329;
+          font-size: 14px;
+          line-height: 22px;
+          text-decoration: none;
+          cursor: pointer;
+          box-sizing: border-box;
+
+          .text {
+            white-space: nowrap;
+          }
+
+          &:hover {
+            border-color: #bbbfc4;
+            background: #fff;
+            color: #1f2329;
+            text-decoration: none;
+          }
+
+          &.is-disabled {
+            border-color: #e5e6eb;
+            color: #8f959e;
+            cursor: not-allowed;
+          }
+        }
+
+        .docx-image-block {
+          width: 100%;
+          margin: 8px 0 12px;
+
+          &.is-selected .image-block-container {
+            outline: 2px solid rgba(51, 112, 255, 0.22);
+            outline-offset: 1px;
+          }
+        }
+
+        .image-block {
+          width: 100%;
+
+          &.align-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+          }
+        }
+
+        .image-block-width-wrapper {
+          max-width: 100%;
+        }
+
+        .image-block-container {
+          position: relative;
+          max-width: 100%;
+        }
+
+        .image-block-container .resizable-wrapper {
+          position: absolute;
+          inset: 0;
+        }
+
+        .image-block-container .img {
+          width: 100%;
+          height: 100%;
+        }
+
+        .image-block-container .docx-image {
+          display: block;
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+
+        .docx-image--qr-placeholder {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          background: #fff;
+
+          svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+          }
+        }
+
+        .docx-image__qr-logo {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
+          border-radius: 8px;
+          background: #fff;
+          box-shadow: 0 0 0 4px #fff;
+          transform: translate(-50%, -50%);
+        }
+
+        .docx-image--placeholder {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
+          color: #bbbfc4;
+          background: #f7f8fa;
+        }
+
+        .image-block-caption {
+          margin: 8px 0 0;
+          color: #8f959e;
+          font-size: 12px;
+          line-height: 20px;
+          text-align: center;
+        }
+
+        .block-folder-manager-wrapper {
+          width: 100%;
+          margin: 8px 0 12px;
+        }
+
+        .block-folder-manager {
+          overflow: hidden;
+          border: 1px solid #dee0e3;
+          border-radius: 6px;
+          background: #fff;
+          color: #1f2329;
+          font-size: 14px;
+        }
+
+        .block-folder-manager-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          min-height: 42px;
+          padding: 8px 12px;
+          border-bottom: 1px solid #eff0f1;
+        }
+
+        .block-folder-manager-header-left,
+        .block-folder-manager-header-right {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .folder-manager-view-switcher,
+        .folder-manager-header-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 8px;
+          border: 0;
+          border-radius: 6px;
+          background: transparent;
+          color: #1f2329;
+          font-size: 14px;
+          line-height: 22px;
+          cursor: default;
+        }
+
+        .folder-manager-view-switcher__icon,
+        .folder-manager-header-btn__icon {
+          display: inline-flex;
+          align-items: center;
+          color: #646a73;
+        }
+
+        .folder-manager-view-switcher__caret,
+        .folder-manager-header-sort-btn__caret {
+          display: inline-flex;
+          align-items: center;
+          color: #8f959e;
+        }
+
+        .block-folder-manager-btn__disabled {
+          color: #bbbfc4;
+          cursor: not-allowed;
+
+          .folder-manager-header-btn__icon { color: #bbbfc4; }
+        }
+
+        .folder-manager-filelist-view {
+          width: 100%;
+        }
+
+        .folder-manager-table-view {
+          width: 100%;
+        }
+
+        .table-view-header-row,
+        .table-view-body .table-view-row {
+          display: grid;
+          grid-template-columns: 32px minmax(180px, 1fr) 120px 140px 40px;
+          align-items: center;
+          min-height: 40px;
+          padding: 0 8px;
+          box-sizing: border-box;
+        }
+
+        .table-view-header-row {
+          min-height: 36px;
+          border-bottom: 1px solid #eff0f1;
+          color: #8f959e;
+          font-size: 13px;
+        }
+
+        .table-view-body .table-view-row {
+          border-bottom: 1px solid #eff0f1;
+
+          &:last-child { border-bottom: 0; }
+          &:hover { background: #f7f8fa; }
+        }
+
+        .table-view-cell {
+          display: flex;
+          align-items: center;
+          min-width: 0;
+        }
+
+        .table-view-cell--checkbox {
+          justify-content: center;
+        }
+
+        .table-view-cell--menu {
+          justify-content: flex-end;
+        }
+
+        .table-view-selection {
+          display: inline-flex;
+          margin: 0;
+          cursor: default;
+        }
+
+        .table-view-checkbox {
+          display: inline-flex;
+          width: 16px;
+          height: 16px;
+          border: 1px solid #dee0e3;
+          border-radius: 4px;
+          background: #fff;
+          box-sizing: border-box;
+
+          input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+          }
+        }
+
+        .folder-manager-header-sort-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          font: inherit;
+          cursor: default;
+        }
+
+        .folder-manager-table-view-header-label {
+          color: #8f959e;
+        }
+
+        .table-view-cell--name {
+          gap: 8px;
+        }
+
+        .block-item-icon-wrapper {
+          display: inline-flex;
+          flex: 0 0 auto;
+          align-items: center;
+        }
+
+        .folder-manager-doc-title {
+          overflow: hidden;
+          color: #1f2329;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+
+          a {
+            color: inherit;
+            text-decoration: none;
+
+            &:hover {
+              color: #3370ff;
+              text-decoration: none;
+            }
+          }
+        }
+
+        .folder-manager-owner,
+        .folder-manager-time {
+          overflow: hidden;
+          color: #646a73;
+          font-size: 13px;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .menu-cell-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          padding: 0;
+          border: 0;
+          border-radius: 4px;
+          background: transparent;
+          color: #646a73;
+          cursor: default;
+          opacity: 0;
+
+          .table-view-row:hover & { opacity: 1; }
+        }
+
+        .folder-manager-empty {
+          padding: 18px 14px;
+          color: #8f959e;
+          font-size: 13px;
+        }
+
         .feishu-doc-nav {
           box-sizing: border-box;
           display: flex;
@@ -1442,16 +1908,30 @@
         }
 
         .feishu-local-card--image {
-          border-style: dashed;
-          background: #fafbfc;
+          width: min(360px, 100%);
+          border: 1px solid #dee0e3;
+          border-radius: 8px;
+          background: #f5f6f7;
 
           .feishu-local-card__icon {
-            color: #8f959e;
-            background: #f2f3f5;
+            color: #646a73;
+            background: #eff0f1;
+            border-radius: 8px;
           }
 
           .feishu-local-card__action {
-            color: #646a73;
+            padding: 3px 14px;
+            border: 1px solid #d0d3d6;
+            border-radius: 4px;
+            background: #fff;
+            color: #1f2329;
+            text-decoration: none;
+
+            &:hover {
+              border-color: #bbbfc4;
+              color: #1f2329;
+              text-decoration: none;
+            }
           }
         }
 
@@ -2481,8 +2961,8 @@
         }
 
         .feishu-local-card--image .feishu-local-card__icon {
-          color: #d48806;
-          background: #fff7e6;
+          color: #646a73;
+          background: #eff0f1;
         }
 
         .feishu-local-card--file .feishu-local-card__icon,
@@ -2816,7 +3296,8 @@
         .tableWrapper table.feishu-table,
         .feishu-table-host table.feishu-table {
           width: max-content;
-          min-width: 100%;
+          /* 列宽由 FeishuTableView 按 colwidth 写入；勿强制 100%，否则拖拽后会被重新均分回弹 */
+          min-width: 0;
           max-width: none !important;
           border-collapse: collapse !important;
           border: 1px solid #dee0e3 !important;
@@ -2899,8 +3380,8 @@
           }
 
           /* 单元格 hover：轻量灰底，接近飞书 */
-          td:hover:not(.selectedCell):not(.feishu-table__cell--rail-selected),
-          th:hover:not(.selectedCell):not(.feishu-table__cell--rail-selected) {
+          td:hover:not(.selectedCell):not(.feishu-table__cell--rail-selected):not([style*="background-color"]),
+          th:hover:not(.selectedCell):not(.feishu-table__cell--rail-selected):not([style*="background-color"]) {
             background: #fafbfc !important;
           }
 
@@ -4020,7 +4501,13 @@
           }
         }
 
-        a { color: @primary; text-decoration: underline; cursor: pointer; }
+        a {
+          color: @primary;
+          text-decoration: none;
+          cursor: pointer;
+
+          &:hover { text-decoration: none; }
+        }
         mark { border-radius: 2px; padding: 1px 2px; }
 
         .has-text-align-center { text-align: center; }

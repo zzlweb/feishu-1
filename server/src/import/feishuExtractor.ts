@@ -4,6 +4,7 @@ import { mirrorRemoteAsset } from './assetPipeline';
 import {
   createFeishuApiClient,
   getFeishuApiConfigFromEnv,
+  getFeishuMediaApiConfigFromEnv,
   parseFeishuUrl,
   type FeishuApiClient,
   type FeishuObjectType,
@@ -238,16 +239,21 @@ function calloutEmoji(emojiId: string | undefined): string {
     gift: '🎁',
     fire: '🔥',
     memo: '📝',
+    memo_alt: '📝',
     book: '📚',
     link: '🔗',
     pin: '📌',
     pushpin: '📌',
     round_pushpin: '📌',
     page_with_curl: '📄',
+    page_facing_up: '📄',
     speech_balloon: '💬',
-    memo_alt: '📝',
   };
-  return emojiId ? emojiMap[emojiId] || emojiId : '💡';
+  if (!emojiId) return '💡';
+  const trimmed = emojiId.trim();
+  if (emojiMap[trimmed]) return emojiMap[trimmed];
+  if (/^[a-z][a-z0-9_]*$/.test(trimmed)) return '💡';
+  return trimmed;
 }
 
 function colorToken(value: number | string | undefined, fallback: string): string {
@@ -508,9 +514,82 @@ function pickNestedString(value: unknown, keys: string[], depth = 0): string | u
   return undefined;
 }
 
+function nestedRecords(value: unknown, keys: string[], depth = 0): Record<string, unknown>[] {
+  if (depth > 3 || value == null || typeof value !== 'object') return [];
+  if (Array.isArray(value)) {
+    return value.flatMap(item => nestedRecords(item, keys, depth + 1));
+  }
+  const record = value as Record<string, unknown>;
+  const matches = keys.flatMap(key => {
+    const candidate = record[key];
+    return Array.isArray(candidate)
+      ? candidate.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+      : [];
+  });
+  return matches.length ? matches : Object.values(record).flatMap(item => nestedRecords(item, keys, depth + 1));
+}
+
+function wikiNodeOwner(item: Record<string, unknown>) {
+  return pickNestedString(item, [
+    'owner_name',
+    'owner',
+    'creator_name',
+    'creator',
+    'author_name',
+    'node_creator_name',
+    'node_creator',
+    'creator_id',
+  ]) || pickNestedString(item.owner, ['name', 'display_name', 'en_name', 'cn_name'])
+    || pickNestedString(item.creator, ['name', 'display_name', 'en_name', 'cn_name']);
+}
+
+function subPageItems(payload: Record<string, unknown>, childBlocks: ImportedBlock[]) {
+  const seen = new Set<string>();
+  const items: Array<{ title: string; owner?: string; updatedAt?: string; url?: string }> = [];
+  for (const item of nestedRecords(payload, ['items', 'pages', 'nodes', 'sub_pages', 'subPages'])) {
+    const title = pickNestedString(item, ['title', 'name', 'page_title', 'doc_title', 'node_title']);
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+    items.push({
+      title,
+      owner: wikiNodeOwner(item),
+      updatedAt: formatFeishuTimestamp(pickNestedString(item, [
+        'obj_edit_time',
+        'updated_at',
+        'update_time',
+        'modified_time',
+        'modified_at',
+        'edited_at',
+        'last_edit_time',
+      ])),
+      url: pickNestedString(item, ['url', 'link', 'href']),
+    });
+  }
+  if (items.length) return items;
+
+  return childBlocks
+    .map(importedBlockText)
+    .filter(Boolean)
+    .filter(title => {
+      if (seen.has(title)) return false;
+      seen.add(title);
+      return true;
+    })
+    .map(title => ({ title }));
+}
+
+function formatFeishuTimestamp(value: string | undefined) {
+  if (!value || !/^\d{10,13}$/.test(value)) return value;
+  const timestamp = Number(value.length === 10 ? `${value}000` : value);
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return value;
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 function advancedEmbedKind(block: FeishuBlock): string {
   const type = blockTypeName(block);
   if (type === '20' || block.chat_card) return 'group';
+  if (type === '42' || type === '51') return 'subdoc-list';
   if (type === '48') return 'link';
   if (type === '43') return 'board';
   if (type === '41' || block.jira_issue) return 'jira_issue';
@@ -605,7 +684,6 @@ async function advancedContainerBlock(
 
 function isAdvancedContainerType(block: FeishuBlock): boolean {
   return new Set([
-    '20',
     '28',
     '33',
     '35',
@@ -615,7 +693,6 @@ function isAdvancedContainerType(block: FeishuBlock): boolean {
     '39',
     '40',
     '41',
-    '42',
     '43',
     '44',
     '45',
@@ -624,7 +701,6 @@ function isAdvancedContainerType(block: FeishuBlock): boolean {
     '48',
     '49',
     '50',
-    '51',
     '52',
     '53',
   ]).has(blockTypeName(block));
@@ -726,18 +802,42 @@ async function convertFeishuBlock(
     return privateBlockEmbed(block, 'diagram', block.diagram.name || '流程图 / UML', block.diagram.diagram_type || '图表块', warnings);
   }
 
-  if (block.chat_card) {
-    warnings.push({
-      type: 'unsupported-block',
-      blockType: 'chat_card',
-      message: '飞书群名片暂无法完整还原入群状态，已保留为本地可见社群卡片。',
-    });
+  if (block.chat_card || blockTypeName(block) === '20') {
+    const payload = (block.chat_card || blockPayload(block)) as Record<string, unknown>;
+    const chatId = pickNestedString(payload, ['chat_id', 'chatId']);
+    let chatDetails: Record<string, unknown> = {};
+    if (chatId) {
+      try {
+        const response = await client.request<{ chat?: Record<string, unknown> } & Record<string, unknown>>(
+          `/open-apis/im/v1/chats/${encodeURIComponent(chatId)}`,
+        );
+        chatDetails = (response.chat || response) as Record<string, unknown>;
+      } catch {
+        // 群聊详情需要额外权限；保留 block 已提供的公开字段。
+      }
+    }
     return {
       type: 'embed',
-      title: block.chat_card.title || '飞书群名片',
+      title: pickNestedString(chatDetails, ['name', 'title']) || pickNestedString(payload, ['title', 'name', 'chat_name']) || '飞书群名片',
       kind: 'group',
-      desc: '飞书群组',
-      url: block.chat_card.url,
+      desc: '群名片',
+      url: pickNestedString(payload, ['url', 'link', 'chat_link', 'href']),
+      metadata: {
+        avatarUrl: pickNestedString(chatDetails, ['avatar', 'avatar_url']) || pickNestedString(payload, ['avatar', 'avatar_url', 'image_url']),
+      },
+    };
+  }
+
+  if (blockTypeName(block) === '42' || blockTypeName(block) === '51' || block.sub_page_list) {
+    const payload = blockPayload(block);
+    const childBlocks = await convertChildBlocks(block.children || [], blockMap, visiting, client, warnings, assets, assetHeaders, apiBaseUrl);
+    const items = subPageItems(payload, childBlocks);
+    return {
+      type: 'embed',
+      title: '子页面目录',
+      kind: 'subdoc-list',
+      desc: items.map(item => item.title).join('\n'),
+      metadata: { items },
     };
   }
 
@@ -868,6 +968,7 @@ async function convertFeishuBlock(
       kind: 'image',
       desc: '图片资源受飞书权限限制，已保留为可见占位卡片。',
       url: remoteUrl,
+      metadata: { variant: 'qr', caption: '扫描二维码加入群聊' },
     };
   }
 
@@ -1006,6 +1107,61 @@ async function fetchAllDocumentBlocks(client: FeishuApiClient, documentToken: st
   } while (pageToken);
 
   return blocks;
+}
+
+async function fetchWikiChildPages(
+  client: FeishuApiClient,
+  node: { space_id?: string; node_token?: string; parent_node_token?: string } | undefined,
+  wikiToken?: string,
+): Promise<Array<Record<string, unknown>>> {
+  let spaceId = node?.space_id?.trim();
+  let nodeToken = node?.node_token?.trim() || wikiToken?.trim();
+  let parentNodeToken = node?.parent_node_token?.trim();
+  if (!spaceId && nodeToken) {
+    try {
+      const query = new URLSearchParams({ token: nodeToken, obj_type: 'wiki' });
+      const data = await client.request<{ node?: { space_id?: string; node_token?: string; parent_node_token?: string } }>(
+        `/open-apis/wiki/v2/spaces/get_node?${query.toString()}`,
+      );
+      spaceId = data.node?.space_id?.trim();
+      nodeToken = data.node?.node_token?.trim() || nodeToken;
+      parentNodeToken = data.node?.parent_node_token?.trim() || parentNodeToken;
+    } catch {
+      // ignore and fall back to block payload items
+    }
+  }
+  if (!spaceId || !nodeToken) return [];
+
+  const listNodes = async (parentToken: string) => {
+    const items: Array<Record<string, unknown>> = [];
+    let pageToken = '';
+    do {
+      const query = new URLSearchParams({
+        parent_node_token: parentToken,
+        page_size: '50',
+      });
+      if (pageToken) query.set('page_token', pageToken);
+      const data = await client.request<{
+        items?: Array<Record<string, unknown>>;
+        has_more?: boolean;
+        page_token?: string;
+      }>(`/open-apis/wiki/v2/spaces/${encodeURIComponent(spaceId!)}/nodes?${query.toString()}`);
+      items.push(...(data.items || []));
+      pageToken = data.has_more && data.page_token ? data.page_token : '';
+    } while (pageToken);
+    return items;
+  };
+
+  try {
+    const directChildren = await listNodes(nodeToken);
+    if (directChildren.length) return directChildren;
+    if (parentNodeToken && parentNodeToken !== nodeToken) {
+      return await listNodes(parentNodeToken);
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 function buildFallbackBusinessReportPayload(sourceUrl: string, warning: string): EmittedImportPayload {
@@ -1260,9 +1416,31 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
       if (bitablePayload) return bitablePayload;
     }
 
-    const blocks = (rawData.document?.blocks || []) as FeishuBlock[];
+    const wikiChildren = (await fetchWikiChildPages(client, rawData.target.wikiNode, parsed.token)).map(item => {
+      const nodeToken = pickNestedString(item, ['node_token', 'token']);
+      if (!nodeToken || pickNestedString(item, ['url', 'link', 'href'])) return item;
+      const url = new URL(sourceUrl);
+      url.pathname = `/wiki/${nodeToken}`;
+      url.search = '';
+      url.hash = '';
+      return { ...item, url: url.toString() };
+    });
+    const blocks = ((rawData.document?.blocks || []) as FeishuBlock[]).map(block => {
+      if (!wikiChildren.length || !['42', '51'].includes(blockTypeName(block))) return block;
+      return {
+        ...block,
+        sub_page_list: {
+          ...blockPayload(block),
+          items: wikiChildren,
+        },
+      };
+    });
     const assets: ImportedAsset[] = [];
-    const token = await client.getTenantAccessToken();
+    // Drive 图片下载可使用独立的媒体应用身份；正文仍由主应用读取。
+    // 这允许把具备 drive:media:download 且被授予文档访问权的应用专用于资产镜像。
+    const mediaConfig = getFeishuMediaApiConfigFromEnv() || config;
+    const mediaClient = createFeishuApiClient(mediaConfig);
+    const mediaToken = await mediaClient.getTenantAccessToken();
     const blockMap = new Map(blocks.filter(block => block.block_id).map(block => [block.block_id!, block]));
     const rootBlockIds = rawData.document?.rootBlockIds || [];
     const rootBlocksFromRaw = rootBlockIds
@@ -1282,7 +1460,7 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
       client,
       warnings,
       assets,
-      { Authorization: `Bearer ${token}` },
+      { Authorization: `Bearer ${mediaToken}` },
       config.baseUrl || 'https://open.feishu.cn',
     )))).filter((block): block is ImportedBlock => block != null);
 

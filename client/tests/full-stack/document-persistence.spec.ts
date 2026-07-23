@@ -11,23 +11,28 @@ test('persists browser edits through Express and restores them after reload', as
   expect(createdResponse.ok()).toBeTruthy();
   const createdPayload = await createdResponse.json();
   const documentId = createdPayload.data.id as string;
+  const initialStoredResponse = await request.get(`/api/documents/${documentId}`);
+  expect(initialStoredResponse.ok()).toBeTruthy();
+  const initialStoredPayload = await initialStoredResponse.json();
+  expect(initialStoredPayload.data.content).toContain('Initial persisted content');
 
-  await page.goto(`/doc/${documentId}`);
-  const paragraph = page.locator('.ProseMirror p').first();
-  await expect(paragraph).toHaveText('Initial persisted content');
-
-  const updateResponse = page.waitForResponse(response =>
+  const loadedResponse = page.waitForResponse(response =>
     response.url().endsWith(`/api/documents/${documentId}`)
-      && response.request().method() === 'PUT'
-      && response.ok(),
+    && response.request().method() === 'GET',
   );
-  await paragraph.fill('Saved through the real browser and server');
-  await updateResponse;
+  await page.goto(`/doc/${documentId}`);
+  expect((await loadedResponse).ok()).toBeTruthy();
+  const editorBody = page.locator('.ProseMirror').filter({ hasText: 'Initial persisted content' }).first();
+  await expect(editorBody).toBeVisible();
+  const paragraph = editorBody.locator('p').filter({ hasText: 'Initial persisted content' }).first();
 
-  const storedResponse = await request.get(`/api/documents/${documentId}`);
-  expect(storedResponse.ok()).toBeTruthy();
-  const storedPayload = await storedResponse.json();
-  expect(storedPayload.data.content).toContain('Saved through the real browser and server');
+  await paragraph.fill('Saved through the real browser and server');
+  await expect.poll(async () => {
+    const storedResponse = await request.get(`/api/documents/${documentId}`);
+    if (!storedResponse.ok()) return '';
+    const storedPayload = await storedResponse.json();
+    return storedPayload.data.content as string;
+  }, { timeout: 10_000 }).toContain('Saved through the real browser and server');
 
   await page.reload();
   await expect(page.locator('.ProseMirror p').first()).toHaveText('Saved through the real browser and server');

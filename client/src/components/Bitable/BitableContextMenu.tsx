@@ -247,7 +247,6 @@ export default function BitableContextMenu({
     posVisible,
     keepHoverAlive,
     scheduleClose,
-    containsTarget,
   } = useFloatingMenuShell({
     fallback: { x, y },
     panelRef: menuRef,
@@ -263,10 +262,8 @@ export default function BitableContextMenu({
   const alignSelectionToBlockAnchor = () =>
     syncEditorSelectionToAnchoredBlock(editor, blockAnchorRef?.current ?? null);
 
-  const pointerStillInShell = (next: EventTarget | null): boolean => containsTarget(next);
-
   const handleShellMouseLeave = (e: React.MouseEvent) => {
-    if (pointerStillInShell(e.relatedTarget)) return;
+    // 始终延时关闭，到点用 :hover 复核，避免快速划出时 relatedTarget 落在块柄导致面板卡住。
     scheduleClose(e.relatedTarget);
   };
 
@@ -275,7 +272,7 @@ export default function BitableContextMenu({
   };
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
-    if (pointerStillInShell(e.relatedTarget)) return;
+    // 始终延时关闭，到点用 :hover 复核，避免快速划出时 relatedTarget 误判导致面板卡住。
     scheduleClose(e.relatedTarget);
   };
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {
+  allowFeishuImportFixtures,
   importFeishuPublicHtml,
   importFeishuPublicUrl,
   isPrivateOrLocalAddress,
@@ -11,6 +12,17 @@ import {
 import { BUSINESS_REPORT_FIXTURE_HTML } from '../src/fixtures/feishuBusinessReport';
 import { FEISHU_PUBLIC_SAMPLE_FIXTURES } from '../src/fixtures/feishuPublicSamples';
 import { getSampleCapabilityRow } from '../src/fixtures/feishuSampleCapabilityMatrix';
+
+function withFeishuFixtureMode<T>(run: () => T): T {
+  const previous = process.env.FEISHU_IMPORT_FIXTURE_MODE;
+  process.env.FEISHU_IMPORT_FIXTURE_MODE = '1';
+  try {
+    return run();
+  } finally {
+    if (previous === undefined) delete process.env.FEISHU_IMPORT_FIXTURE_MODE;
+    else process.env.FEISHU_IMPORT_FIXTURE_MODE = previous;
+  }
+}
 
 function startMockFeishuApi(
   blocks: unknown[],
@@ -94,6 +106,21 @@ test('isAllowedFeishuPublicUrl accepts feishu wiki links and rejects others', ()
   assert.equal(isAllowedFeishuPublicUrl('http://qcntpn5n60jv.feishu.cn/wiki/test'), false);
   assert.equal(isAllowedFeishuPublicUrl('https://user@qcntpn5n60jv.feishu.cn/wiki/test'), false);
   assert.equal(isAllowedFeishuPublicUrl('https://qcntpn5n60jv.feishu.cn:8443/wiki/test'), false);
+});
+
+test('allowFeishuImportFixtures respects FEISHU_IMPORT_FIXTURE_MODE override', () => {
+  const previous = process.env.FEISHU_IMPORT_FIXTURE_MODE;
+  try {
+    process.env.FEISHU_IMPORT_FIXTURE_MODE = '0';
+    assert.equal(allowFeishuImportFixtures(), false);
+    process.env.FEISHU_IMPORT_FIXTURE_MODE = '1';
+    assert.equal(allowFeishuImportFixtures(), true);
+    delete process.env.FEISHU_IMPORT_FIXTURE_MODE;
+    assert.equal(allowFeishuImportFixtures(), process.env.NODE_ENV === 'test');
+  } finally {
+    if (previous === undefined) delete process.env.FEISHU_IMPORT_FIXTURE_MODE;
+    else process.env.FEISHU_IMPORT_FIXTURE_MODE = previous;
+  }
 });
 
 test('public Feishu fetch safety rejects private addresses and untrusted redirects', () => {
@@ -408,6 +435,7 @@ test('importFeishuPublicUrl maps Open API container and media blocks', async () 
     assert.equal(imported.importQuality, 'full');
     assert.equal(imported.assetCount, 3);
     assert.match(imported.content, /data-type="highlight-block"/);
+    assert.match(imported.content, /data-icon="💡"/);
     assert.match(imported.content, /高亮块内容/);
     assert.match(imported.content, /data-local-block="columns"/);
     assert.match(imported.content, /data-width-ratio="40"/);
@@ -765,7 +793,11 @@ test('importFeishuPublicUrl expands advanced Feishu blocks instead of dropping t
     {
       block_id: 'chatCard',
       block_type: 20,
-      chat_card: { title: '飞书群名片', url: 'https://example.com/group' },
+      chat_card: {
+        title: '飞书群名片',
+        url: 'https://example.com/group',
+        avatar_url: 'https://example.com/group-avatar.png',
+      },
     },
     {
       block_id: 'task',
@@ -830,7 +862,15 @@ test('importFeishuPublicUrl expands advanced Feishu blocks instead of dropping t
     {
       block_id: 'wikiList',
       block_type: 51,
-      sub_page_list: { title: 'Wiki 子页面列表' },
+      sub_page_list: {
+        title: 'Wiki 子页面列表',
+        items: [{
+          title: '🚀 新手入门',
+          owner_name: 'Ben',
+          updated_at: '4月1日 15:22',
+          url: 'https://example.com/wiki/getting-started',
+        }],
+      },
     },
     {
       block_id: 'aiTemplate',
@@ -865,11 +905,15 @@ test('importFeishuPublicUrl expands advanced Feishu blocks instead of dropping t
     assert.match(imported.content, /链接预览标题/);
     assert.match(imported.content, /源同步块（49 已降级）/);
     assert.match(imported.content, /同步块正文可见/);
-    assert.match(imported.content, /data-kind="feishu-block-51"/);
-    assert.match(imported.content, /Wiki 子页面列表/);
+    assert.match(imported.content, /data-kind="subdoc-list"/);
+    assert.match(imported.content, /子页面目录/);
+    assert.match(imported.content, /🚀 新手入门/);
+    assert.match(imported.content, /4月1日 15:22/);
+    assert.match(imported.content, /group-avatar\.png/);
     assert.match(imported.content, /data-kind="template"/);
     assert.match(imported.content, /AI 模板/);
     assert.doesNotMatch(imported.content, /data-href="AI 模板"/);
+    assert.equal(imported.unsupportedBlocks?.some(block => block.type === 'chat_card' || block.type === '20' || block.type === '51'), false);
     assert.doesNotMatch(imported.warnings.join('\n'), /已在导入中跳过/);
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
@@ -1103,9 +1147,10 @@ test('public Feishu sample fixtures are covered by capability matrix', () => {
 });
 
 test('importFeishuPublicHtml converts public samples into local renderable blocks', () => {
-  FEISHU_PUBLIC_SAMPLE_FIXTURES
-    .filter(sample => sample.id !== 'business-report')
-    .forEach(sample => {
+  withFeishuFixtureMode(() => {
+    FEISHU_PUBLIC_SAMPLE_FIXTURES
+      .filter(sample => sample.id !== 'business-report')
+      .forEach(sample => {
       const imported = importFeishuPublicHtml(sample.rawHtml, sample.url);
       assert.equal(imported.title, sample.title);
       assert.equal(imported.importQuality, 'fallback');
@@ -1138,29 +1183,32 @@ test('importFeishuPublicHtml converts public samples into local renderable block
       sample.unsupportedBlocks.forEach(type => {
         assert.ok(imported.unsupportedBlocks?.some(block => block.type === type), `${sample.id} should mark ${type} unsupported`);
       });
-    });
+      });
+  });
 });
 
 test('bitable quickstart sample renders content columns instead of ratio placeholders', () => {
-  const sample = FEISHU_PUBLIC_SAMPLE_FIXTURES.find(item => item.id === 'bitable-quickstart');
-  assert.ok(sample);
-  const imported = importFeishuPublicHtml(sample.rawHtml, sample.url);
+  withFeishuFixtureMode(() => {
+    const sample = FEISHU_PUBLIC_SAMPLE_FIXTURES.find(item => item.id === 'bitable-quickstart');
+    assert.ok(sample);
+    const imported = importFeishuPublicHtml(sample.rawHtml, sample.url);
 
-  assert.equal(imported.title, '多维表格 快速入门指南 & 学习测验地图');
-  assert.match(imported.content, /data-local-block="doc-nav"/);
-  assert.doesNotMatch(imported.content, /<p>首页 \| 新人必逛/);
-  assert.match(imported.content, /data-local-block="columns"/);
-  assert.match(imported.content, /data-local-block="bitable"/);
-  assert.match(imported.content, /多维表格学习地图/);
-  assert.match(imported.content, /按阶段看板/);
-  assert.match(imported.content, /资源画册/);
-  assert.match(imported.content, /官方课程资源推荐/);
-  assert.match(imported.content, /多维表格学习地图/);
-  assert.match(imported.content, /data-local-block="embed"/);
-  assert.match(imported.content, /<ul>/);
-  assert.match(imported.content, /data-desc="推荐资料"/);
-  assert.match(imported.content, /初阶操作/);
-  assert.match(imported.content, /中阶操作/);
-  assert.doesNotMatch(imported.content, /分栏 50%/);
-  assert.doesNotMatch(imported.content, /data-local-block="dashboard"/);
+    assert.equal(imported.title, '多维表格 快速入门指南 & 学习测验地图');
+    assert.match(imported.content, /data-local-block="doc-nav"/);
+    assert.doesNotMatch(imported.content, /<p>首页 \| 新人必逛/);
+    assert.match(imported.content, /data-local-block="columns"/);
+    assert.match(imported.content, /data-local-block="bitable"/);
+    assert.match(imported.content, /多维表格学习地图/);
+    assert.match(imported.content, /按阶段看板/);
+    assert.match(imported.content, /资源画册/);
+    assert.match(imported.content, /官方课程资源推荐/);
+    assert.match(imported.content, /多维表格学习地图/);
+    assert.match(imported.content, /data-local-block="embed"/);
+    assert.match(imported.content, /<ul>/);
+    assert.match(imported.content, /data-desc="推荐资料"/);
+    assert.match(imported.content, /初阶操作/);
+    assert.match(imported.content, /中阶操作/);
+    assert.doesNotMatch(imported.content, /分栏 50%/);
+    assert.doesNotMatch(imported.content, /data-local-block="dashboard"/);
+  });
 });

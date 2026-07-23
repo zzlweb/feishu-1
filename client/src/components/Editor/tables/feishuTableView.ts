@@ -11,14 +11,19 @@ function updateColumns(
   overrideValue?: number,
 ) {
   let totalWidth = 0;
+  let hasExplicitWidth = false;
   let nextDOM = colgroup.firstChild;
   const row = node.firstChild;
   if (!row) return;
 
   for (let i = 0, col = 0; i < row.childCount; i += 1) {
     const { colspan, colwidth } = row.child(i).attrs;
+    if (Array.isArray(colwidth) && colwidth.some((value: unknown) => Number(value) > 0)) {
+      hasExplicitWidth = true;
+    }
     for (let j = 0; j < colspan; j += 1, col += 1) {
-      const width = Math.max(cellMinWidth, Number(overrideCol === col ? overrideValue : colwidth && colwidth[j]) || cellMinWidth);
+      const raw = overrideCol === col ? overrideValue : colwidth && colwidth[j];
+      const width = Math.max(cellMinWidth, Number(raw) || cellMinWidth);
       const cssWidth = `${width}px`;
       totalWidth += width;
       if (!nextDOM) {
@@ -41,7 +46,8 @@ function updateColumns(
     nextDOM = after;
   }
   table.style.width = `${totalWidth}px`;
-  table.style.minWidth = '100%';
+  // 有明确列宽时用总和锁定，避免 min-width:100% 把拖拽结果重新均分回弹
+  table.style.minWidth = hasExplicitWidth ? `${totalWidth}px` : '100%';
 }
 
 /** 飞书表格 NodeView：resizable:false 时 TipTap 默认不包 tableWrapper，此处始终包裹 */

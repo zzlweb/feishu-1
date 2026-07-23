@@ -1,4 +1,5 @@
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
+import type { Request, Response } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -14,8 +15,8 @@ import {
   getAllTemplates,
   createTemplateRecord,
   deleteTemplateById,
-  CommentRecord,
 } from '../database';
+import type { CommentRecord } from '../database';
 import { importDocumentFile } from '../documentImporter';
 import { importFeishuPublicUrl } from '../feishuPublicImporter';
 

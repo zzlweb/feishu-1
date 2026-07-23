@@ -45,6 +45,13 @@ export interface ImportedDashboardBlock {
   fallbackSlices?: Array<{ label: string; value: number; color?: string }>;
 }
 
+export interface ImportedEmbedMetadata {
+  avatarUrl?: string;
+  variant?: 'qr' | 'default';
+  caption?: string;
+  items?: Array<{ title: string; owner?: string; updatedAt?: string; url?: string }>;
+}
+
 export type ImportedBlock =
   | { type: 'heading'; level: number; inlines: ImportedInline[] }
   | { type: 'paragraph'; inlines: ImportedInline[] }
@@ -60,7 +67,7 @@ export type ImportedBlock =
   | { type: 'highlight'; content: ImportedBlock[]; bgColor?: string; borderColor?: string; textColor?: string; icon?: string }
   | { type: 'bitable'; payload: ImportedBitableBlock }
   | { type: 'dashboard'; payload: ImportedDashboardBlock }
-  | { type: 'embed'; title: string; url?: string; kind?: string; desc?: string }
+  | { type: 'embed'; title: string; url?: string; kind?: string; desc?: string; metadata?: ImportedEmbedMetadata }
   | { type: 'formula'; formula: string }
   | { type: 'html'; html: string };
 

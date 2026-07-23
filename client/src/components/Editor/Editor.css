@@ -243,8 +243,13 @@
 .editor-content .tiptap a,
 .editor-content .tiptap .editor-link {
   color: var(--primary-color);
-  text-decoration: underline;
+  text-decoration: none;
   cursor: pointer;
+}
+
+.editor-content .tiptap a:hover,
+.editor-content .tiptap .editor-link:hover {
+  text-decoration: none;
 }
 
 /* Highlight */

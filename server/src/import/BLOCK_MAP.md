@@ -29,6 +29,8 @@
 | `quote_container` (34) | `blockquote` | full | 展开子块 |
 | `callout` | `highlightBlock` | full | |
 | `divider` (22) | `horizontalRule` | full | |
+| `chat_card` (20) | `localEmbedBlock` (kind=group) | full | 本地群名片，保留入群链接 |
+| Wiki 子页面列表 (42 / 51) | `localEmbedBlock` (kind=subdoc-list) | full | 保留目录与可用的子页面标题 |
 
 ## 多维表格 / 仪表盘
 
@@ -45,7 +47,6 @@
 | `sheet` | embed | unsupported | 保留标题卡片 |
 | `mindnote` | embed | unsupported | |
 | `diagram` | embed | unsupported | |
-| `chat_card` | embed | unsupported | |
 | `jira_issue` / `add_ons` | embed | unsupported | |
 | 未知 `block_type` | highlight 或 embed | unsupported | **不得丢弃子文本**；写入 `unsupported_blocks` |
 

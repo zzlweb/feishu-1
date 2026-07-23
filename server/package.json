@@ -9,7 +9,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "tsx --test tests/api.test.ts tests/encoding.test.ts tests/feishuPublicImporter.test.ts tests/feishuRawDocumentFetcher.test.ts tests/businessReportEnricher.test.ts tests/bitableAttachmentImport.test.ts tests/feishuBlockMapAndAssets.test.ts",
-    "audit:public-feishu": "tsx src/tools/auditPublicFeishuDocs.ts"
+    "audit:public-feishu": "tsx src/tools/auditPublicFeishuDocs.ts",
+    "seed:feishu-templates": "tsx scripts/seed-feishu-corpus-templates.ts"
   },
   "dependencies": {
     "@types/multer": "^2.1.0",

@@ -60,12 +60,16 @@ import {
   applyEditorIndentIncrease,
   getEditorIndentUiState,
 } from '../blocks/blockIndent';
-import { isPointerWithinFloatingShell, bindFloatingLayoutListeners } from '../shared/floatingPanel';
+import { bindFloatingLayoutListeners } from '../shared/floatingPanel';
 import {
   CONTEXT_MENU_SHELL_SELECTORS,
   FloatingMenuPortal,
   useFloatingMenuShell,
 } from '../shared/FloatingMenuShell';
+
+const CONTEXT_MENU_HOVER_SELECTORS = CONTEXT_MENU_SHELL_SELECTORS.filter(
+  selector => selector !== '.feishu-table-chrome',
+);
 import { setHeadingLevel, setTextAlignment, toggleBlockStyle } from '../panels/panelActions';
 import './ContextMenu.less';
 import './SlashMenu.less';
@@ -86,6 +90,7 @@ interface ContextMenuProps {
   blockAnchorRef?: RefObject<HTMLElement | null>;
   onHoverDismiss?: () => void;
   onMouseEnterCancel?: () => void;
+  computePosition?: (anchor: DOMRect, menuW: number, menuH: number) => { x: number; y: number };
 }
 
 type RowKind = 'heading' | 'block' | 'insertLink' | 'insertImage';
@@ -199,6 +204,7 @@ export default function ContextMenu({
   blockAnchorRef,
   onHoverDismiss,
   onMouseEnterCancel,
+  computePosition,
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const alignTriggerRef = useRef<HTMLButtonElement>(null);
@@ -225,7 +231,6 @@ export default function ContextMenu({
     posVisible,
     keepHoverAlive,
     scheduleClose,
-    containsTarget,
   } = useFloatingMenuShell({
     fallback: { x, y },
     panelRef: menuRef,
@@ -233,9 +238,10 @@ export default function ContextMenu({
     onClose,
     onHoverDismiss: dismissByHover,
     onMouseEnterCancel,
-    hoverRefs: [alignTriggerRef, colorTriggerRef, colorFlyoutRef, addBelowTriggerRef, addBelowFlyoutRef],
-    hoverSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+    hoverRefs: [alignTriggerRef, alignFlyoutRef, colorTriggerRef, colorFlyoutRef, addBelowTriggerRef, addBelowFlyoutRef],
+    hoverSelectors: [...CONTEXT_MENU_HOVER_SELECTORS],
     insideSelectors: [...CONTEXT_MENU_SHELL_SELECTORS],
+    computePosition,
   });
 
   useEffect(() => () => {
@@ -260,9 +266,6 @@ export default function ContextMenu({
     setGridTooltip(null);
   };
 
-  const pointerStillInShell = (next: EventTarget | null): boolean =>
-    containsTarget(next) || isPointerWithinFloatingShell(next, [menuRef, anchorRef], [...CONTEXT_MENU_SHELL_SELECTORS]);
-
   const isFlyoutAnchorTarget = (target: EventTarget | null): boolean => {
     if (!(target instanceof Element)) return false;
     return Boolean(target.closest('.context-menu-item.has-submenu, .context-submenu-flyout, .context-add-below-flyout'));
@@ -273,7 +276,7 @@ export default function ContextMenu({
   };
 
   const handleShellMouseLeave = (e: React.MouseEvent) => {
-    if (pointerStillInShell(e.relatedTarget)) return;
+    // 始终延时关闭，到点用 :hover 复核，避免快速划出时 relatedTarget 落在块柄导致面板卡住。
     scheduleClose(e.relatedTarget);
   };
 
@@ -399,12 +402,10 @@ export default function ContextMenu({
   }, [activeFlyout?.kind, finalPos.x, finalPos.y, posVisible]);
 
   const handleFlyoutMouseLeave = (e: React.MouseEvent) => {
-    if (pointerStillInShell(e.relatedTarget)) {
-      if (!isFlyoutAnchorTarget(e.relatedTarget)) {
-        closeActiveFlyout();
-      }
-      return;
+    if (!isFlyoutAnchorTarget(e.relatedTarget)) {
+      closeActiveFlyout();
     }
+    // 始终延时关闭，到点用 :hover 复核，避免快速划出时 relatedTarget 误判导致面板卡住。
     scheduleClose(e.relatedTarget);
   };
 

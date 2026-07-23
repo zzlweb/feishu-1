@@ -8,6 +8,7 @@ import { findFeishuPublicSample } from './fixtures/feishuPublicSamples';
 import { buildBusinessReportDocumentContent } from './fixtures/businessReportTemplate';
 import { getFeishuApiConfigFromEnv, isFeishuApiError } from './import/feishuApiClient';
 import { importFeishuDocumentFromApi } from './import/feishuExtractor';
+import { allowFeishuImportFixtures } from './import/fixturePolicy';
 import { assertImportQualityContract } from './import/importQuality';
 import { emitLocalHtml } from './import/localHtmlEmitter';
 import { parsePublicFeishuHtmlToDocument } from './import/publicHtmlIr';
@@ -34,6 +35,8 @@ export interface ImportedFeishuUrlPayload {
   coverUrl?: string;
   importMetadata?: ImportMetadata;
 }
+
+export { allowFeishuImportFixtures } from './import/fixturePolicy';
 
 export function isAllowedFeishuPublicUrl(urlString: string): boolean {
   try {
@@ -242,13 +245,18 @@ export function importFeishuPublicHtml(rawHtml: string, sourceUrl: string): Impo
   return buildGenericDocument(sourceUrl, rawHtml);
 }
 
-async function fetchWithNode(urlString: string, redirectCount = 0): Promise<string> {
-  if (process.env.NODE_ENV === 'test') {
+type PublicHtmlFetchResult = {
+  html: string;
+  source: 'public_html' | 'fixture_snapshot';
+};
+
+async function fetchWithNode(urlString: string, redirectCount = 0): Promise<PublicHtmlFetchResult> {
+  if (allowFeishuImportFixtures()) {
     const sample = findFeishuPublicSample(urlString);
-    if (sample) return sample.rawHtml;
+    if (sample) return { html: sample.rawHtml, source: 'fixture_snapshot' };
   }
-  if (process.env.NODE_ENV === 'test' && /H58uwRchYi7889k6dnJcVoMMnO5/.test(urlString)) {
-    return BUSINESS_REPORT_FIXTURE_HTML;
+  if (allowFeishuImportFixtures() && /H58uwRchYi7889k6dnJcVoMMnO5/.test(urlString)) {
+    return { html: BUSINESS_REPORT_FIXTURE_HTML, source: 'fixture_snapshot' };
   }
 
   if (!isAllowedFeishuPublicUrl(urlString)) throw new Error('仅支持安全的飞书或 Lark HTTPS 文档链接');
@@ -306,7 +314,10 @@ async function fetchWithNode(urlString: string, redirectCount = 0): Promise<stri
           chunks.push(chunk);
         });
         response.on('end', () => {
-          resolve(Buffer.concat(chunks).toString('utf-8'));
+          resolve({
+            html: Buffer.concat(chunks).toString('utf-8'),
+            source: 'public_html',
+          });
         });
       },
     );
@@ -349,9 +360,37 @@ function toUrlPayload(
   });
 }
 
+function annotateImportSource(
+  payload: ImportedFeishuUrlPayload,
+  source: 'open_api' | 'public_html' | 'fixture_snapshot',
+): ImportedFeishuUrlPayload {
+  const sourceNote = {
+    open_api: '导入通道：飞书 Open API。',
+    public_html: '导入通道：飞书公开页面 HTML。',
+    fixture_snapshot: '导入通道：测试 fixture 渲染快照。',
+  }[source];
+  const metadata = payload.importMetadata || {
+    permission: 'unknown' as const,
+    readonly: true,
+    comments: 'not_supported' as const,
+    notes: [],
+  };
+  const notes = metadata.notes.includes(sourceNote)
+    ? metadata.notes
+    : [...metadata.notes, sourceNote];
+
+  return {
+    ...payload,
+    importMetadata: {
+      ...metadata,
+      notes,
+    },
+  };
+}
+
 export async function importFeishuPublicUrl(
   sourceUrl: string,
-  fetchHtml: (url: string) => Promise<string> = fetchWithNode,
+  fetchHtml: (url: string) => Promise<string | PublicHtmlFetchResult> = fetchWithNode,
 ): Promise<ImportedFeishuUrlPayload> {
   const trimmed = sourceUrl.trim();
   if (!trimmed) throw new Error('请输入飞书文档链接');
@@ -364,7 +403,7 @@ export async function importFeishuPublicUrl(
   try {
     const apiImported = await importFeishuDocumentFromApi(trimmed);
     if (apiImported) {
-      return toUrlPayload(apiImported, trimmed);
+      return annotateImportSource(toUrlPayload(apiImported, trimmed), 'open_api');
     }
   } catch (error) {
     if (isFeishuApiError(error)) {
@@ -382,16 +421,28 @@ export async function importFeishuPublicUrl(
   }
 
   try {
-    const html = await fetchHtml(trimmed);
+    const fetched = await fetchHtml(trimmed);
+    const { html, source } = typeof fetched === 'string'
+      ? { html: fetched, source: 'public_html' as const }
+      : fetched;
     if (!html.trim()) throw new Error('飞书页面内容为空，可能文档未公开或需要登录');
-    return toUrlPayload(importFeishuPublicHtml(html, trimmed), trimmed, preamble);
+    return annotateImportSource(
+      toUrlPayload(importFeishuPublicHtml(html, trimmed), trimmed, preamble),
+      source,
+    );
   } catch (error) {
+    // 真实导入不能把固定快照伪装成网络抓取成功；仅 fixture 模式允许该测试兜底。
+    if (!allowFeishuImportFixtures()) throw error;
+
     const imported = importFeishuPublicHtml('', trimmed);
     if (imported.content.replace(/<[^>]+>/g, '').trim() && imported.title !== '飞书文档') {
-      return toUrlPayload(imported, trimmed, [
-        ...preamble,
-        `飞书页面实时抓取失败，已使用本地渲染快照导入：${error instanceof Error ? error.message : '未知错误'}`,
-      ]);
+      return annotateImportSource(
+        toUrlPayload(imported, trimmed, [
+          ...preamble,
+          `飞书页面实时抓取失败，已使用测试 fixture 渲染快照导入：${error instanceof Error ? error.message : '未知错误'}`,
+        ]),
+        'fixture_snapshot',
+      );
     }
     throw error;
   }

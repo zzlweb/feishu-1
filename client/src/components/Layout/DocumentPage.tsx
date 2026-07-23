@@ -1,8 +1,8 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Loading, MessagePlugin } from 'tdesign-react';
-import { addComment, deleteComment, getComments, getDocument, updateComment } from '../../api/documents';
-import type { Comment, Document, HeadingItem } from '../../types';
+import { addComment, deleteComment, getComments, updateComment } from '../../api/documents';
+import type { Comment, Document } from '../../types';
 import { DOC_TITLE_CATALOGUE_ID } from '../../types';
 import Editor from '../Editor/Editor';
 import { FEISHU_LAYOUT_SCROLL_EVENT } from '../Editor/shared/floatingPanel';
@@ -10,6 +10,7 @@ import Sidebar from './Sidebar';
 import DocumentHeader from './DocumentHeader';
 import CommentSidebar from './CommentSidebar';
 import { CommentSidebarTrackContext } from './CommentSidebarContext';
+import { useDocumentOutline } from './useDocumentOutline';
 import {
   BITABLE_COMMENT_CLOSE,
   BITABLE_COMMENT_META,
@@ -29,13 +30,12 @@ import {
   COMMENT_REANCHOR_SELECTED_EVENT,
   type CommentReanchorSelection,
 } from '../Editor/blocks/commentBlockAnchor';
-import { useDocumentSaveQueue, type DocumentPatch } from '../../features/documents/session/useDocumentSaveQueue';
 import {
-  clearDocumentDraft,
-  isDocumentDraftNewer,
-  readDocumentDraft,
-  type StoredDocumentDraft,
-} from '../../features/documents/session/documentDraft';
+  useDocumentDraftRecoveryActions,
+  useDocumentLoadSession,
+  useDocumentSaveQueue,
+  type DocumentPatch,
+} from '../../features/documents/session';
 import './Layout.less';
 
 const EDITOR_PAGE_MIN_WIDTH = 860;
@@ -78,11 +78,20 @@ function isCatalogueAreaSqueezed(pageMain: HTMLElement, commentSidebarOpen: bool
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [doc, setDoc] = useState<Document | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [headings, setHeadings] = useState<HeadingItem[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [readingMode, setReadingMode] = useState(false);
+  const resetReadingModeOnDocumentLoad = useCallback(() => setReadingMode(false), []);
+  const {
+    document: doc,
+    setDocument: setDoc,
+    loading,
+    recoverableDraft,
+    setRecoverableDraft,
+  } = useDocumentLoadSession({
+    documentId: id,
+    onMissing: () => navigate('/'),
+    onLoaded: resetReadingModeOnDocumentLoad,
+  });
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentSidebarVisible, setCommentSidebarVisible] = useState(false);
   const [bitableCommentActive, setBitableCommentActive] = useState(false);
@@ -99,7 +108,6 @@ export default function DocumentPage() {
     quote: string;
     anchorJson: string;
   } | null>(null);
-  const [recoverableDraft, setRecoverableDraft] = useState<{ draft: StoredDocumentDraft; serverDocument: Document } | null>(null);
   const [editorRevision, setEditorRevision] = useState(0);
   const outlineWasVisibleRef = useRef(false);
   const mainScrollRef = useRef<HTMLDivElement>(null);
@@ -110,20 +118,20 @@ export default function DocumentPage() {
   sidebarCollapsedRef.current = sidebarCollapsed;
   const collapsedPersistReadyRef = useRef(false);
   const collapsedPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadRequestSequenceRef = useRef(0);
   const commentRequestSequenceRef = useRef(0);
   const catalogueScrollFrameRef = useRef<number | null>(null);
-  const headingSnapshotDocumentRef = useRef<string | null>(null);
-  const [titleInputSnapshot, setTitleInputSnapshot] = useState('');
-  const [catalogueActiveId, setCatalogueActiveId] = useState<string | null>(null);
-  const [collapsedHeadingIds, setCollapsedHeadingIds] = useState<Set<string>>(() => new Set());
-  const collapsedHeadingIdList = useMemo(
-    () => Array.from(collapsedHeadingIds).sort(),
-    [collapsedHeadingIds],
-  );
-
-  const catalogueTitleDisplay = titleInputSnapshot.trim();
-  const showOutlineSidebar = headings.length > 0 || catalogueTitleDisplay.length > 0;
+  const {
+    headings,
+    catalogueTitleDisplay,
+    showOutlineSidebar,
+    catalogueActiveId,
+    setCatalogueActiveId,
+    collapsedHeadingIds,
+    collapsedHeadingIdList,
+    handleTitleInputChange,
+    handleHeadingsChange,
+    handleToggleHeadingCollapse,
+  } = useDocumentOutline(doc);
   const commentInput = activeCommentBlockId ? (commentDrafts[activeCommentBlockId] || '') : '';
 
   const handleCommentInputChange = useCallback((value: string) => {
@@ -131,58 +139,10 @@ export default function DocumentPage() {
     setCommentDrafts(current => ({ ...current, [activeCommentBlockId]: value }));
   }, [activeCommentBlockId]);
 
-  const handleTitleInputChange = useCallback((t: string) => {
-    setTitleInputSnapshot(t);
-  }, []);
-
-  useEffect(() => {
-    if (!doc) return;
-    setTitleInputSnapshot(doc.title === '未命名文档' ? '' : doc.title);
-  }, [doc?.id, doc?.title]);
-
   useEffect(() => {
     outlineWasVisibleRef.current = false;
-    headingSnapshotDocumentRef.current = null;
-    setHeadings([]);
-    setCatalogueActiveId(null);
     collapsedPersistReadyRef.current = false;
-    setCollapsedHeadingIds(new Set(doc?.collapsed_heading_ids ?? []));
   }, [doc?.id]);
-
-  const handleHeadingsChange = useCallback((nextHeadings: HeadingItem[]) => {
-    headingSnapshotDocumentRef.current = doc?.id || null;
-    setHeadings(nextHeadings);
-  }, [doc?.id]);
-
-  useEffect(() => {
-    if (!doc?.id || headingSnapshotDocumentRef.current !== doc.id) return;
-    const validIds = new Set(headings.map(heading => heading.id));
-    setCollapsedHeadingIds(current => {
-      const next = new Set(Array.from(current).filter(headingId => validIds.has(headingId)));
-      if (next.size === current.size && Array.from(next).every(headingId => current.has(headingId))) return current;
-      return next;
-    });
-  }, [doc?.id, headings]);
-
-  const handleToggleHeadingCollapse = useCallback((headingId: string) => {
-    setCollapsedHeadingIds(prev => {
-      const next = new Set(prev);
-      if (next.has(headingId)) next.delete(headingId);
-      else next.add(headingId);
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (catalogueActiveId === null) return;
-    if (catalogueActiveId === DOC_TITLE_CATALOGUE_ID) {
-      if (catalogueTitleDisplay.length === 0) setCatalogueActiveId(null);
-      return;
-    }
-    if (!headings.some(h => h.id === catalogueActiveId)) {
-      setCatalogueActiveId(null);
-    }
-  }, [headings, catalogueTitleDisplay, catalogueActiveId]);
 
   useEffect(() => {
     if (showOutlineSidebar && !outlineWasVisibleRef.current) {
@@ -192,40 +152,6 @@ export default function DocumentPage() {
     }
     outlineWasVisibleRef.current = showOutlineSidebar;
   }, [showOutlineSidebar]);
-
-  const loadDocument = useCallback(async (signal?: AbortSignal) => {
-    if (!id) return;
-    const requestId = ++loadRequestSequenceRef.current;
-    setLoading(true);
-    try {
-      const res = await getDocument(id, { signal });
-      if (requestId !== loadRequestSequenceRef.current) return;
-      if (res.code === 0 && res.data) {
-        const draft = readDocumentDraft(window.localStorage, id);
-        if (draft && isDocumentDraftNewer(draft, res.data) && !res.data.read_only) {
-          setRecoverableDraft({ draft, serverDocument: res.data });
-          setDoc({ ...res.data, ...draft.patch });
-        } else {
-          if (draft) clearDocumentDraft(window.localStorage, id);
-          setRecoverableDraft(null);
-          setDoc(res.data);
-        }
-        // Server-enforced read-only is a permission boundary, not a UI mode.
-        // Reset only the user's temporary reading mode when navigating.
-        setReadingMode(false);
-      } else {
-        navigate('/');
-      }
-    } finally {
-      if (requestId === loadRequestSequenceRef.current) setLoading(false);
-    }
-  }, [id, navigate]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void loadDocument(controller.signal);
-    return () => controller.abort();
-  }, [loadDocument]);
 
   const loadComments = useCallback(async (signal?: AbortSignal) => {
     if (!id) return;
@@ -483,19 +409,21 @@ export default function DocumentPage() {
     enqueueSave(patch);
   }, [enqueueSave, recoverableDraft]);
 
-  const retryRecoveredDraft = useCallback(() => {
-    if (!recoverableDraft) return;
-    enqueueSave(recoverableDraft.draft.patch);
-    setRecoverableDraft(null);
-  }, [enqueueSave, recoverableDraft]);
-
-  const discardRecoveredDraft = useCallback(() => {
-    if (!recoverableDraft || !id) return;
-    clearDocumentDraft(window.localStorage, id);
-    setDoc(recoverableDraft.serverDocument);
-    setRecoverableDraft(null);
+  const handleRecoveredDraftDiscarded = useCallback(() => {
     setEditorRevision(value => value + 1);
-  }, [id, recoverableDraft]);
+  }, []);
+
+  const {
+    retryRecoveredDraft,
+    discardRecoveredDraft,
+  } = useDocumentDraftRecoveryActions({
+    documentId: id,
+    recoverableDraft,
+    setRecoverableDraft,
+    setDocument: setDoc,
+    enqueueSave,
+    onDiscarded: handleRecoveredDraftDiscarded,
+  });
 
   useEffect(() => {
     if (!id || !doc?.id) return;
@@ -712,6 +640,7 @@ export default function DocumentPage() {
                     onToggle={handleSidebarToggle}
                     collapsedHeadingIds={collapsedHeadingIds}
                     onToggleHeadingCollapse={handleToggleHeadingCollapse}
+                    scrollContainerRef={mainScrollRef}
                   />
                 </div>
               )}
