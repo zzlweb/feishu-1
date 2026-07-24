@@ -2,8 +2,8 @@
 
 @text-placeholder: @text-placeholder-light;
 @radius-md: @radius-lg;
-@editor-page-padding-left: 48px;
-@editor-page-padding-right: 56px;
+@editor-page-padding-left: @fs-editor-page-padding-left;
+@editor-page-padding-right: @fs-editor-page-padding-right;
 /** 目录轨与正文之间的固定间距（轨宽由 Layout 中 .doc-page-catalogue-rail 占位） */
 @editor-content-rail-gap: 24px;
 /** 顶层块之间的垂直间距，对齐飞书行与行之间的留白 */
@@ -266,6 +266,17 @@
           border-radius: 50%;
           background: @primary;
           transform: translateY(-50%);
+        }
+
+        &--side {
+          height: auto;
+          border-radius: 0;
+          background: @primary;
+          box-shadow: none;
+
+          &::before {
+            display: none;
+          }
         }
       }
 
@@ -2244,6 +2255,18 @@
               text-align: right;
             }
           }
+        }
+
+        .feishu-image-grid__cell {
+          &:hover,
+          &:focus-within {
+            .docx-menu-container {
+              opacity: 1;
+              pointer-events: auto;
+              transform: translate(-50%, 0);
+            }
+          }
+
         }
 
         .feishu-image-block {

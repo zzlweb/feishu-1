@@ -14,6 +14,7 @@ export const FEISHU_BLOCK_ID_TYPES = [
   'table',
   'localColumnsBlock',
   'localColumnBlock',
+  'localImageGridBlock',
   'highlightBlock',
   'localFileBlock',
   'localDivTableBlock',

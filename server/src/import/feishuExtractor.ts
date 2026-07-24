@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
 import { buildBusinessReportDocumentContent } from '../fixtures/businessReportTemplate';
-import { mirrorRemoteAsset } from './assetPipeline';
 import {
   createFeishuApiClient,
   getFeishuApiConfigFromEnv,
@@ -17,7 +16,7 @@ import {
 } from './businessReportEnricher';
 import { mapFeishuBitableToBaseTable } from './bitableMapper';
 import { mirrorBitableTableAttachments, type BitableAttachmentMirrorContext } from './bitableAttachmentMirror';
-import { fetchFeishuRawDocumentData, type FeishuRawFetchWarning } from './feishuRawDocumentFetcher';
+import { fetchFeishuRawDocumentData, type FeishuRawFetchWarning, type FeishuRawMediaRef } from './feishuRawDocumentFetcher';
 import { emitLocalHtml } from './localHtmlEmitter';
 import type { EmittedImportPayload, ImportedBlock, ImportedDocument, ImportedInline, ImportWarning } from './types';
 import type { ImportedAsset } from './types';
@@ -55,7 +54,7 @@ interface FeishuBlock {
   grid?: Record<string, unknown>;
   grid_column?: { width_ratio?: number | string };
   iframe?: { component?: { type?: number | string; url?: string } };
-  image?: { token?: string; url?: string };
+  image?: { token?: string; url?: string; file_token?: string; [key: string]: unknown };
   table?: {
     cells?: string[][] | string[];
     row_size?: number;
@@ -279,8 +278,19 @@ function decodeIframeUrl(value: string | undefined): string {
   }
 }
 
-function mediaDownloadUrl(baseUrl: string, token: string): string {
-  return `${baseUrl.replace(/\/$/, '')}/open-apis/drive/v1/medias/${encodeURIComponent(token)}/download`;
+/** 导入时不落盘：编辑器用本地代理地址直出飞书素材（浏览器无法带 Authorization）。 */
+function localFeishuMediaProxyUrl(token: string): string {
+  return `/api/feishu-media/${encodeURIComponent(token)}`;
+}
+
+function extractFeishuMediaToken(url: string): string | null {
+  const match = url.match(/\/open-apis\/drive\/v1\/medias\/([^/?#]+)/i);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
 }
 
 async function fetchPagedItems<T>(
@@ -424,6 +434,7 @@ function importedBlockText(block: ImportedBlock): string {
   if (block.type === 'embed') return [block.title, block.desc, block.url].filter(Boolean).join(' ');
   if (block.type === 'formula') return block.formula;
   if (block.type === 'image') return block.alt || block.src;
+  if (block.type === 'imageGrid') return block.images.map(image => image.alt || image.src).filter(Boolean).join('\n');
   return '';
 }
 
@@ -713,6 +724,177 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+function isBlankImportedBlock(block: ImportedBlock): boolean {
+  if (block.type === 'paragraph') {
+    return block.inlines.every(inline => !String(inline.text || '').trim());
+  }
+  if (block.type === 'html') {
+    return !String(block.html || '').replace(/<[^>]+>/g, '').trim();
+  }
+  return false;
+}
+
+function extractImagesFromColumn(column: ImportedBlock[]): Array<{ src: string; alt?: string }> | null {
+  return collectImagesFromBlocks(column);
+}
+
+/** 从块树里提取纯图片序列（允许空白块、高亮/引用容器包裹） */
+function collectImagesFromBlocks(blocks: ImportedBlock[]): Array<{ src: string; alt?: string }> | null {
+  const images: Array<{ src: string; alt?: string }> = [];
+  for (const block of blocks) {
+    if (block.type === 'image' && block.src) {
+      images.push({ src: block.src, alt: block.alt });
+      continue;
+    }
+    if (isBlankImportedBlock(block)) continue;
+    if (block.type === 'highlight' && block.content?.length) {
+      const nested = collectImagesFromBlocks(block.content);
+      if (!nested) return null;
+      images.push(...nested);
+      continue;
+    }
+    if (block.type === 'quote' && block.blocks?.length) {
+      const nested = collectImagesFromBlocks(block.blocks);
+      if (!nested) return null;
+      images.push(...nested);
+      continue;
+    }
+    return null;
+  }
+  return images.length ? images : null;
+}
+
+function isGridColumnBlock(block: FeishuBlock): boolean {
+  return Boolean(block.grid_column) || block.block_type === 25 || block.block_type === 'grid_column';
+}
+
+function buildImageGridFromImages(
+  images: Array<{ src: string; alt?: string }>,
+  columnCount?: number,
+): ImportedBlock {
+  const cols = columnCount ?? Math.min(3, Math.max(2, images.length));
+  return { type: 'imageGrid', images, columnCount: cols };
+}
+
+function countImportedImages(blocks: ImportedBlock[]): number {
+  let count = 0;
+  for (const block of blocks) {
+    if (block.type === 'image' && block.src) count += 1;
+    else if (block.type === 'imageGrid') count += block.images.filter(image => image.src).length;
+    else if (block.type === 'columns') {
+      for (const column of block.columns) count += countImportedImages(column);
+    } else if (block.type === 'highlight') count += countImportedImages(block.content || []);
+    else if (block.type === 'quote') count += countImportedImages(block.blocks || []);
+    else if (block.type === 'list') {
+      for (const item of block.items) count += countImportedImages(item.blocks || []);
+    } else if (block.type === 'table') {
+      for (const row of block.rows) {
+        for (const cell of row) count += countImportedImages(cell.blocks || []);
+      }
+    }
+  }
+  return count;
+}
+
+function proxyImagesFromMediaRefs(mediaRefs: FeishuRawMediaRef[]): Array<{ src: string }> {
+  const images: Array<{ src: string }> = [];
+  const seen = new Set<string>();
+  for (const ref of mediaRefs) {
+    if (ref.type !== 'image') continue;
+    const token = firstString(
+      ref.token,
+      ref.url ? extractFeishuMediaToken(ref.url) : undefined,
+      ref.downloadUrl ? extractFeishuMediaToken(ref.downloadUrl) : undefined,
+    );
+    const src = token
+      ? localFeishuMediaProxyUrl(token)
+      : (ref.url && !/open-apis\/drive\/v1\/medias\//i.test(ref.url) ? ref.url : '');
+    if (!src || seen.has(src)) continue;
+    seen.add(src);
+    images.push({ src });
+  }
+  return images;
+}
+
+/** 转换结果缺图时，用原始 mediaRefs 回填图片排版 / 单图 */
+function repairImportedBlocksWithMediaRefs(
+  blocks: ImportedBlock[],
+  mediaRefs: FeishuRawMediaRef[],
+): ImportedBlock[] {
+  const proxyImages = proxyImagesFromMediaRefs(mediaRefs);
+  if (!proxyImages.length) {
+    return blocks.filter(block => !(block.type === 'imageGrid' && block.images.filter(image => image.src).length === 0));
+  }
+
+  let repaired = blocks.map(block => {
+    if (block.type !== 'imageGrid') return block;
+    const valid = block.images.filter(image => image.src);
+    if (valid.length > 0) return { ...block, images: valid };
+    if (proxyImages.length >= 2) {
+      return buildImageGridFromImages(proxyImages, block.columnCount || Math.min(3, Math.max(2, proxyImages.length)));
+    }
+    if (proxyImages.length === 1) {
+      return { type: 'image' as const, src: proxyImages[0].src };
+    }
+    return block;
+  }).filter(block => !(block.type === 'imageGrid' && block.images.filter(image => image.src).length === 0));
+
+  if (countImportedImages(repaired) === 0) {
+    if (proxyImages.length >= 2) repaired = [...repaired, buildImageGridFromImages(proxyImages)];
+    else if (proxyImages.length === 1) repaired = [...repaired, { type: 'image', src: proxyImages[0].src }];
+  }
+
+  return repaired;
+}
+
+function assetsFromMediaRefs(mediaRefs: FeishuRawMediaRef[]): ImportedAsset[] {
+  const assets: ImportedAsset[] = [];
+  const seen = new Set<string>();
+  for (const ref of mediaRefs) {
+    const token = firstString(
+      ref.token,
+      ref.url ? extractFeishuMediaToken(ref.url) : undefined,
+      ref.downloadUrl ? extractFeishuMediaToken(ref.downloadUrl) : undefined,
+    );
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    assets.push({
+      id: token,
+      sourceUrl: ref.downloadUrl || ref.url || mediaDownloadUrlFallback(token),
+      localUrl: localFeishuMediaProxyUrl(token),
+      name: ref.name || token,
+      mimeType: ref.mimeType,
+      status: 'downloaded',
+    });
+  }
+  return assets;
+}
+
+function mediaDownloadUrlFallback(token: string): string {
+  return `https://open.feishu.cn/open-apis/drive/v1/medias/${encodeURIComponent(token)}/download`;
+}
+
+/** 纯图片 grid（每列仅含图片）→ 飞书「图片排版」，不走通用分栏 */
+function tryBuildImageGridFromColumns(columns: ImportedBlock[]): ImportedBlock | null {
+  if (columns.length < 2) return null;
+  const perColumn = columns.map(extractImagesFromColumn);
+  if (perColumn.some(images => !images?.length)) return null;
+  const images: Array<{ src: string; alt?: string }> = [];
+  const maxRows = Math.max(...perColumn.map(column => column!.length));
+  for (let row = 0; row < maxRows; row += 1) {
+    for (let col = 0; col < perColumn.length; col += 1) {
+      const image = perColumn[col]![row];
+      if (image) images.push(image);
+    }
+  }
+  if (images.length < 2) return null;
+  return {
+    type: 'imageGrid',
+    images,
+    columnCount: columns.length,
+  };
+}
+
 function findHeading(block: FeishuBlock): { level: number; inlines: ImportedInline[] } | null {
   for (let level = 1; level <= 6; level += 1) {
     const key = `heading${level}`;
@@ -910,13 +1092,16 @@ async function convertFeishuBlock(
   }
 
   if (block.grid) {
-    const columnBlocks = (block.children || [])
+    const childIds = block.children || [];
+    const columnBlocks = childIds
       .map(childId => blockMap.get(childId))
-      .filter((child): child is FeishuBlock => Boolean(child?.grid_column));
-    const columns = await Promise.all(columnBlocks.map(column =>
-      convertChildBlocks(column.children || [], blockMap, visiting, client, warnings, assets, assetHeaders, apiBaseUrl),
-    ));
-    if (columns.length) {
+      .filter((child): child is FeishuBlock => Boolean(child && isGridColumnBlock(child)));
+    if (columnBlocks.length) {
+      const columns = await Promise.all(columnBlocks.map(column =>
+        convertChildBlocks(column.children || [], blockMap, visiting, client, warnings, assets, assetHeaders, apiBaseUrl),
+      ));
+      const imageGrid = tryBuildImageGridFromColumns(columns);
+      if (imageGrid) return imageGrid;
       const fallbackWidth = Math.floor(100 / columns.length);
       return {
         type: 'columns',
@@ -924,6 +1109,38 @@ async function convertFeishuBlock(
         ratios: columnBlocks.map(column => Number(column.grid_column?.width_ratio) || fallbackWidth),
       };
     }
+
+    // 飞书「图片排版」有时在 grid 下直接挂 image，无 grid_column 包裹
+    const directBlocks = await convertChildBlocks(childIds, blockMap, visiting, client, warnings, assets, assetHeaders, apiBaseUrl);
+    const directImages = collectImagesFromBlocks(directBlocks);
+    if (directImages && directImages.length >= 2) {
+      return buildImageGridFromImages(directImages);
+    }
+    if (directImages?.length === 1) {
+      return { type: 'image', src: directImages[0].src, alt: directImages[0].alt };
+    }
+    if (directBlocks.length === 1) return directBlocks[0];
+    if (directBlocks.length > 1) {
+      warnings.push({
+        type: 'partial-data',
+        blockType: 'grid',
+        message: '飞书分栏块未识别到列结构，已展开为可见内容。',
+      });
+      return {
+        type: 'highlight',
+        icon: '🖼️',
+        bgColor: '#f7f8fa',
+        borderColor: '#dee0e3',
+        textColor: '#1f2329',
+        content: directBlocks,
+      };
+    }
+
+    warnings.push({
+      type: 'partial-data',
+      blockType: 'grid',
+      message: '飞书分栏/图片排版块为空或结构无法识别，已跳过。',
+    });
   }
 
   if (block.iframe?.component?.url) {
@@ -939,50 +1156,49 @@ async function convertFeishuBlock(
 
   if (block.file) {
     const token = block.file.file_token || block.file.token || '';
-    const asset = token ? await mirrorRemoteAsset(mediaDownloadUrl(apiBaseUrl, token), assetHeaders, warnings) : null;
-    if (asset) assets.push(asset);
-    if (!asset?.localUrl) {
+    if (!token) {
       warnings.push({
         type: 'partial-data',
         blockType: 'file',
-        message: '飞书文件块已保留为本地卡片，但文件二进制下载失败或缺少 token。',
+        message: '飞书文件块缺少 token，已保留为可见占位卡片。',
       });
     }
     return {
       type: 'embed',
       title: block.file.name || block.file.file_token || block.file.token || '飞书文件',
-      url: asset?.localUrl,
+      url: token ? localFeishuMediaProxyUrl(token) : undefined,
       kind: 'file',
       desc: block.file.mime_type || 'Feishu file',
     };
   }
 
   if (block.image?.token) {
-    const remoteUrl = mediaDownloadUrl(apiBaseUrl, block.image.token);
-    const asset = await mirrorRemoteAsset(remoteUrl, assetHeaders, warnings);
-    assets.push(asset);
-    if (asset.localUrl) return { type: 'image', src: asset.localUrl };
-    return {
-      type: 'embed',
-      title: '飞书图片',
-      kind: 'image',
-      desc: '图片资源受飞书权限限制，已保留为可见占位卡片。',
-      url: remoteUrl,
-      metadata: { variant: 'qr', caption: '扫描二维码加入群聊' },
-    };
+    return { type: 'image', src: localFeishuMediaProxyUrl(block.image.token) };
   }
 
   if (block.image?.url) {
-    const asset = await mirrorRemoteAsset(block.image.url, assetHeaders, warnings);
-    assets.push(asset);
-    if (asset.localUrl) return { type: 'image', src: asset.localUrl };
-    return {
-      type: 'embed',
-      title: '飞书图片',
-      kind: 'image',
-      desc: '图片资源下载失败，已保留为可见占位卡片。',
-      url: block.image.url,
-    };
+    const token = extractFeishuMediaToken(block.image.url);
+    if (token) return { type: 'image', src: localFeishuMediaProxyUrl(token) };
+    // 非鉴权公开地址可直接展示，无需导入落盘
+    return { type: 'image', src: block.image.url };
+  }
+
+  const imageToken = firstString(
+    block.image?.token,
+    (block.image as { file_token?: string } | undefined)?.file_token,
+    pickNestedString(block.image, ['token', 'file_token', 'fileToken', 'media_token']),
+  );
+  if (imageToken) {
+    return { type: 'image', src: localFeishuMediaProxyUrl(imageToken) };
+  }
+
+  if (block.block_type === 27 || block.block_type === 'image') {
+    warnings.push({
+      type: 'partial-data',
+      blockType: 'image',
+      message: '飞书图片块缺少 token/url，已跳过该图片。',
+    });
+    return null;
   }
 
   if (block.table?.cells?.length && Array.isArray(block.table.cells[0])) {
@@ -1405,7 +1621,7 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
     const rawData = await fetchFeishuRawDocumentData(sourceUrl, {
       config,
       client,
-      // 本地转换阶段会再次下载图片/附件到 /static/uploads，这里只收集完整引用和结构。
+      // 本地转换阶段把图片/附件写成 /api/feishu-media/:token，打开时由后端代理直出，导入不再落盘。
       downloadMedia: false,
     });
     warnings.push(...rawData.warnings.map(rawWarningToImportWarning));
@@ -1435,7 +1651,7 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
         },
       };
     });
-    const assets: ImportedAsset[] = [];
+    const assets: ImportedAsset[] = assetsFromMediaRefs(rawData.mediaRefs || []);
     // Drive 图片下载可使用独立的媒体应用身份；正文仍由主应用读取。
     // 这允许把具备 drive:media:download 且被授予文档访问权的应用专用于资产镜像。
     const mediaConfig = getFeishuMediaApiConfigFromEnv() || config;
@@ -1453,16 +1669,21 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
         ? block.children.map(childId => blockMap.get(childId)).filter((child): child is FeishuBlock => Boolean(child))
         : [block]));
     const rootBlocks = rootBlocksFromRaw.length ? rootBlocksFromRaw : fallbackRootBlocks;
-    const importedBlocks = (await Promise.all(rootBlocks.map(block => safeConvertFeishuBlock(
-      block,
-      blockMap,
-      new Set(block.block_id ? [block.block_id] : []),
-      client,
-      warnings,
-      assets,
-      { Authorization: `Bearer ${mediaToken}` },
-      config.baseUrl || 'https://open.feishu.cn',
-    )))).filter((block): block is ImportedBlock => block != null);
+    // 根块串行转换，避免数十个图片块同时打到飞书 5 QPS 素材下载上限。
+    const importedBlocks: ImportedBlock[] = [];
+    for (const block of rootBlocks) {
+      const converted = await safeConvertFeishuBlock(
+        block,
+        blockMap,
+        new Set(block.block_id ? [block.block_id] : []),
+        client,
+        warnings,
+        assets,
+        { Authorization: `Bearer ${mediaToken}` },
+        config.baseUrl || 'https://open.feishu.cn',
+      );
+      if (converted) importedBlocks.push(converted);
+    }
 
     const isBusinessReport = parsed.token === BUSINESS_REPORT_TOKEN;
     let finalBlocks = importedBlocks;
@@ -1477,6 +1698,7 @@ export async function importFeishuDocumentFromApi(sourceUrl: string): Promise<Em
         });
       }
     }
+    finalBlocks = repairImportedBlocksWithMediaRefs(finalBlocks, rawData.mediaRefs || []);
 
     if (!finalBlocks.length && isBusinessReport) {
       return buildFallbackBusinessReportPayload(sourceUrl, '飞书 API 未返回可识别的文档 block，已使用固定周报高保真 fixture 兜底。');

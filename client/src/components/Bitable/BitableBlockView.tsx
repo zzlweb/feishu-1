@@ -9,6 +9,7 @@ import { BitableAddFieldPopover, BitableEditFieldPopover, buildNewFieldPayload, 
 import { FieldLockGlyph, fieldTypeGlyph } from './fields/bitableFieldTypeIcons';
 import { isFieldTypeCreatable } from './fields/bitableFieldTypes';
 import {
+  AttachmentCoverMedia,
   BitableTooltip,
   useBitablePanelHoverHandlers,
   useBitableToolbarPortalStyle,
@@ -720,20 +721,6 @@ function withUpdatedValue(record: BaseRecord, fieldId: string, value: CellValue,
     fields: { ...record.fields, [fieldId]: value },
   };
   return fieldName ? appendRecordHistory(next, fieldId, fieldName, before, value) : next;
-}
-
-function isPreviewImage(attachment: AttachmentValue | undefined) {
-  return Boolean(attachment?.mimeType.startsWith('image/') && (attachment.thumbnailUrl || attachment.previewUrl || attachment.url));
-}
-
-function FileBadge({ attachment }: { attachment: AttachmentValue }) {
-  const kind = attachment.mimeType.startsWith('video/') ? 'VIDEO' : attachment.extension.toUpperCase() || 'FILE';
-  return (
-    <div className="base-gallery-file-fallback">
-      <strong>{kind}</strong>
-      <span>{attachment.name}</span>
-    </div>
-  );
 }
 
 function FieldDisplay({ field, value }: { field: BaseField; value: CellValue }) {
@@ -1918,10 +1905,15 @@ export default function BitableBlockView({ node, updateAttributes, selected, edi
   const renderCover = (record: BaseRecord) => {
     const attachments = getAttachments(record, galleryConfig.coverFieldId);
     const cover = selectCoverAttachment(attachments);
-    if (isPreviewImage(cover)) {
-      return <img loading="lazy" src={cover!.thumbnailUrl || cover!.previewUrl || cover!.url} alt="" style={{ objectFit: galleryConfig.coverFit, objectPosition: galleryConfig.coverPosition || 'center' }} />;
+    if (cover) {
+      return (
+        <AttachmentCoverMedia
+          attachment={cover}
+          objectFit={galleryConfig.coverFit}
+          objectPosition={galleryConfig.coverPosition || 'center'}
+        />
+      );
     }
-    if (cover) return <FileBadge attachment={cover} />;
     return (
       <div className="base-gallery-empty-cover">
         <span aria-hidden>▧</span>

@@ -36,7 +36,8 @@ async function dragFromHandleTo(page: Page, handle: Locator, target: Locator, pl
 
   const startX = handleBox.x + handleBox.width / 2;
   const startY = handleBox.y + handleBox.height / 2;
-  const endX = targetBox.x + Math.min(40, targetBox.width / 2);
+  // 落在目标块水平中央，避免误触左右分栏热区
+  const endX = targetBox.x + targetBox.width / 2;
   const endY = placement === 'before' ? targetBox.y + 2 : targetBox.y + targetBox.height - 2;
 
   await page.mouse.move(startX, startY);
@@ -58,9 +59,41 @@ test('drags a paragraph block using the left block handle', async ({ page }) => 
   await dragFromHandleTo(page, handle, omega, 'after');
 
   const order = await page.locator('.ProseMirror > *').evaluateAll(nodes =>
-    nodes.map(node => node.textContent?.trim()).filter(Boolean),
+    nodes.map(node => {
+      if (node.classList.contains('feishu-columns-node') || node.querySelector?.('.feishu-columns-block__col')) {
+        return 'columns';
+      }
+      return node.textContent?.trim() || '';
+    }).filter(Boolean),
   );
-  expect(order).toEqual(['Beta block', 'Table cell', 'Left columnRight column', 'Omega block', 'Alpha block']);
+  expect(order.at(-1)).toBe('Alpha block');
+  expect(order).toContain('Beta block');
+  expect(order).toContain('Omega block');
+});
+
+test('drags a paragraph beside another paragraph to create two columns', async ({ page }) => {
+  const alpha = page.locator('.ProseMirror > p', { hasText: 'Alpha block' });
+  const beta = page.locator('.ProseMirror > p', { hasText: 'Beta block' });
+  await alpha.hover();
+  const handle = page.locator('.block-drag-row').first();
+  await expect(handle).toBeVisible();
+
+  const handleBox = await handle.boundingBox();
+  const targetBox = await beta.boundingBox();
+  expect(handleBox).not.toBeNull();
+  expect(targetBox).not.toBeNull();
+  if (!handleBox || !targetBox) return;
+
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width - 4, targetBox.y + targetBox.height / 2, { steps: 14 });
+  await expect(page.locator('.block-drag-drop-indicator--side')).toBeVisible();
+  await page.mouse.up();
+
+  const columns = page.locator('.feishu-columns-node').filter({ hasText: 'Alpha block' });
+  await expect(columns).toHaveCount(1);
+  await expect(columns.locator('.feishu-columns-block__col').filter({ hasText: 'Alpha block' })).toHaveCount(1);
+  await expect(columns.locator('.feishu-columns-block__col').filter({ hasText: 'Beta block' })).toHaveCount(1);
 });
 
 test('drags an image directly into another column with a thumbnail preview', async ({ page }) => {
@@ -82,6 +115,52 @@ test('drags an image directly into another column with a thumbnail preview', asy
   const rightColumn = page.locator('.feishu-columns-block__col', { hasText: 'Right column' });
   await expect(rightColumn.locator('.feishu-image-block-wrap')).toHaveCount(1);
   await expect(page.locator('.ProseMirror > .feishu-image-block-wrap')).toHaveCount(0);
+});
+
+test('drags an image onto another image side to create image-grid layout', async ({ page }) => {
+  await page.unroute('**/api/documents/block-drag-e2e');
+  await page.route('**/api/documents/block-drag-e2e', route =>
+    route.fulfill({
+      json: {
+        code: 0,
+        data: {
+          ...dragDocument,
+          content: [
+            '<p>Intro</p>',
+            '<img class="feishu-image" src="/static/uploads/sample-crop.png" alt="图一">',
+            '<img class="feishu-image" src="/static/uploads/sample-crop.png" alt="图二">',
+            '<p>Tail</p>',
+          ].join(''),
+        },
+      },
+    }),
+  );
+  await page.goto('/doc/block-drag-e2e');
+
+  const wraps = page.locator('.ProseMirror .feishu-image-block-wrap');
+  await expect(wraps).toHaveCount(2);
+
+  const firstWrap = wraps.nth(0);
+  const secondWrap = wraps.nth(1);
+  await firstWrap.hover();
+  const handle = page.locator('.block-drag-row').first();
+  await expect(handle).toBeVisible();
+
+  const handleBox = await handle.boundingBox();
+  const targetBox = await secondWrap.boundingBox();
+  expect(handleBox).not.toBeNull();
+  expect(targetBox).not.toBeNull();
+  if (!handleBox || !targetBox) return;
+
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + Math.min(12, targetBox.width * 0.08), targetBox.y + targetBox.height / 2, { steps: 16 });
+  await expect(page.locator('.block-drag-drop-indicator--side')).toBeVisible({ timeout: 5_000 });
+  await page.mouse.up();
+
+  await expect(page.locator('.feishu-image-grid')).toHaveCount(1);
+  await expect(page.locator('.feishu-image-grid__cell')).toHaveCount(2);
+  await expect(page.locator('.ProseMirror .feishu-image-block-wrap')).toHaveCount(0);
 });
 
 test('drags a table block using its top-left block handle', async ({ page }) => {

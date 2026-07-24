@@ -4,7 +4,7 @@ import { Button, Checkbox, Input, Select, Upload } from 'tdesign-react';
 import { CalendarIcon } from 'tdesign-icons-react';
 import type { PopupProps } from 'tdesign-react';
 import { FLOATING_Z_INDEX, bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
-import { fieldTypeGlyph, isPreviewImage } from '../shared/BitableViewShared';
+import { fieldTypeGlyph, getAttachmentMediaUrl, isPreviewImage, isPreviewVideo } from '../shared/BitableViewShared';
 import {
   DEFAULT_RECORD_OPERATOR,
   findSelectChoice,
@@ -278,22 +278,28 @@ function formatAttachmentSize(size: number) {
 }
 
 function getAttachmentPreviewUrl(attachment: AttachmentValue): string {
-  if (!isPreviewImage(attachment)) return '';
-  return attachment.thumbnailUrl || attachment.previewUrl || attachment.url || '';
+  if (isPreviewImage(attachment)) return getAttachmentMediaUrl(attachment);
+  if (isPreviewVideo(attachment)) return attachment.url || attachment.previewUrl || '';
+  return '';
 }
 
 function AttachmentPreviewChip({ attachment }: { attachment: AttachmentValue }) {
   const previewUrl = getAttachmentPreviewUrl(attachment);
   const isUploading = attachment.uploadStatus === 'uploading';
   const isFailed = attachment.uploadStatus === 'failed';
+  const isVideo = isPreviewVideo(attachment);
 
   if (previewUrl) {
     return (
       <div
-        className={`bitable-card-attachment-preview${isFailed ? ' is-failed' : ''}${isUploading ? ' is-uploading' : ''}`}
+        className={`bitable-card-attachment-preview${isFailed ? ' is-failed' : ''}${isUploading ? ' is-uploading' : ''}${isVideo ? ' is-video' : ''}`}
         title={attachment.name}
       >
-        <img src={previewUrl} alt={attachment.name} />
+        {isVideo ? (
+          <video src={previewUrl} preload="metadata" muted playsInline controls={false} />
+        ) : (
+          <img src={previewUrl} alt={attachment.name} />
+        )}
         {isUploading ? (
           <span className="bitable-card-attachment-preview__progress">{attachment.uploadProgress ?? 0}%</span>
         ) : null}

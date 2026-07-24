@@ -444,12 +444,170 @@ test('importFeishuPublicUrl maps Open API container and media blocks', async () 
     assert.match(imported.content, /class="feishu-table"/);
     assert.match(imported.content, /<th class="feishu-table__header-cell" data-table-cell="true"><p>表头 A<\/p><\/th>/);
     assert.match(imported.content, /<td class="feishu-table__cell" data-table-cell="true"><p>数据 B<\/p><\/td>/);
-    assert.match(imported.content, /<td class="feishu-table__cell" data-table-cell="true"><p>数据 A<\/p><img class="feishu-image" data-align="center" src="\/static\/uploads\//);
-    assert.match(imported.content, /<img class="feishu-image" data-align="center" src="\/static\/uploads\//);
+    assert.match(imported.content, /<td class="feishu-table__cell" data-table-cell="true"><p>数据 A<\/p><img class="feishu-image" data-align="center" src="\/api\/feishu-media\//);
+    assert.match(imported.content, /<img class="feishu-image" data-align="center" src="\/api\/feishu-media\//);
     assert.match(imported.content, /data-local-block="embed" data-kind="iframe" data-href="https:\/\/example.com\/embed"/);
-    assert.match(imported.content, /data-local-block="embed" data-kind="file" data-href="\/static\/uploads\//);
+    assert.match(imported.content, /data-local-block="embed" data-kind="file" data-href="\/api\/feishu-media\//);
     assert.match(imported.content, /需求文档.pdf/);
     assert.equal(imported.warnings.some(warning => /文件二进制下载/.test(warning)), false);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    if (previousAppId === undefined) delete process.env.FEISHU_APP_ID;
+    else process.env.FEISHU_APP_ID = previousAppId;
+    if (previousSecret === undefined) delete process.env.FEISHU_APP_SECRET;
+    else process.env.FEISHU_APP_SECRET = previousSecret;
+    if (previousBaseUrl === undefined) delete process.env.FEISHU_OPEN_API_BASE_URL;
+    else process.env.FEISHU_OPEN_API_BASE_URL = previousBaseUrl;
+  }
+});
+
+test('importFeishuPublicUrl maps image-only grid to image-grid instead of columns', async () => {
+  const blocks = [
+    {
+      block_id: 'page',
+      block_type: 1,
+      children: ['heading', 'grid'],
+      page: { elements: [{ text_run: { content: '图片排版测试' } }] },
+    },
+    {
+      block_id: 'heading',
+      block_type: 3,
+      heading1: { elements: [{ text_run: { content: '图片排版测试' } }] },
+    },
+    {
+      block_id: 'grid',
+      block_type: 24,
+      children: ['col1', 'col2'],
+      grid: {},
+    },
+    {
+      block_id: 'col1',
+      parent_id: 'grid',
+      block_type: 25,
+      children: ['img1', 'img3'],
+      grid_column: { width_ratio: 50 },
+    },
+    {
+      block_id: 'col2',
+      parent_id: 'grid',
+      block_type: 25,
+      children: ['img2', 'img4'],
+      grid_column: { width_ratio: 50 },
+    },
+    {
+      block_id: 'img1',
+      parent_id: 'col1',
+      block_type: 27,
+      image: { token: 'img-token-1' },
+    },
+    {
+      block_id: 'img2',
+      parent_id: 'col2',
+      block_type: 27,
+      image: { token: 'img-token-2' },
+    },
+    {
+      block_id: 'img3',
+      parent_id: 'col1',
+      block_type: 27,
+      image: { token: 'img-token-3' },
+    },
+    {
+      block_id: 'img4',
+      parent_id: 'col2',
+      block_type: 27,
+      image: { token: 'img-token-4' },
+    },
+  ];
+  const { server, baseUrl } = await startMockFeishuApi(blocks, {
+    'img-token-1': { body: 'i1', contentType: 'image/png' },
+    'img-token-2': { body: 'i2', contentType: 'image/png' },
+    'img-token-3': { body: 'i3', contentType: 'image/png' },
+    'img-token-4': { body: 'i4', contentType: 'image/png' },
+  });
+  const previousAppId = process.env.FEISHU_APP_ID;
+  const previousSecret = process.env.FEISHU_APP_SECRET;
+  const previousBaseUrl = process.env.FEISHU_OPEN_API_BASE_URL;
+  process.env.FEISHU_APP_ID = 'test-app';
+  process.env.FEISHU_APP_SECRET = 'test-secret';
+  process.env.FEISHU_OPEN_API_BASE_URL = baseUrl;
+
+  try {
+    const imported = await importFeishuPublicUrl(
+      'https://qcntpn5n60jv.feishu.cn/wiki/mockDocToken',
+      async () => '<html><body>fallback should not be used</body></html>',
+    );
+
+    assert.match(imported.content, /data-local-block="image-grid"/);
+    assert.match(imported.content, /data-cols="2"/);
+    assert.match(imported.content, /feishu-image-grid__cell/);
+    assert.equal(/data-local-block="columns"/.test(imported.content), false);
+    assert.equal((imported.content.match(/feishu-image-grid__cell/g) || []).length, 4);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    if (previousAppId === undefined) delete process.env.FEISHU_APP_ID;
+    else process.env.FEISHU_APP_ID = previousAppId;
+    if (previousSecret === undefined) delete process.env.FEISHU_APP_SECRET;
+    else process.env.FEISHU_APP_SECRET = previousSecret;
+    if (previousBaseUrl === undefined) delete process.env.FEISHU_OPEN_API_BASE_URL;
+    else process.env.FEISHU_OPEN_API_BASE_URL = previousBaseUrl;
+  }
+});
+
+test('importFeishuPublicUrl maps flat image children under grid to image-grid', async () => {
+  const blocks = [
+    {
+      block_id: 'page',
+      block_type: 1,
+      children: ['heading', 'grid'],
+      page: { elements: [{ text_run: { content: '图片' } }] },
+    },
+    {
+      block_id: 'heading',
+      block_type: 6,
+      heading4: { elements: [{ text_run: { content: '1' } }] },
+    },
+    {
+      block_id: 'grid',
+      block_type: 24,
+      children: ['img1', 'img2'],
+      grid: {},
+    },
+    {
+      block_id: 'img1',
+      parent_id: 'grid',
+      block_type: 27,
+      image: { token: 'flat-img-1' },
+    },
+    {
+      block_id: 'img2',
+      parent_id: 'grid',
+      block_type: 27,
+      image: { token: 'flat-img-2' },
+    },
+  ];
+  const { server, baseUrl } = await startMockFeishuApi(blocks, {
+    'flat-img-1': { body: 'i1', contentType: 'image/png' },
+    'flat-img-2': { body: 'i2', contentType: 'image/png' },
+  });
+  const previousAppId = process.env.FEISHU_APP_ID;
+  const previousSecret = process.env.FEISHU_APP_SECRET;
+  const previousBaseUrl = process.env.FEISHU_OPEN_API_BASE_URL;
+  process.env.FEISHU_APP_ID = 'test-app';
+  process.env.FEISHU_APP_SECRET = 'test-secret';
+  process.env.FEISHU_OPEN_API_BASE_URL = baseUrl;
+
+  try {
+    const imported = await importFeishuPublicUrl(
+      'https://qcntpn5n60jv.feishu.cn/wiki/mockDocToken',
+      async () => '<html><body>fallback</body></html>',
+    );
+
+    assert.match(imported.content, /data-local-block="image-grid"/);
+    assert.match(imported.content, /data-images=/);
+    assert.equal((imported.content.match(/feishu-image-grid__cell/g) || []).length, 2);
+    assert.match(imported.content, /\/api\/feishu-media\/flat-img-1/);
+    assert.match(imported.content, /\/api\/feishu-media\/flat-img-2/);
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
     if (previousAppId === undefined) delete process.env.FEISHU_APP_ID;

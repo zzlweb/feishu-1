@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
 import type { Editor } from '@tiptap/react';
 import { MessagePlugin } from 'tdesign-react';
 import {
@@ -26,6 +26,7 @@ interface UseImageBlockInteractionsOptions {
   isLocalFileBlock?: boolean;
   uploadId?: string;
   fileName?: string;
+  imageRef?: MutableRefObject<HTMLImageElement | null>;
 }
 
 export function useImageBlockInteractions({
@@ -37,9 +38,11 @@ export function useImageBlockInteractions({
   isLocalFileBlock = false,
   uploadId = '',
   fileName = 'image',
+  imageRef: externalImageRef,
 }: UseImageBlockInteractionsOptions) {
   const captionRef = useRef<HTMLTextAreaElement>(null);
-  const imageRef = useRef<HTMLImageElement>(null);
+  const internalImageRef = useRef<HTMLImageElement | null>(null);
+  const imageRef = externalImageRef ?? internalImageRef;
   const cropRectRef = useRef<CropRect | null>(null);
   const boundsRef = useRef<RenderedImageBounds>({ x: 0, y: 0, width: 0, height: 0 });
   const isApplyingCropRef = useRef(false);

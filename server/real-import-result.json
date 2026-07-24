@@ -1,0 +1,43 @@
+﻿{
+    "code":  0,
+    "data":  {
+                 "document":  {
+                                  "id":  "30b5062b-1107-43a8-a0bc-8ae5301d32da",
+                                  "title":  "图片",
+                                  "content":  "\u003ch4\u003e1\u003c/h4\u003e\u003cdiv data-local-block=\"image-grid\" data-cols=\"2\" data-images=\"[{\u0026quot;src\u0026quot;:\u0026quot;/api/feishu-media/PPpqbcwFzoMIcTxsCCDc0PvGnqf\u0026quot;},{\u0026quot;src\u0026quot;:\u0026quot;/api/feishu-media/YhR2bRmBfo8LTQxdgoPcSRzsnth\u0026quot;}]\" class=\"feishu-image-grid\"\u003e\u003cfigure class=\"feishu-image-grid__cell\"\u003e\u003cimg class=\"feishu-image\" src=\"/api/feishu-media/PPpqbcwFzoMIcTxsCCDc0PvGnqf\" alt=\"\"\u003e\u003c/figure\u003e\u003cfigure class=\"feishu-image-grid__cell\"\u003e\u003cimg class=\"feishu-image\" src=\"/api/feishu-media/YhR2bRmBfo8LTQxdgoPcSRzsnth\" alt=\"\"\u003e\u003c/figure\u003e\u003c/div\u003e",
+                                  "author":  "??????",
+                                  "created_at":  "2026-07-23T09:55:33.126Z",
+                                  "updated_at":  "2026-07-23T09:55:33.126Z",
+                                  "is_template":  0,
+                                  "parent_id":  null,
+                                  "cover_url":  "",
+                                  "icon":  "",
+                                  "collapsed_heading_ids":  [
+
+                                                            ],
+                                  "read_only":  0,
+                                  "import_metadata":  "{\"permission\":\"readable\",\"readonly\":false,\"comments\":\"not_supported\",\"notes\":[\"已通过飞书 Open API 读取文档结构，并使用完整原始数据模块构建 block 树、表格详情、媒体引用和多维表格数据。\",\"飞书原始数据完整性检查通过。\",\"飞书评论线程尚未接入 Open API 导入，评论侧栏只显示本地评论。\",\"导入通道：飞书 Open API。\"]}",
+                                  "version":  1,
+                                  "schema_version":  1
+                              },
+                 "template":  null,
+                 "source_name":  "BARQwFd6yi1CGzkTJNbcNHlxnZc",
+                 "source_url":  "https://qcntpn5n60jv.feishu.cn/wiki/BARQwFd6yi1CGzkTJNbcNHlxnZc",
+                 "asset_count":  2,
+                 "warnings":  [
+
+                              ],
+                 "import_quality":  "full",
+                 "import_metadata":  {
+                                         "permission":  "readable",
+                                         "readonly":  false,
+                                         "comments":  "not_supported",
+                                         "notes":  [
+                                                       "已通过飞书 Open API 读取文档结构，并使用完整原始数据模块构建 block 树、表格详情、媒体引用和多维表格数据。",
+                                                       "飞书原始数据完整性检查通过。",
+                                                       "飞书评论线程尚未接入 Open API 导入，评论侧栏只显示本地评论。",
+                                                       "导入通道：飞书 Open API。"
+                                                   ]
+                                     }
+             }
+}

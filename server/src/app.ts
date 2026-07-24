@@ -4,6 +4,7 @@ import path from 'path';
 import multer from 'multer';
 import documentsRouter from './routes/documents';
 import uploadsRouter, { setUploadedAssetHeaders } from './routes/uploads';
+import feishuMediaRouter from './routes/feishuMedia';
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.use('/static', express.static(path.resolve(__dirname, '..', 'public'), {
 
 app.use('/api/documents', documentsRouter);
 app.use('/api/uploads', uploadsRouter);
+app.use('/api/feishu-media', feishuMediaRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

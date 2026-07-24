@@ -481,13 +481,19 @@ function collectRootBlockIds(blocks: FeishuRawBlock[]) {
 function collectMediaRefs(blocks: FeishuRawBlock[], apiBaseUrl: string): FeishuRawMediaRef[] {
   const refs: FeishuRawMediaRef[] = [];
   blocks.forEach(block => {
-    if (block.image?.token || block.image?.url) {
+    const imageToken = firstStringLoose(
+      block.image?.token,
+      (block.image as { file_token?: string } | undefined)?.file_token,
+      pickNestedStringLoose(block.image, ['token', 'file_token', 'fileToken', 'media_token']),
+    );
+    const imageUrl = block.image?.url;
+    if (imageToken || imageUrl) {
       refs.push({
         blockId: block.block_id,
         type: 'image',
-        token: block.image.token,
-        url: block.image.url,
-        downloadUrl: block.image.token ? mediaDownloadUrl(apiBaseUrl, block.image.token) : undefined,
+        token: imageToken || undefined,
+        url: imageUrl,
+        downloadUrl: imageToken ? mediaDownloadUrl(apiBaseUrl, imageToken) : undefined,
         source: 'document_block',
       });
     }
@@ -505,6 +511,36 @@ function collectMediaRefs(blocks: FeishuRawBlock[], apiBaseUrl: string): FeishuR
     }
   });
   return refs;
+}
+
+function firstStringLoose(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function pickNestedStringLoose(value: unknown, keys: string[], depth = 0): string | undefined {
+  if (!value || depth > 4) return undefined;
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value !== 'object') return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const picked = pickNestedStringLoose(item, keys, depth + 1);
+      if (picked) return picked;
+    }
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const direct = record[key];
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  }
+  for (const item of Object.values(record)) {
+    const picked = pickNestedStringLoose(item, keys, depth + 1);
+    if (picked) return picked;
+  }
+  return undefined;
 }
 
 function collectBitableAttachmentRefs(bitables: FeishuRawBitableData[], apiBaseUrl: string): FeishuRawMediaRef[] {

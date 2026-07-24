@@ -987,10 +987,13 @@
     aspect-ratio: auto;
   }
 
-  .base-gallery-card__cover img {
+  .base-gallery-card__cover img,
+  .base-gallery-card__cover video,
+  .base-gallery-cover-video {
     display: block;
     width: 100%;
     height: 100%;
+    background: #0f1115;
   }
 
   .base-gallery-empty-cover {
@@ -3748,10 +3751,12 @@
     overflow: hidden;
     background: #f5f6f7;
 
-    img {
+    img,
+    video {
       display: block;
       width: 100%;
       height: 100%;
+      background: #0f1115;
     }
   }
 
@@ -9973,11 +9978,13 @@
   background: #f5f6f7;
 }
 
-.bitable-card-attachment-preview img {
+.bitable-card-attachment-preview img,
+.bitable-card-attachment-preview video {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  background: #0f1115;
 }
 
 .bitable-card-attachment-preview--file {

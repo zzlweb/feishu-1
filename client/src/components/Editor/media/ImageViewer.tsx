@@ -46,27 +46,35 @@ export default function ImageViewer({
 
   if (!src) return null;
 
+  const handleBackdropMouseDown = (event: React.MouseEvent<HTMLElement>) => {
+    if (event.target === event.currentTarget) onClose();
+  };
+
   return createPortal(
     <div
       className="feishu-image-viewer"
       role="dialog"
       aria-modal="true"
       aria-label="图片预览"
-      onMouseDown={event => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+      onMouseDown={handleBackdropMouseDown}
     >
       <button type="button" className="feishu-image-viewer__close" aria-label="关闭预览" onClick={onClose}>×</button>
-      <div className="feishu-image-viewer__stage">
+      <div className="feishu-image-viewer__stage" onMouseDown={handleBackdropMouseDown}>
         <img
           className="feishu-image-viewer__image"
           src={src}
           alt={alt}
           draggable={false}
           style={{ transform: `scale(${scale}) rotate(${rotation}deg)` }}
+          onMouseDown={event => event.stopPropagation()}
         />
       </div>
-      <div className="feishu-image-viewer__toolbar" role="toolbar" aria-label="图片预览工具栏">
+      <div
+        className="feishu-image-viewer__toolbar"
+        role="toolbar"
+        aria-label="图片预览工具栏"
+        onMouseDown={event => event.stopPropagation()}
+      >
         <button type="button" aria-label="缩小" title="缩小 (-)" onClick={() => setScale(value => clampScale(value - SCALE_STEP))}>−</button>
         <span aria-live="polite">{Math.round(scale * 100)}%</span>
         <button type="button" aria-label="放大" title="放大 (+)" onClick={() => setScale(value => clampScale(value + SCALE_STEP))}>＋</button>

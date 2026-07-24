@@ -267,6 +267,7 @@ function resolveBlockRange(editor: Editor, dom: HTMLElement): { from: number; to
       : dom.closest('.feishu-formula-editor') ? 'localFormulaBlock'
       : dom.closest('.feishu-file-block') ? 'localFileBlock'
       : dom.closest('.feishu-local-card') ? 'localEmbedBlock'
+      : dom.closest('.feishu-image-grid') ? 'localImageGridBlock'
       : dom.closest('.feishu-divider') ? 'horizontalRule'
       : dom.closest('.feishu-highlight-block-wrap') ? 'highlightBlock'
       : null;

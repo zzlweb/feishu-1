@@ -193,8 +193,17 @@ export function fieldCardIcon(field: BaseField): string {
   return 'A=';
 }
 
+export function getAttachmentMediaUrl(attachment: AttachmentValue | undefined): string {
+  if (!attachment) return '';
+  return attachment.thumbnailUrl || attachment.previewUrl || attachment.url || '';
+}
+
 export function isPreviewImage(attachment: AttachmentValue | undefined) {
-  return Boolean(attachment?.mimeType.startsWith('image/') && (attachment.thumbnailUrl || attachment.previewUrl || attachment.url));
+  return Boolean(attachment?.mimeType.startsWith('image/') && getAttachmentMediaUrl(attachment));
+}
+
+export function isPreviewVideo(attachment: AttachmentValue | undefined) {
+  return Boolean(attachment?.mimeType.startsWith('video/') && (attachment.url || attachment.previewUrl));
 }
 
 export function FileBadge({ attachment }: { attachment: AttachmentValue }) {
@@ -205,6 +214,44 @@ export function FileBadge({ attachment }: { attachment: AttachmentValue }) {
       <span>{attachment.name}</span>
     </div>
   );
+}
+
+/** 画册/看板封面：图片用 img，视频用 video（preload metadata 显示首帧），其它走 FileBadge。 */
+export function AttachmentCoverMedia({
+  attachment,
+  objectFit,
+  objectPosition,
+}: {
+  attachment: AttachmentValue;
+  objectFit?: CSSProperties['objectFit'];
+  objectPosition?: string;
+}) {
+  const mediaStyle = { objectFit, objectPosition } as const;
+  if (isPreviewImage(attachment)) {
+    return (
+      <img
+        loading="lazy"
+        src={getAttachmentMediaUrl(attachment)}
+        alt=""
+        style={mediaStyle}
+      />
+    );
+  }
+  if (isPreviewVideo(attachment)) {
+    const src = attachment.url || attachment.previewUrl || '';
+    return (
+      <video
+        className="base-gallery-cover-video"
+        src={src}
+        preload="metadata"
+        muted
+        playsInline
+        controls={false}
+        style={mediaStyle}
+      />
+    );
+  }
+  return <FileBadge attachment={attachment} />;
 }
 
 /** 将 Bitable 左缘与标题区对齐：补偿 editor-container 左侧 padding */

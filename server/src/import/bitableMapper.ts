@@ -131,7 +131,9 @@ function inferMimeTypeFromName(name: string): string {
   if (ext === 'gif') return 'image/gif';
   if (ext === 'webp') return 'image/webp';
   if (ext === 'svg') return 'image/svg+xml';
-  if (ext === 'mp4') return 'video/mp4';
+  if (ext === 'mp4' || ext === 'm4v') return 'video/mp4';
+  if (ext === 'webm') return 'video/webm';
+  if (ext === 'mov') return 'video/quicktime';
   if (ext === 'pdf') return 'application/pdf';
   return '';
 }

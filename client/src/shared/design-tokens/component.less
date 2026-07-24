@@ -2,7 +2,11 @@
 @fs-control-height: 32px;
 @fs-menu-min-width: 180px;
 @fs-menu-item-height: 32px;
-@fs-editor-page-width: 860px;
+/** 正文版心 820（对齐飞书）；容器宽 = 820 + 左 48 + 右 56 */
+@fs-editor-content-width: 820px;
+@fs-editor-page-padding-left: 48px;
+@fs-editor-page-padding-right: 56px;
+@fs-editor-page-width: (@fs-editor-content-width + @fs-editor-page-padding-left + @fs-editor-page-padding-right);
 @fs-header-height: 48px;
 @fs-outline-rail-width: 232px;
 @fs-comment-panel-width: 280px;

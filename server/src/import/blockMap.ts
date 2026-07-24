@@ -33,7 +33,7 @@ export const FEISHU_BLOCK_MAP: FeishuBlockMapping[] = [
   { feishu: '31', name: 'table', local: 'table', support: 'full' },
   { feishu: '32', name: 'table_cell', local: 'tableCell', support: 'full' },
   { feishu: 'equation', name: 'equation', local: 'localFormulaBlock', support: 'full' },
-  { feishu: 'grid', name: 'grid / columns', local: 'localColumnsBlock', support: 'full' },
+  { feishu: 'grid', name: 'grid / columns', local: 'localColumnsBlock | localImageGridBlock', support: 'full', notes: '纯图 grid → image-grid；混排 → columns' },
   { feishu: '34', name: 'quote_container', local: 'blockquote', support: 'full' },
   { feishu: 'callout', name: 'callout', local: 'highlightBlock', support: 'full' },
   { feishu: 'bitable', name: 'bitable', local: 'localBitableBlock', support: 'partial' },

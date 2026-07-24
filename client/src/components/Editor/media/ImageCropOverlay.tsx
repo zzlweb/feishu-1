@@ -156,6 +156,8 @@ export default function ImageCropOverlay({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    // 飞书式裁剪：拖拽结束立即提交裁剪结果，无需再次点击确认。
+    void confirmActiveImageCropSession();
   };
 
   if (!activeCrop || !rendered.width || !rendered.height) return null;

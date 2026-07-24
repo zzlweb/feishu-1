@@ -128,6 +128,17 @@ export function renderImportedBlock(block: ImportedBlock): string {
   if (block.type === 'image') {
     return `<img class="feishu-image" data-align="center" src="${escapeAttr(block.src)}" alt="${escapeAttr(block.alt || '')}">`;
   }
+  if (block.type === 'imageGrid') {
+    if (!block.images?.length) return '';
+    const cols = Math.max(1, Math.min(block.columnCount || 2, 6));
+    const dataImages = stringifyJsonAttr(block.images.map(image => (
+      image.alt ? { src: image.src, alt: image.alt } : { src: image.src }
+    )));
+    const cells = block.images.map(image => (
+      `<figure class="feishu-image-grid__cell"><img class="feishu-image" src="${escapeAttr(image.src)}" alt="${escapeAttr(image.alt || '')}"></figure>`
+    )).join('');
+    return `<div data-local-block="image-grid" data-cols="${cols}" data-images="${dataImages}" class="feishu-image-grid">${cells}</div>`;
+  }
   if (block.type === 'table') {
     const rows = block.rows.map(row => `<tr>${row.map(renderTableCell).join('')}</tr>`).join('');
     return `<table class="feishu-table"><tbody>${rows}</tbody></table>`;

@@ -25,7 +25,7 @@
 | `file` | `localEmbedBlock` (kind=file) | partial | 优先下载；失败 warning |
 | `table` (31) / `table_cell` (32) | TipTap `table` | full | 含 rowspan/colspan/背景色 |
 | `equation` | `localFormulaBlock` | full | KaTeX 公式块 |
-| `grid` / `grid_column` | `localColumnsBlock` | full | 分栏 |
+| `grid` / `grid_column` | `localColumnsBlock` / `localImageGridBlock` | full | 纯图 grid → 图片排版；混排 → 分栏 |
 | `quote_container` (34) | `blockquote` | full | 展开子块 |
 | `callout` | `highlightBlock` | full | |
 | `divider` (22) | `horizontalRule` | full | |
@@ -52,4 +52,4 @@
 
 ## 资源
 
-图片 / 附件经 `assetPipeline.mirrorRemoteAsset` 写入 `server/public/uploads`，本地 URL 形如 `/static/uploads/...`。失败只记 `warnings`，不中断整篇（除非最终正文为空）。
+图片 / 附件导入时写入 `/api/feishu-media/:token`，打开文档时由后端带飞书 Authorization 代理直出，**不再**在导入阶段落盘到 `server/public/uploads`。跨租户无权限时代理会 403，前端显示破图或占位。

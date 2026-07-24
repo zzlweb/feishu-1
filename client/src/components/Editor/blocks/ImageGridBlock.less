@@ -1,0 +1,117 @@
+.feishu-image-grid {
+  position: relative;
+  width: 100%;
+  margin: 8px 0 12px;
+  user-select: none;
+
+  &.is-selected {
+    outline: none;
+  }
+
+  &.is-selected::selection,
+  &.ProseMirror-selectednode::selection,
+  &.is-selected *::selection,
+  &.ProseMirror-selectednode *::selection {
+    background: transparent !important;
+  }
+}
+
+.feishu-image-grid__surface {
+  display: grid;
+  grid-template-columns: repeat(var(--feishu-image-grid-cols, 2), minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.feishu-image-grid__cell {
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f5f6f7;
+  cursor: pointer;
+  min-height: 120px;
+
+  &.is-active {
+    z-index: 3;
+    overflow: visible;
+    outline: none;
+    background: transparent;
+
+    .feishu-image-grid__img.is-loaded {
+      outline: 2px solid rgba(51, 112, 255, 0.55);
+      outline-offset: 2px;
+      border-radius: 8px;
+    }
+
+  }
+
+  &:hover > .docx-menu-container,
+  &:focus-within > .docx-menu-container {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, 0);
+  }
+}
+
+.feishu-image-grid__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  vertical-align: top;
+  object-fit: cover;
+  border-radius: 8px;
+  pointer-events: none;
+
+  &.is-loading,
+  &.is-error {
+    visibility: hidden;
+    min-height: 120px;
+  }
+}
+
+.feishu-image-grid__load-state {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  border-radius: inherit;
+  color: #646a73;
+  background: #f5f6f7;
+  font-size: 13px;
+  line-height: 20px;
+  pointer-events: auto;
+
+  button {
+    padding: 3px 8px;
+    border: 0;
+    border-radius: 4px;
+    color: #3370ff;
+    background: rgba(51, 112, 255, 0.1);
+    cursor: pointer;
+  }
+}
+
+.feishu-image-grid__load-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #d0d3d6;
+  border-top-color: #3370ff;
+  border-radius: 50%;
+  animation: feishu-image-grid-spin 0.8s linear infinite;
+}
+
+@keyframes feishu-image-grid-spin {
+  to { transform: rotate(360deg); }
+}
+
+.feishu-image-grid__caption {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  box-sizing: border-box;
+}

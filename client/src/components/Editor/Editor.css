@@ -1,5 +1,5 @@
 .editor-container {
-  max-width: 800px;
+  max-width: var(--editor-page-width, 924px);
   margin: 0 auto;
 }
 

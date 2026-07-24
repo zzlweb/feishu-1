@@ -1,5 +1,4 @@
 import type { AttachmentValue, BaseTableModel } from '../bitableModelFactory';
-import { mirrorRemoteAsset } from './assetPipeline';
 import type { ImportedAsset, ImportWarning } from './types';
 
 export interface BitableAttachmentMirrorContext {
@@ -9,82 +8,50 @@ export interface BitableAttachmentMirrorContext {
   assets: ImportedAsset[];
 }
 
-function mediaDownloadUrl(baseUrl: string, token: string): string {
-  return `${baseUrl.replace(/\/$/, '')}/open-apis/drive/v1/medias/${encodeURIComponent(token)}/download`;
+function localFeishuMediaProxyUrl(token: string): string {
+  return `/api/feishu-media/${encodeURIComponent(token)}`;
 }
 
-function shouldMirrorAttachment(attachment: AttachmentValue): boolean {
+function shouldProxyAttachment(attachment: AttachmentValue): boolean {
   const url = attachment.url || '';
-  if (url.startsWith('/static/')) return false;
+  if (url.startsWith('/static/') || url.startsWith('/api/feishu-media/')) return false;
   if (url.includes('/open-apis/drive/v1/medias/')) return true;
   return attachment.fileId.startsWith('box');
 }
 
-function resolveAttachmentSourceUrl(attachment: AttachmentValue, apiBaseUrl: string): string {
-  const url = attachment.url || '';
-  if (attachment.fileId && url.includes('/open-apis/drive/v1/medias/')) {
-    return mediaDownloadUrl(apiBaseUrl, attachment.fileId);
-  }
-  if (attachment.fileId) return mediaDownloadUrl(apiBaseUrl, attachment.fileId);
-  return url;
-}
-
-function applyLocalUrl(attachment: AttachmentValue, localUrl: string, mimeType?: string): AttachmentValue {
+function applyProxyUrl(attachment: AttachmentValue, proxyUrl: string): AttachmentValue {
+  const isVideo = (attachment.mimeType || '').startsWith('video/');
   return {
     ...attachment,
-    url: localUrl,
-    thumbnailUrl: localUrl,
-    previewUrl: localUrl,
-    mimeType: mimeType?.startsWith('image/') ? mimeType : attachment.mimeType,
+    url: proxyUrl,
+    // 视频不要把 thumbnail 也写成整段视频流，避免被当成图片缩略图误用
+    thumbnailUrl: isVideo ? (attachment.thumbnailUrl || '') : proxyUrl,
+    previewUrl: proxyUrl,
     uploadStatus: 'success',
   };
 }
 
+/**
+ * 多维表格附件不再导入落盘，改为指向本地飞书素材代理，打开时再按需拉取。
+ */
 export async function mirrorBitableTableAttachments(
   table: BaseTableModel,
-  context: BitableAttachmentMirrorContext,
+  _context: BitableAttachmentMirrorContext,
 ): Promise<BaseTableModel> {
   const attachmentFieldIds = new Set(
     table.fields.filter(field => field.type === 'attachment').map(field => field.id),
   );
   if (!attachmentFieldIds.size) return table;
 
-  const downloadCache = new Map<string, string>();
-
   for (const record of table.records) {
     for (const fieldId of attachmentFieldIds) {
       const value = record.fields[fieldId];
       if (!Array.isArray(value) || !value.length) continue;
 
-      const mirrored: AttachmentValue[] = [];
-      for (const attachment of value as AttachmentValue[]) {
-        if (!shouldMirrorAttachment(attachment)) {
-          mirrored.push(attachment);
-          continue;
-        }
-
-        const cachedUrl = downloadCache.get(attachment.fileId);
-        if (cachedUrl) {
-          mirrored.push(applyLocalUrl(attachment, cachedUrl));
-          continue;
-        }
-
-        const sourceUrl = resolveAttachmentSourceUrl(attachment, context.apiBaseUrl);
-        if (!sourceUrl) {
-          mirrored.push(attachment);
-          continue;
-        }
-
-        const asset = await mirrorRemoteAsset(sourceUrl, context.assetHeaders, context.warnings);
-        context.assets.push(asset);
-        if (asset.localUrl) {
-          downloadCache.set(attachment.fileId, asset.localUrl);
-          mirrored.push(applyLocalUrl(attachment, asset.localUrl, asset.mimeType));
-        } else {
-          mirrored.push(attachment);
-        }
-      }
-      record.fields[fieldId] = mirrored;
+      record.fields[fieldId] = (value as AttachmentValue[]).map(attachment => {
+        if (!shouldProxyAttachment(attachment) || !attachment.fileId) return attachment;
+        return applyProxyUrl(attachment, localFeishuMediaProxyUrl(attachment.fileId));
+      });
     }
   }
 

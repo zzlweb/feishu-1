@@ -4,7 +4,7 @@ import { findSelectChoice, valueText, getAttachments, selectCoverAttachment, typ
 import { BitableCardField } from '../shared/BitableCardField';
 import { bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
 import { syncBitableDocAlign } from '../shared/BitableViewShared';
-import { FileBadge, isPreviewImage, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
+import { AttachmentCoverMedia, resolveBitableBleedRightEdge } from '../shared/BitableViewShared';
 
 const KANBAN_DOC_WIDTH = 860;
 const KANBAN_COLUMN_WIDTH = 236;
@@ -105,17 +105,15 @@ function handleKanbanCardClick(
 function KanbanCardCover({ record, config }: { record: BaseRecord; config: GalleryViewConfig }) {
   const attachments = getAttachments(record, config.coverFieldId);
   const cover = selectCoverAttachment(attachments);
-  if (isPreviewImage(cover)) {
+  if (cover) {
     return (
-      <img
-        loading="lazy"
-        src={cover!.thumbnailUrl || cover!.previewUrl || cover!.url}
-        alt=""
-        style={{ objectFit: config.coverFit, objectPosition: config.coverPosition || 'center' }}
+      <AttachmentCoverMedia
+        attachment={cover}
+        objectFit={config.coverFit}
+        objectPosition={config.coverPosition || 'center'}
       />
     );
   }
-  if (cover) return <FileBadge attachment={cover} />;
   return (
     <div className="base-kanban__card-cover-empty" aria-hidden>
       <span>▧</span>

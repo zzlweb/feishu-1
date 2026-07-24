@@ -12,7 +12,7 @@ import {
 import { BitableGalleryRecordContextMenu } from '../records/BitableGalleryRecordContextMenu';
 import { bindFloatingLayoutListeners } from '../../Editor/shared/floatingPanel';
 import { BitableCardField } from '../shared/BitableCardField';
-import { FileBadge, isPreviewImage, syncBitableDocAlign } from '../shared/BitableViewShared';
+import { AttachmentCoverMedia, syncBitableDocAlign } from '../shared/BitableViewShared';
 
 export interface BitableGalleryGroup {
   key: string;
@@ -74,22 +74,16 @@ function GalleryCardCover({
 }) {
   const attachments = getAttachments(record, config.coverFieldId);
   const cover = selectCoverAttachment(attachments);
-  const coverStyle = {
-    objectFit: config.coverFit,
-    objectPosition: config.coverPosition || 'center',
-  } as const;
+  const isVideo = Boolean(cover?.mimeType.startsWith('video/'));
 
   return (
     <>
-      {isPreviewImage(cover) ? (
-        <img
-          loading="lazy"
-          src={cover!.thumbnailUrl || cover!.previewUrl || cover!.url}
-          alt=""
-          style={coverStyle}
+      {cover ? (
+        <AttachmentCoverMedia
+          attachment={cover}
+          objectFit={config.coverFit}
+          objectPosition={config.coverPosition || 'center'}
         />
-      ) : cover ? (
-        <FileBadge attachment={cover} />
       ) : (
         <div className="base-gallery-empty-cover">
           <span aria-hidden>▧</span>
@@ -99,7 +93,7 @@ function GalleryCardCover({
       {attachments.length > 1 && config.showAttachmentCount ? (
         <span className="base-gallery-count">{attachments.length}</span>
       ) : null}
-      {cover?.mimeType.startsWith('video/') ? <span className="base-gallery-video" aria-hidden>▶</span> : null}
+      {isVideo ? <span className="base-gallery-video" aria-hidden>▶</span> : null}
     </>
   );
 }

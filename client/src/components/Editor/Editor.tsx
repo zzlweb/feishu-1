@@ -62,11 +62,15 @@ import { resolveListItemHighlightRect } from './blocks/blockDom';
 import { getBlockAtPos, normalizeHorizontalRulesOutOfLists } from './blocks/blockOperations';
 import { resolveInlineBlockElementFromEditor, syncEditorSelectionToAnchoredBlock } from './blocks/blockAnchorSelection';
 import {
+  canSideLayoutDrop,
   moveDraggableBlock,
   resolveBlockDomAtPoint,
   resolveDraggableBlockPos,
+  resolveImageLayoutPlacement,
   type BlockDragPlacement,
+  type ImageGridDragHints,
 } from './blocks/feishuBlockDrag';
+import { findImageGridCellIndex, IMAGE_GRID_DROP_LINE_WIDTH, resolveImageGridCellDrop } from './blocks/imageGridDrag';
 import { FeishuBlockBackspace } from './blocks/feishuBlockBackspace';
 import { FeishuBoxSelectionKeyboard } from './blocks/feishuBoxSelectionKeyboard';
 import {
@@ -80,6 +84,7 @@ import { FeishuHeading, readHeadingId } from './blocks/feishuHeading';
 import { FeishuBlockId, makeFeishuBlockId } from './blocks/feishuBlockId';
 import { feishuTableExtensions } from './tables/feishuTable';
 import { localColumnsExtensions } from './blocks/columnsExtensions';
+import { LocalImageGridBlock } from './blocks/imageGridBlock';
 import FeishuTableOverlay from './tables/FeishuTableOverlay';
 import { CellSelection } from '@tiptap/pm/tables';
 import {
@@ -955,6 +960,22 @@ const FeishuImage = Image.extend({
         renderHTML: attributes => attributes.naturalHeight ? { 'data-natural-height': attributes.naturalHeight } : {},
       },
     };
+  },
+  parseHTML() {
+    const parentRules = this.parent?.() || [{ tag: 'img[src]' }];
+    return parentRules.map(rule => ({
+      ...rule,
+      getAttrs: (element: HTMLElement | string) => {
+        if (typeof element !== 'string'
+          && element.closest?.('[data-local-block="image-grid"], .feishu-image-grid')) {
+          return false;
+        }
+        if (typeof rule.getAttrs === 'function') {
+          return rule.getAttrs(element as HTMLElement);
+        }
+        return rule.getAttrs ?? null;
+      },
+    }));
   },
   addNodeView() {
     return ReactNodeViewRenderer(FeishuImageView);
@@ -2780,6 +2801,7 @@ const editorExtensions = [
     HTMLAttributes: { class: 'feishu-image' },
   }),
   LocalFileBlock,
+  LocalImageGridBlock,
   ...localColumnsExtensions,
   LocalDivTableBlock,
   ...feishuTableExtensions,
@@ -3249,6 +3271,8 @@ export default function Editor({
     left: number;
     width: number;
     height?: number;
+    mode?: 'row' | 'side';
+    side?: 'left' | 'right';
   } | null>(null);
   const blockDragPreviewRef = useRef<HTMLElement | null>(null);
   const blockDragStateRef = useRef<{
@@ -3260,6 +3284,9 @@ export default function Editor({
     placement: BlockDragPlacement;
     directMedia: boolean;
     openMenuOnRelease: boolean;
+    sourceCellIndex: number | null;
+    targetCellIndex: number | null;
+    targetInsertIndex: number | null;
   } | null>(null);
   const openBlockConfigMenuRef = useRef<((options?: { skipCooldown?: boolean }) => void) | null>(null);
 
@@ -3364,7 +3391,7 @@ export default function Editor({
       const isEmpty = !cell?.textContent?.trim();
       return { element: tableHost, type: 'table', isEmpty };
     }
-    const imageBlock = target.closest('.feishu-image-block-wrap, .feishu-file-block--image') as HTMLElement | null;
+    const imageBlock = target.closest('.feishu-image-block-wrap, .feishu-file-block--image, .feishu-image-grid') as HTMLElement | null;
     if (imageBlock && editorAreaRef.current.contains(imageBlock)) {
       return { element: imageBlock, type: 'image', isEmpty: false };
     }
@@ -3438,6 +3465,7 @@ export default function Editor({
     if (editorInstance.isActive('horizontalRule')) return 'hr';
     if (editorInstance.isActive('table')) return 'table';
     if (editorInstance.isActive('image')) return 'image';
+    if (editorInstance.isActive('localImageGridBlock')) return 'image';
     if (editorInstance.isActive('localFileBlock')) {
       const attrs = editorInstance.getAttributes('localFileBlock');
       if (String(attrs.mediaKind || '') === 'image') return 'image';
@@ -4000,15 +4028,18 @@ export default function Editor({
   const beginBlockDrag = useCallback((
     event: React.PointerEvent<HTMLButtonElement> | PointerEvent,
     sourceOverride?: HTMLElement,
-    options?: { directMedia?: boolean; openMenuOnRelease?: boolean },
+    options?: { directMedia?: boolean; openMenuOnRelease?: boolean; sourceCellIndex?: number | null },
   ) => {
     if (!editor || readOnly) return;
     const source = sourceOverride ?? activeBlockElRef.current;
     if (!source?.isConnected || !resolveDraggableBlockPos(editor, source)) return;
 
-    if (!options?.directMedia) {
-      event.preventDefault();
-      event.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      source.setPointerCapture(event.pointerId);
+    } catch {
+      /* pointer capture is unavailable for some synthetic events */
     }
     setContextMenu(null);
     setBlockGutterHoveredState(true);
@@ -4021,6 +4052,9 @@ export default function Editor({
       placement: 'before',
       directMedia: Boolean(options?.directMedia),
       openMenuOnRelease: Boolean(options?.openMenuOnRelease),
+      sourceCellIndex: options?.sourceCellIndex ?? null,
+      targetCellIndex: null,
+      targetInsertIndex: null,
     };
 
     const clearDragPreview = () => {
@@ -4028,8 +4062,38 @@ export default function Editor({
       blockDragPreviewRef.current = null;
       document.body.classList.remove('feishu-block-dragging');
       source.classList.remove('is-block-drag-source');
+      dragIndicatorEl?.remove();
+      dragIndicatorEl = null;
     };
 
+    let dragIndicatorEl: HTMLDivElement | null = null;
+    const renderDragIndicator = (indicator: { top: number; left: number; width: number; height?: number; mode?: 'row' | 'side'; side?: 'left' | 'right' } | null) => {
+      if (!indicator) {
+        dragIndicatorEl?.remove();
+        dragIndicatorEl = null;
+        return;
+      }
+      if (!dragIndicatorEl) {
+        dragIndicatorEl = document.createElement('div');
+        dragIndicatorEl.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(dragIndicatorEl);
+      }
+      dragIndicatorEl.className = 'block-drag-drop-indicator'
+        + (indicator.mode === 'side' ? ' block-drag-drop-indicator--side' : '')
+        + (indicator.side ? ' is-' + indicator.side : '');
+      const areaRect = editorAreaRef.current?.getBoundingClientRect();
+      dragIndicatorEl.style.position = 'fixed';
+      dragIndicatorEl.style.display = 'block';
+      dragIndicatorEl.style.visibility = 'visible';
+      dragIndicatorEl.style.opacity = '1';
+      dragIndicatorEl.style.zIndex = '9999';
+      dragIndicatorEl.style.pointerEvents = 'none';
+      dragIndicatorEl.style.background = '#3370ff';
+      dragIndicatorEl.style.top = (indicator.top + (areaRect?.top ?? 0)) + 'px';
+      dragIndicatorEl.style.left = (indicator.left + (areaRect?.left ?? 0)) + 'px';
+      dragIndicatorEl.style.width = indicator.width + 'px';
+      dragIndicatorEl.style.height = (indicator.height ?? 2) + 'px';
+    };
     const syncDragPreview = (clientX: number, clientY: number) => {
       const area = editorAreaRef.current;
       if (!area) return;
@@ -4037,7 +4101,11 @@ export default function Editor({
       const areaRect = area.getBoundingClientRect();
       let preview = blockDragPreviewRef.current;
       if (!preview) {
-        preview = source.cloneNode(true) as HTMLElement;
+        const sourceCellIndex = blockDragStateRef.current?.sourceCellIndex;
+        const sourceCell = sourceCellIndex != null && sourceCellIndex >= 0
+          ? source.querySelectorAll<HTMLElement>('.feishu-image-grid__cell')[sourceCellIndex]
+          : null;
+        preview = (sourceCell ?? source).cloneNode(true) as HTMLElement;
         preview.classList.remove('is-block-drag-source');
         preview.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
         preview.querySelectorAll('.feishu-table-chrome-mount, .docx-menu-container').forEach(node => node.remove());
@@ -4045,7 +4113,7 @@ export default function Editor({
         if (blockDragStateRef.current?.directMedia) preview.classList.add('block-drag-preview--media');
         preview.setAttribute('aria-hidden', 'true');
         preview.style.width = blockDragStateRef.current?.directMedia
-          ? `${Math.min(240, sourceRect.width)}px`
+          ? `${Math.min(240, sourceCell?.getBoundingClientRect().width ?? sourceRect.width)}px`
           : `${sourceRect.width}px`;
         area.appendChild(preview);
         blockDragPreviewRef.current = preview;
@@ -4065,10 +4133,29 @@ export default function Editor({
         .find((candidate): candidate is NonNullable<ReturnType<typeof getElementBlockInfo>> =>
           Boolean(candidate && candidate !== 'keep'));
 
-      const target = hitInfo?.element ?? resolveBlockDomAtPoint(editor, clientX, clientY);
-      if (!target || target === dragState.source || !resolveDraggableBlockPos(editor, target)) {
+      const pointTargetCandidate = hitInfo?.element ?? resolveBlockDomAtPoint(editor, clientX, clientY);
+      const pointTarget = pointTargetCandidate && !pointTargetCandidate.classList.contains('block-drag-preview')
+        && resolveDraggableBlockPos(editor, pointTargetCandidate)
+        ? pointTargetCandidate
+        : null;
+      const target = pointTarget ?? Array.from(area.querySelectorAll<HTMLElement>(
+        '.feishu-image-block-wrap, .feishu-file-block--image, .feishu-image-grid, .feishu-columns-block__col-wrap',
+      )).filter(candidate => candidate !== dragState.source && !candidate.classList.contains('block-drag-preview')).map(candidate => {
+        const rect = candidate.getBoundingClientRect();
+        const distanceX = clientX < rect.left ? rect.left - clientX : clientX > rect.right ? clientX - rect.right : 0;
+        const distanceY = clientY < rect.top ? rect.top - clientY : clientY > rect.bottom ? clientY - rect.bottom : 0;
+        return { candidate, distance: distanceX + distanceY };
+      }).sort((left, right) => left.distance - right.distance)[0]?.candidate ?? null;
+      const isSameImageGridCellDrag = Boolean(
+        target
+        && target === dragState.source
+        && dragState.sourceCellIndex != null
+        && dragState.sourceCellIndex >= 0
+        && target.matches('.feishu-image-grid'),
+      );
+      if (!target || (!isSameImageGridCellDrag && target === dragState.source) || !resolveDraggableBlockPos(editor, target)) {
         dragState.dropTarget = null;
-        setBlockDragIndicator(null);
+        renderDragIndicator(null);
         return;
       }
 
@@ -4077,15 +4164,71 @@ export default function Editor({
       const columnContent = getColumnContentFromBlock(target);
       const indicatorRect = columnContent?.isConnected ? columnContent.getBoundingClientRect() : targetRect;
 
-      const placement: BlockDragPlacement = clientY < targetRect.top + targetRect.height / 2 ? 'before' : 'after';
+      const sourcePos = resolveDraggableBlockPos(editor, dragState.source);
+      const targetPos = resolveDraggableBlockPos(editor, target);
+      const sourceIsImage = Boolean(sourcePos && sourcePos.node && (sourcePos.node.type.name === 'image' || sourcePos.node.type.name === 'localImageGridBlock' || (sourcePos.node.type.name === 'localFileBlock' && String(sourcePos.node.attrs.mediaKind || '') === 'image')));
+      const targetIsImage = Boolean(targetPos && targetPos.node && (targetPos.node.type.name === 'image' || targetPos.node.type.name === 'localImageGridBlock' || (targetPos.node.type.name === 'localFileBlock' && String(targetPos.node.attrs.mediaKind || '') === 'image')));
+      const canSideLayout = sourceIsImage && targetIsImage
+        ? true
+        : canSideLayoutDrop(editor, sourcePos, targetPos);
 
       dragState.dropTarget = target;
+      dragState.targetCellIndex = null;
+      dragState.targetInsertIndex = null;
+
+      const gridTarget = target.matches('.feishu-image-grid')
+        ? target
+        : target.closest('.feishu-image-grid') as HTMLElement | null;
+      if (gridTarget?.matches('.feishu-image-grid')) {
+        const cellDrop = resolveImageGridCellDrop(gridTarget, clientX, clientY);
+        if (cellDrop) {
+          dragState.placement = cellDrop.placement;
+          dragState.targetCellIndex = cellDrop.cellIndex;
+          dragState.targetInsertIndex = cellDrop.insertIndex;
+          const lineRect = cellDrop.lineRect;
+          if (cellDrop.placement === 'left' || cellDrop.placement === 'right') {
+            renderDragIndicator({
+              top: lineRect.top - areaRect.top,
+              left: lineRect.left - areaRect.left,
+              width: lineRect.width,
+              height: lineRect.height,
+              mode: 'side',
+              side: cellDrop.placement,
+            });
+          } else {
+            renderDragIndicator({
+              top: lineRect.top - areaRect.top,
+              left: lineRect.left - areaRect.left,
+              width: lineRect.width,
+              height: lineRect.height,
+              mode: 'row',
+            });
+          }
+          return;
+        }
+      }
+
+      const placement = resolveImageLayoutPlacement(clientX, clientY, targetRect, canSideLayout);
       dragState.placement = placement;
 
-      setBlockDragIndicator({
+      if (placement === 'left' || placement === 'right') {
+        const lineX = placement === 'left' ? targetRect.left : targetRect.right;
+        renderDragIndicator({
+          top: targetRect.top - areaRect.top,
+          left: (lineX - IMAGE_GRID_DROP_LINE_WIDTH / 2) - areaRect.left,
+          width: IMAGE_GRID_DROP_LINE_WIDTH,
+          height: targetRect.height,
+          mode: 'side',
+          side: placement,
+        });
+        return;
+      }
+
+      renderDragIndicator({
         top: (placement === 'before' ? targetRect.top : targetRect.bottom) - areaRect.top,
         left: columnContent?.isConnected ? indicatorRect.left - areaRect.left : 0,
         width: columnContent?.isConnected ? indicatorRect.width : areaRect.width,
+        mode: 'row',
       });
     };
 
@@ -4115,18 +4258,39 @@ export default function Editor({
       clearDragPreview();
     };
 
+    let finished = false;
     const finish = () => {
+      if (finished) return;
+      finished = true;
       const dragState = blockDragStateRef.current;
+      if (!dragState) return;
+      const sourceEl = dragState.source;
+      const targetEl = dragState.dropTarget;
+      const placement = dragState.placement;
+      const hints: ImageGridDragHints = {
+        sourceCellIndex: dragState.sourceCellIndex,
+        targetCellIndex: dragState.targetCellIndex,
+        targetInsertIndex: dragState.targetInsertIndex,
+      };
+      blockDragStateRef.current = null;
       cleanupDragListeners();
-      cancelBlockDragSession();
-      clearDragPreview();
-      if (dragState?.dragging && dragState.dropTarget) {
-        const moved = moveDraggableBlock(editor, dragState.source, dragState.dropTarget, dragState.placement);
+      if (dragState.dragging && targetEl) {
+        const moved = moveDraggableBlock(
+          editor,
+          sourceEl,
+          targetEl,
+          placement,
+          hints,
+        );
         if (moved) {
           hideBlockTools();
         }
+        cancelBlockDragSession();
+        clearDragPreview();
         return;
       }
+      cancelBlockDragSession();
+      clearDragPreview();
       // block-drag-row 的 pointerdown 会阻止浏览器默认 click；未触发拖拽时在这里打开菜单。
       if (dragState?.openMenuOnRelease && !dragState.dragging) {
         openBlockConfigMenuRef.current?.({ skipCooldown: true });
@@ -4137,10 +4301,25 @@ export default function Editor({
       if (document.hidden) cancel();
     };
 
+    const handlePointerCancel = () => {
+      const dragState = blockDragStateRef.current;
+      if (dragState?.dragging && dragState.dropTarget) {
+        finish();
+      } else {
+        cancel();
+      }
+    };
+
     cleanupDragListeners = () => {
+      try {
+        if (source.hasPointerCapture(event.pointerId)) source.releasePointerCapture(event.pointerId);
+      } catch {
+        /* pointer capture may already be released */
+      }
       document.removeEventListener('pointermove', onMove, true);
       document.removeEventListener('pointerup', finish, true);
-      document.removeEventListener('pointercancel', cancel, true);
+      window.removeEventListener('pointerup', finish, true);
+      document.removeEventListener('pointercancel', handlePointerCancel, true);
       window.removeEventListener('blur', cancel, true);
       window.removeEventListener('pagehide', cancel, true);
       document.removeEventListener('visibilitychange', cancelWhenHidden, true);
@@ -4148,7 +4327,8 @@ export default function Editor({
 
     document.addEventListener('pointermove', onMove, true);
     document.addEventListener('pointerup', finish, true);
-    document.addEventListener('pointercancel', cancel, true);
+    window.addEventListener('pointerup', finish, true);
+    document.addEventListener('pointercancel', handlePointerCancel, true);
     window.addEventListener('blur', cancel, true);
     window.addEventListener('pagehide', cancel, true);
     document.addEventListener('visibilitychange', cancelWhenHidden, true);
@@ -4168,6 +4348,30 @@ export default function Editor({
   const handleDirectMediaPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!editor || readOnly || event.button !== 0 || !event.isPrimary) return;
     const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('a, button, textarea, .docx-menu-container, .docx-menu-wrapper, .feishu-image-crop-layer')) return;
+
+    const gridWrap = target.closest('.feishu-image-grid') as HTMLElement | null;
+    const gridCell = target.closest('.feishu-image-grid__cell') as HTMLElement | null;
+    if (gridCell && gridWrap) {
+      const cellIndex = findImageGridCellIndex(gridWrap, gridCell);
+      if (cellIndex < 0) return;
+
+      // 保留普通点击的选中/预览语义；按住一会儿才进入块拖拽。
+      const nativeEvent = event.nativeEvent;
+      const timer = window.setTimeout(() => {
+        beginBlockDrag(nativeEvent, gridWrap, { directMedia: true, sourceCellIndex: cellIndex });
+      }, 320);
+      const cancelLongPress = () => window.clearTimeout(timer);
+      document.addEventListener('pointerup', cancelLongPress, true);
+      document.addEventListener('pointercancel', cancelLongPress, true);
+      window.setTimeout(() => {
+        document.removeEventListener('pointerup', cancelLongPress, true);
+        document.removeEventListener('pointercancel', cancelLongPress, true);
+      }, 1000);
+      return;
+    }
+
     if (!(target instanceof HTMLImageElement)) return;
     if (!target.matches('.feishu-image, .feishu-media-preview__image')) return;
     const source = target.closest('.feishu-image-block-wrap, .feishu-file-block--image') as HTMLElement | null;
@@ -4487,6 +4691,7 @@ export default function Editor({
             node.isAtom
             || node.type.name === 'horizontalRule'
             || node.type.name === 'image'
+            || node.type.name === 'localImageGridBlock'
             || node.type.name === 'localEmbedBlock'
             || node.type.name === 'localFileBlock'
           )
@@ -5266,17 +5471,7 @@ export default function Editor({
                 aria-hidden
               />
             )}
-            {blockDragIndicator && (
-              <div
-                className="block-drag-drop-indicator"
-                style={{
-                  top: blockDragIndicator.top,
-                  left: blockDragIndicator.left,
-                  width: blockDragIndicator.width,
-                  height: blockDragIndicator.height,
-                }}
-              />
-            )}
+
             {pageLinkDialogVisible && !readOnly && (
               <div
                 className="editor-page-link-pop"

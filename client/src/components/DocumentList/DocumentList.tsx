@@ -840,6 +840,7 @@ export default function DocumentList() {
         destroyOnClose
         header="导入飞书文档"
         width={520}
+        className="feishu-import-dialog-modal"
         confirmBtn={{
           content: feishuImportResult?.document ? '打开导入文档' : isImportingUrl ? '导入中...' : '开始导入',
           loading: isImportingUrl,
@@ -862,7 +863,9 @@ export default function DocumentList() {
             onEnter={() => void handleImportFeishuUrl()}
           />
           {feishuImportResult && (
-            <ImportResultPanel result={feishuImportResult} onReset={resetFeishuImportInput} />
+            <div className="feishu-import-dialog__result-scroll">
+              <ImportResultPanel result={feishuImportResult} onReset={resetFeishuImportInput} />
+            </div>
           )}
           <label className="feishu-import-dialog__option">
             <input

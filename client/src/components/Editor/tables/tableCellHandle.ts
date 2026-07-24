@@ -30,6 +30,7 @@ export function computeTableCellHandleAnchorLeft(
 function mapNodeTypeToBlockType(node: { type: { name: string }; attrs: Record<string, unknown> }): string {
   const name = node.type.name;
   if (name === 'image') return 'image';
+  if (name === 'localImageGridBlock') return 'image';
   if (name === 'horizontalRule') return 'hr';
   if (name === 'localFileBlock') {
     const kind = String(node.attrs.mediaKind || 'file');
@@ -53,6 +54,7 @@ function resolveBlockTypeFromEditor(editor: Editor): string {
   if (editor.isActive('highlightBlock')) return 'highlightBlock';
   if (editor.isActive('horizontalRule')) return 'hr';
   if (editor.isActive('image')) return 'image';
+  if (editor.isActive('localImageGridBlock')) return 'image';
   if (editor.isActive('localFileBlock')) return 'file';
   if (editor.isActive('localEmbedBlock')) return 'embed';
   return 'paragraph';

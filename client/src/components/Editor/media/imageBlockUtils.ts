@@ -62,6 +62,7 @@ export function downloadImageSource(src: string, fileName = 'image') {
 
 export function isImageBlockNode(node: { type: { name: string }; attrs: Record<string, unknown> }): boolean {
   if (node.type.name === 'image') return true;
+  if (node.type.name === 'localImageGridBlock') return true;
   if (node.type.name === 'localFileBlock') {
     return String(node.attrs.mediaKind || '') === 'image';
   }
@@ -70,6 +71,7 @@ export function isImageBlockNode(node: { type: { name: string }; attrs: Record<s
 
 export function isImageBlockActive(editor: Editor): boolean {
   if (editor.isActive('image')) return true;
+  if (editor.isActive('localImageGridBlock')) return true;
   if (!editor.isActive('localFileBlock')) return false;
   const attrs = editor.getAttributes('localFileBlock');
   return String(attrs.mediaKind || '') === 'image';

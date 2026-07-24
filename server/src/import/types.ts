@@ -59,6 +59,7 @@ export type ImportedBlock =
   | { type: 'code'; code: string; language?: string }
   | { type: 'divider' }
   | { type: 'image'; src: string; alt?: string }
+  | { type: 'imageGrid'; images: Array<{ src: string; alt?: string }>; columnCount: number }
   | { type: 'table'; rows: ImportedTableCell[][] }
   | { type: 'taskList'; items: Array<{ id: string; text: string; checked?: boolean }> }
   | { type: 'list'; ordered?: boolean; items: Array<{ blocks: ImportedBlock[] }> }

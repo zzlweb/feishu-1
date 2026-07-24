@@ -16,6 +16,7 @@ export const OPERABLE_BLOCK_TYPES = new Set([
   'highlightBlock',
   'localFileBlock',
   'localColumnsBlock',
+  'localImageGridBlock',
   'localDivTableBlock',
   'localSyncBlock',
   'localButtonBlock',
